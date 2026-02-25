@@ -1,0 +1,237 @@
+import SwiftUI
+import DirWizLib
+
+/// Root view with NavigationSplitView layout.
+struct ContentView: View {
+    @Bindable var appState: AppState
+
+    @State private var showLegend: Bool = true
+    @State private var selectedCategory: FileCategory? = nil
+    @State private var activeScanner: FileScanner?
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var splitRatio: CGFloat = 0.4
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 320)
+        } detail: {
+            detailContent
+        }
+        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Toggle(isOn: $showLegend) {
+                    Image(systemName: "sidebar.trailing")
+                }
+                .help("Toggle Legend (Cmd+Opt+L)")
+                .keyboardShortcut("l", modifiers: [.command, .option])
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .searchRequested)) { _ in
+            appState.activeTab = .search
+        }
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            VolumePickerView(appState: appState, onScan: startScan)
+
+            if appState.scanProgress.isScanning {
+                ScanProgressView(scanProgress: appState.scanProgress, onCancel: cancelScan)
+            }
+
+            Spacer()
+
+            if appState.scanProgress.scanComplete {
+                scanSummary
+            }
+        }
+    }
+
+    private var scanSummary: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack {
+                if appState.scanProgress.error != nil {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                    Text("Scan Cancelled")
+                        .font(.callout.bold())
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Scan Complete")
+                        .font(.callout.bold())
+                }
+            }
+            if let tree = appState.fileTree {
+                Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(SizeFormatter.shared.format(tree.nodes.first?.fileSize ?? 0))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Text(String(format: "%.1fs elapsed", appState.scanProgress.elapsedTime))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
+    // MARK: - Detail
+
+    private var detailContent: some View {
+        HStack(spacing: 0) {
+            // Main content area with resizable split.
+            VStack(spacing: 0) {
+                tabBar
+                Divider()
+
+                GeometryReader { geo in
+                    VStack(spacing: 0) {
+                        // Top: table or scanning placeholder.
+                        Group {
+                            if appState.scanProgress.isScanning {
+                                scanningPlaceholder
+                            } else {
+                                switch appState.activeTab {
+                                case .treeView:
+                                    TreeTableView(appState: appState)
+                                case .extensions:
+                                    ExtensionListView(
+                                        fileTypeStats: appState.fileTypeStats,
+                                        totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0
+                                    )
+                                case .duplicates:
+                                    DuplicateFilesView(appState: appState)
+                                case .search:
+                                    SearchView(appState: appState)
+                                }
+                            }
+                        }
+                        .frame(height: max(60, geo.size.height * splitRatio))
+                        .clipped()
+
+                        // Resizable drag divider.
+                        splitDivider(totalHeight: geo.size.height)
+
+                        // Bottom: treemap.
+                        InteractiveTreemapView(appState: appState)
+                            .frame(minHeight: 100)
+                    }
+                    .coordinateSpace(name: "splitView")
+                }
+            }
+
+            // Right sidebar: legend.
+            if showLegend {
+                Divider()
+                ExtensionLegend(
+                    extensionStats: appState.extensionStats,
+                    totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0,
+                    selectedCategory: $selectedCategory
+                )
+                .frame(width: 220)
+            }
+        }
+    }
+
+    // MARK: - Split Divider
+
+    private func splitDivider(totalHeight: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(height: 6)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeUpDown.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(coordinateSpace: .named("splitView"))
+                    .onChanged { value in
+                        let newRatio = value.location.y / totalHeight
+                        splitRatio = max(0.1, min(0.85, newRatio))
+                    }
+            )
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(DetailTab.allCases) { tab in
+                Button(action: { appState.activeTab = tab }) {
+                    Text(tab.rawValue)
+                        .font(.system(size: 12, weight: appState.activeTab == tab ? .semibold : .regular))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(
+                            appState.activeTab == tab
+                                ? Color.accentColor.opacity(0.12)
+                                : Color.clear
+                        )
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
+
+    // MARK: - Scanning Placeholder
+
+    private var scanningPlaceholder: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Scanning filesystem...")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("\(SizeFormatter.shared.formatCount(appState.scanProgress.totalItems)) items found")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
+    }
+
+    // MARK: - Actions
+
+    private func startScan() {
+        guard let volumeURL = appState.selectedVolume else { return }
+        let scanner = FileScanner()
+        activeScanner = scanner
+        let path = volumeURL.path
+
+        // Create tree upfront so the UI can observe it growing during scan.
+        let tree = FileTree()
+        appState.fileTree = tree
+        appState.resetForNewScan()
+        appState.activeTab = .treeView
+
+        Task {
+            await scanner.scan(path: path, progress: appState.scanProgress, tree: tree)
+            await MainActor.run {
+                appState.setTreemapRoot(0, recordHistory: false)
+                appState.computeExtensionStats()
+                activeScanner = nil
+            }
+        }
+    }
+
+    private func cancelScan() {
+        activeScanner?.cancel()
+    }
+}
