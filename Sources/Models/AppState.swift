@@ -152,13 +152,6 @@ public final class AppState {
         duplicateGroups = []
     }
 
-    // MARK: - Deprecated (keep for compatibility)
-
-    /// Navigate into a directory in the treemap.
-    public func navigateInto(nodeIndex: UInt32) {
-        setTreemapRoot(nodeIndex)
-    }
-
     // MARK: - Path Building
 
     /// Build canonical path from root (0) to the given node index by walking parent chain.

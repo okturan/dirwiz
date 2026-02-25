@@ -273,17 +273,14 @@ public struct InteractiveTreemapView: View {
 
     // MARK: - Tooltip
 
+    @ViewBuilder
     private func tooltipView(for nodeIndex: UInt32) -> some View {
-        guard let tree = appState.fileTree,
-              let node = tree.node(at: nodeIndex) else {
-            return AnyView(EmptyView())
-        }
+        if let tree = appState.fileTree,
+           let node = tree.node(at: nodeIndex) {
+            let name = tree.name(at: nodeIndex)
+            let size = SizeFormatter.shared.format(node.fileSize)
+            let category = ExtensionColorMap.shared.category(forHash: node.extensionHash)
 
-        let name = tree.name(at: nodeIndex)
-        let size = SizeFormatter.shared.format(node.fileSize)
-        let category = ExtensionColorMap.shared.category(forHash: node.extensionHash)
-
-        return AnyView(
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     if node.isDirectory {
@@ -322,7 +319,7 @@ public struct InteractiveTreemapView: View {
                     .fill(.ultraThickMaterial)
                     .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
             )
-        )
+        }
     }
 
     /// Position the tooltip near the cursor but keep it within the view bounds.

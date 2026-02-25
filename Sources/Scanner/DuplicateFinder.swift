@@ -34,11 +34,12 @@ public final class DuplicateFinder {
         // ---------------------------------------------------------------
         // Pass 1: Group files by size
         // ---------------------------------------------------------------
+        let snapshot = tree.nodesSnapshot()
         var sizeGroups: [UInt64: [UInt32]] = [:]
-        sizeGroups.reserveCapacity(tree.count / 2)
+        sizeGroups.reserveCapacity(snapshot.count / 2)
 
-        for i in 0..<tree.count {
-            let node = tree.nodes[i]
+        for i in 0..<snapshot.count {
+            let node = snapshot[i]
             guard !node.isDirectory, node.fileSize >= minimumFileSize else { continue }
             sizeGroups[node.fileSize, default: []].append(UInt32(i))
         }
@@ -60,19 +61,19 @@ public final class DuplicateFinder {
         let processedCount = OSAllocatedUnfairLock(initialState: 0)
 
         // Collect partial-hash groups using TaskGroup for concurrency
-        let partialGroups: [PartialHashKey: [UInt32]] = await withTaskGroup(
-            of: [(PartialHashKey, UInt32)].self,
-            returning: [PartialHashKey: [UInt32]].self
+        let partialGroups: [FileHashKey: [UInt32]] = await withTaskGroup(
+            of: [(FileHashKey, UInt32)].self,
+            returning: [FileHashKey: [UInt32]].self
         ) { group in
             // Process each size group in parallel
             for sizeGroup in candidateGroups {
-                let fileSize = tree.nodes[Int(sizeGroup[0])].fileSize
+                let fileSize = snapshot[Int(sizeGroup[0])].fileSize
                 group.addTask {
-                    var results: [(PartialHashKey, UInt32)] = []
+                    var results: [(FileHashKey, UInt32)] = []
                     for nodeIndex in sizeGroup {
                         let path = tree.path(at: nodeIndex)
                         if let hash = self.partialHash(path: path, fileSize: fileSize) {
-                            let key = PartialHashKey(size: fileSize, hash: hash)
+                            let key = FileHashKey(size: fileSize, hash: hash)
                             results.append((key, nodeIndex))
                         }
                         // Update progress
@@ -89,7 +90,7 @@ public final class DuplicateFinder {
             }
 
             // Collect results
-            var collected: [PartialHashKey: [UInt32]] = [:]
+            var collected: [FileHashKey: [UInt32]] = [:]
             for await batch in group {
                 for (key, nodeIndex) in batch {
                     collected[key, default: []].append(nodeIndex)
@@ -109,17 +110,17 @@ public final class DuplicateFinder {
         // ---------------------------------------------------------------
         // Pass 3: Full-file hash for remaining candidates
         // ---------------------------------------------------------------
-        let fullGroups: [FullHashKey: [UInt32]] = await withTaskGroup(
-            of: [(FullHashKey, UInt32)].self,
-            returning: [FullHashKey: [UInt32]].self
+        let fullGroups: [FileHashKey: [UInt32]] = await withTaskGroup(
+            of: [(FileHashKey, UInt32)].self,
+            returning: [FileHashKey: [UInt32]].self
         ) { group in
             for (partialKey, indices) in partialMatches {
                 group.addTask {
-                    var results: [(FullHashKey, UInt32)] = []
+                    var results: [(FileHashKey, UInt32)] = []
                     for nodeIndex in indices {
                         let path = tree.path(at: nodeIndex)
                         if let hash = self.fullFileHash(path: path) {
-                            let key = FullHashKey(size: partialKey.size, hash: hash)
+                            let key = FileHashKey(size: partialKey.size, hash: hash)
                             results.append((key, nodeIndex))
                         }
                     }
@@ -127,7 +128,7 @@ public final class DuplicateFinder {
                 }
             }
 
-            var collected: [FullHashKey: [UInt32]] = [:]
+            var collected: [FileHashKey: [UInt32]] = [:]
             for await batch in group {
                 for (key, nodeIndex) in batch {
                     collected[key, default: []].append(nodeIndex)
@@ -220,24 +221,26 @@ public final class DuplicateFinder {
             let bytesRead = read(fd, buffer, chunkSize)
             if bytesRead <= 0 { break }
             let rawBuffer = UnsafeRawBufferPointer(start: buffer, count: bytesRead)
-            for byte in rawBuffer {
-                hash ^= UInt64(byte)
-                hash &*= 0x100000001b3
-            }
+            hash = fnv1aContinue(rawBuffer, hash: hash)
         }
 
         return hash
     }
+
+    /// Continue FNV-1a hashing from a previous state (for chunked reads).
+    private func fnv1aContinue(_ data: UnsafeRawBufferPointer, hash: UInt64) -> UInt64 {
+        var h = hash
+        for byte in data {
+            h ^= UInt64(byte)
+            h &*= 0x100000001b3
+        }
+        return h
+    }
 }
 
-// MARK: - Internal Key Types
+// MARK: - Internal Key Type
 
-private struct PartialHashKey: Hashable {
-    let size: UInt64
-    let hash: UInt64
-}
-
-private struct FullHashKey: Hashable {
+private struct FileHashKey: Hashable {
     let size: UInt64
     let hash: UInt64
 }

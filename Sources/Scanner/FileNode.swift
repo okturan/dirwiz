@@ -81,13 +81,6 @@ public final class FileTree: @unchecked Sendable {
 
     // MARK: - Thread-safe Reads
 
-    /// Take a snapshot of the current node count for safe iteration.
-    public var safeNodeCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return nodes.count
-    }
-
     /// Safely read a node by index. Returns nil if out of bounds.
     public func node(at index: UInt32) -> FileNode? {
         lock.lock()

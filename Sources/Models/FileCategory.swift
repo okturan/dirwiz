@@ -15,35 +15,30 @@ public enum FileCategory: String, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
-    public var color: Color {
+    private var rgb: (r: Double, g: Double, b: Double) {
         switch self {
-        case .documents:    return Color(red: 0.20, green: 0.40, blue: 0.85)
-        case .images:       return Color(red: 0.85, green: 0.35, blue: 0.60)
-        case .video:        return Color(red: 0.75, green: 0.25, blue: 0.25)
-        case .audio:        return Color(red: 0.90, green: 0.55, blue: 0.20)
-        case .code:         return Color(red: 0.30, green: 0.70, blue: 0.35)
-        case .archives:     return Color(red: 0.55, green: 0.45, blue: 0.75)
-        case .applications: return Color(red: 0.45, green: 0.75, blue: 0.85)
-        case .system:       return Color(red: 0.60, green: 0.60, blue: 0.60)
-        case .caches:       return Color(red: 0.75, green: 0.75, blue: 0.50)
-        case .other:        return Color(red: 0.50, green: 0.50, blue: 0.50)
+        case .documents:    return (0.20, 0.40, 0.85)
+        case .images:       return (0.85, 0.35, 0.60)
+        case .video:        return (0.75, 0.25, 0.25)
+        case .audio:        return (0.90, 0.55, 0.20)
+        case .code:         return (0.30, 0.70, 0.35)
+        case .archives:     return (0.55, 0.45, 0.75)
+        case .applications: return (0.45, 0.75, 0.85)
+        case .system:       return (0.60, 0.60, 0.60)
+        case .caches:       return (0.75, 0.75, 0.50)
+        case .other:        return (0.50, 0.50, 0.50)
         }
+    }
+
+    public var color: Color {
+        let c = rgb
+        return Color(red: c.r, green: c.g, blue: c.b)
     }
 
     /// SIMD4 color for Metal rendering.
     public var simdColor: SIMD4<Float> {
-        switch self {
-        case .documents:    return SIMD4(0.20, 0.40, 0.85, 1.0)
-        case .images:       return SIMD4(0.85, 0.35, 0.60, 1.0)
-        case .video:        return SIMD4(0.75, 0.25, 0.25, 1.0)
-        case .audio:        return SIMD4(0.90, 0.55, 0.20, 1.0)
-        case .code:         return SIMD4(0.30, 0.70, 0.35, 1.0)
-        case .archives:     return SIMD4(0.55, 0.45, 0.75, 1.0)
-        case .applications: return SIMD4(0.45, 0.75, 0.85, 1.0)
-        case .system:       return SIMD4(0.60, 0.60, 0.60, 1.0)
-        case .caches:       return SIMD4(0.75, 0.75, 0.50, 1.0)
-        case .other:        return SIMD4(0.50, 0.50, 0.50, 1.0)
-        }
+        let c = rgb
+        return SIMD4(Float(c.r), Float(c.g), Float(c.b), 1.0)
     }
 
     public var fileTypeDescription: String {

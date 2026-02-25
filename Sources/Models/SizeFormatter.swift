@@ -55,11 +55,15 @@ public struct SizeFormatter: Sendable {
         }
     }
 
+    private static let countFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f
+    }()
+
     /// Format file count with thousands separator.
     public func formatCount(_ count: Int) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.groupingSeparator = ","
-        return formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+        Self.countFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
     }
 }
