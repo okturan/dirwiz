@@ -103,13 +103,21 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     var currentViewportSize: CGSize = .zero
     var selectedNodeIndex: UInt32?
     var hoveredNodeIndex: UInt32?
+    var extensionPalette = ExtensionPalette()
+    var recencyFactors: [Float] = []
+    var recencyGeneration: UInt64 = 0
+    var isRecencyOverlayEnabled: Bool = false
+    var temporalDiffKinds: [UInt8] = []
+    var temporalDiffStrengths: [Float] = []
+    var isTemporalDiffEnabled: Bool = false
+    var temporalDiffGeneration: UInt64 = 0
 
     /// Layout throttling — minimum interval between layout recomputes.
     private var lastLayoutTime: CFAbsoluteTime = 0
     private var needsForceLayout: Bool = false
 
     /// Instance buffer dirty tracking — skip rebuild when nothing changed.
-    private var instanceBufferDirty: Bool = true
+    var instanceBufferDirty: Bool = true
     private var lastSelectedNodeIndex: UInt32? = nil
     private var lastHoveredNodeIndex: UInt32? = nil
 
@@ -260,7 +268,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         lastSelectedNodeIndex = selectedNodeIndex
         lastHoveredNodeIndex = hoveredNodeIndex
 
-        let colorMap = ExtensionColorMap.shared
+        let palette = extensionPalette
         let nodes = cachedSnapshot
         let layoutCount = cachedLayout.count
 
@@ -301,13 +309,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                 let dirRGB = directoryBaseColor(depth: tmRect.depth)
                 let dirColor = SIMD4<Float>(dirRGB.x, dirRGB.y, dirRGB.z, 1.0)
                 if let dominantHash = dominantDirectFileExtensionHash(in: tmRect.nodeIndex, nodes: nodes) {
-                    let childColor = colorMap.color(forHash: dominantHash)
+                    let childColor = palette.color(forHash: dominantHash)
                     baseColor = blend(dirColor, childColor, factor: 0.65)
                 } else {
                     baseColor = dirColor
                 }
             } else {
-                baseColor = colorMap.color(forHash: node.extensionHash)
+                baseColor = palette.color(forHash: node.extensionHash)
             }
 
             // Highlight selected node.
@@ -318,6 +326,39 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                     min(baseColor.z + 0.25, 1.0),
                     1.0
                 )
+            }
+
+            // Encode recency factor in alpha for shader desaturation.
+            // While factors are still loading (empty array), show everything as fully recent.
+            if isRecencyOverlayEnabled {
+                let nodeI = Int(tmRect.nodeIndex)
+                baseColor.w = recencyFactors.isEmpty ? 1.0
+                    : (nodeI < recencyFactors.count ? recencyFactors[nodeI] : 0.0)
+            }
+            // else: baseColor.w stays 1.0 (set by palette / directory colors above)
+
+            // Apply temporal diff tinting by pre-blending in Swift (no shader changes needed).
+            if isTemporalDiffEnabled {
+                let nodeI = Int(tmRect.nodeIndex)
+                if nodeI < temporalDiffKinds.count {
+                    let kind = TemporalDiffKind(rawValue: temporalDiffKinds[nodeI]) ?? .none
+                    if kind != .none {
+                        let strength = nodeI < temporalDiffStrengths.count
+                            ? temporalDiffStrengths[nodeI] : 0.5
+                        let tint: SIMD3<Float>
+                        switch kind {
+                        case .new:                tint = SIMD3(0.20, 0.82, 0.35)
+                        case .grown:              tint = SIMD3(0.20, 0.55, 0.95)
+                        case .shrunk:             tint = SIMD3(0.95, 0.72, 0.20)
+                        case .deletedDescendants: tint = SIMD3(0.90, 0.25, 0.25)
+                        case .none:               tint = SIMD3(0, 0, 0)
+                        }
+                        let t = 0.25 + 0.45 * strength
+                        baseColor.x += (tint.x - baseColor.x) * t
+                        baseColor.y += (tint.y - baseColor.y) * t
+                        baseColor.z += (tint.z - baseColor.z) * t
+                    }
+                }
             }
 
             // Use cached coefficients instead of recomputing.
@@ -512,6 +553,14 @@ public struct CushionTreemapView: NSViewRepresentable {
     public var treeRevision: Int
     public var rootIndex: UInt32
     public var selectedNodeIndex: UInt32?
+    public var extensionPalette: ExtensionPalette
+    public var recencyFactors: [Float]
+    public var recencyGeneration: UInt64
+    public var isRecencyOverlayEnabled: Bool
+    public var temporalDiffKinds: [UInt8]
+    public var temporalDiffStrengths: [Float]
+    public var isTemporalDiffEnabled: Bool
+    public var temporalDiffGeneration: UInt64
     public var onClick: ((UInt32) -> Void)?
     public var onDoubleClick: ((UInt32) -> Void)?
     public var onBack: (() -> Void)?
@@ -524,6 +573,14 @@ public struct CushionTreemapView: NSViewRepresentable {
         treeRevision: Int = 0,
         rootIndex: UInt32,
         selectedNodeIndex: UInt32? = nil,
+        extensionPalette: ExtensionPalette = ExtensionPalette(),
+        recencyFactors: [Float] = [],
+        recencyGeneration: UInt64 = 0,
+        isRecencyOverlayEnabled: Bool = false,
+        temporalDiffKinds: [UInt8] = [],
+        temporalDiffStrengths: [Float] = [],
+        isTemporalDiffEnabled: Bool = false,
+        temporalDiffGeneration: UInt64 = 0,
         onClick: ((UInt32) -> Void)? = nil,
         onDoubleClick: ((UInt32) -> Void)? = nil,
         onBack: (() -> Void)? = nil,
@@ -535,6 +592,14 @@ public struct CushionTreemapView: NSViewRepresentable {
         self.treeRevision = treeRevision
         self.rootIndex = rootIndex
         self.selectedNodeIndex = selectedNodeIndex
+        self.extensionPalette = extensionPalette
+        self.recencyFactors = recencyFactors
+        self.recencyGeneration = recencyGeneration
+        self.isRecencyOverlayEnabled = isRecencyOverlayEnabled
+        self.temporalDiffKinds = temporalDiffKinds
+        self.temporalDiffStrengths = temporalDiffStrengths
+        self.isTemporalDiffEnabled = isTemporalDiffEnabled
+        self.temporalDiffGeneration = temporalDiffGeneration
         self.onClick = onClick
         self.onDoubleClick = onDoubleClick
         self.onBack = onBack
@@ -569,11 +634,33 @@ public struct CushionTreemapView: NSViewRepresentable {
         let revisionChanged = coordinator.currentTreeRevision != treeRevision
         let rootChanged = coordinator.currentRootIndex != rootIndex
         let selectionChanged = coordinator.selectedNodeIndex != selectedNodeIndex
+        let paletteChanged = coordinator.extensionPalette.generation != extensionPalette.generation
+        let recencyChanged = coordinator.recencyGeneration != recencyGeneration ||
+                             coordinator.isRecencyOverlayEnabled != isRecencyOverlayEnabled
+        let temporalChanged = coordinator.temporalDiffGeneration != temporalDiffGeneration ||
+                              coordinator.isTemporalDiffEnabled != isTemporalDiffEnabled
 
         coordinator.currentFileTree = fileTree
         coordinator.currentTreeRevision = treeRevision
         coordinator.currentRootIndex = rootIndex
         coordinator.selectedNodeIndex = selectedNodeIndex
+        if paletteChanged {
+            coordinator.extensionPalette = extensionPalette
+            coordinator.instanceBufferDirty = true
+        }
+        if recencyChanged {
+            coordinator.recencyFactors = recencyFactors
+            coordinator.recencyGeneration = recencyGeneration
+            coordinator.isRecencyOverlayEnabled = isRecencyOverlayEnabled
+            coordinator.instanceBufferDirty = true
+        }
+        if temporalChanged {
+            coordinator.temporalDiffKinds = temporalDiffKinds
+            coordinator.temporalDiffStrengths = temporalDiffStrengths
+            coordinator.isTemporalDiffEnabled = isTemporalDiffEnabled
+            coordinator.temporalDiffGeneration = temporalDiffGeneration
+            coordinator.instanceBufferDirty = true
+        }
         coordinator.onClick = onClick
         coordinator.onDoubleClick = onDoubleClick
         coordinator.onBack = onBack
@@ -588,7 +675,7 @@ public struct CushionTreemapView: NSViewRepresentable {
             coordinator.invalidateLayout()
         }
 
-        if treeChanged || rootChanged || revisionChanged || selectionChanged {
+        if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged || recencyChanged || temporalChanged {
             mtkView.needsDisplay = true
         }
     }

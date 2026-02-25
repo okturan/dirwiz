@@ -8,6 +8,25 @@ struct TreeNodeItem: Identifiable {
     let id: UInt32 // node index in the FileTree
     let tree: FileTree
     let depth: Int
+    let reclaimScores: [UInt8]
+    let sortKey: TreeSortKey
+    let sortAscending: Bool
+
+    init(
+        id: UInt32,
+        tree: FileTree,
+        depth: Int,
+        reclaimScores: [UInt8] = [],
+        sortKey: TreeSortKey = .size,
+        sortAscending: Bool = false
+    ) {
+        self.id = id
+        self.tree = tree
+        self.depth = depth
+        self.reclaimScores = reclaimScores
+        self.sortKey = sortKey
+        self.sortAscending = sortAscending
+    }
 
     var node: FileNode { tree.node(at: id) ?? FileNode() }
     var name: String { tree.name(at: id) }
@@ -21,8 +40,82 @@ struct TreeNodeItem: Identifiable {
 
     /// Sorted children — only call when actually expanding.
     var children: [TreeNodeItem] {
-        tree.childrenSortedBySize(of: id)
-            .map { TreeNodeItem(id: $0, tree: tree, depth: depth + 1) }
+        let childIndices = tree.children(of: id).map { UInt32($0) }
+        let sorted = childIndices.sorted(by: compare)
+        return sorted.map {
+            TreeNodeItem(
+                id: $0,
+                tree: tree,
+                depth: depth + 1,
+                reclaimScores: reclaimScores,
+                sortKey: sortKey,
+                sortAscending: sortAscending
+            )
+        }
+    }
+
+    private func compare(_ lhs: UInt32, _ rhs: UInt32) -> Bool {
+        guard
+            let lhsNode = tree.node(at: lhs),
+            let rhsNode = tree.node(at: rhs)
+        else { return lhs < rhs }
+
+        let isLess: Bool
+        switch sortKey {
+        case .name:
+            let lhsName = tree.name(at: lhs)
+            let rhsName = tree.name(at: rhs)
+            isLess = lhsName.localizedCaseInsensitiveCompare(rhsName) == .orderedAscending
+        case .percentage:
+            isLess = lhsNode.fileSize < rhsNode.fileSize
+        case .size:
+            isLess = lhsNode.fileSize < rhsNode.fileSize
+        case .allocated:
+            isLess = lhsNode.allocatedSize < rhsNode.allocatedSize
+        case .items:
+            isLess = lhsNode.childCount < rhsNode.childCount
+        case .modified:
+            isLess = lhsNode.modifiedDate < rhsNode.modifiedDate
+        case .reclaimScore:
+            let lhsScore = reclaimScore(for: lhs, isDirectory: lhsNode.isDirectory)
+            let rhsScore = reclaimScore(for: rhs, isDirectory: rhsNode.isDirectory)
+            isLess = lhsScore < rhsScore
+        }
+
+        if sortAscending {
+            if isLess { return true }
+            if compareEqual(lhsNode: lhsNode, rhsNode: rhsNode, lhs: lhs, rhs: rhs) { return lhs < rhs }
+            return false
+        } else {
+            if !isLess, !compareEqual(lhsNode: lhsNode, rhsNode: rhsNode, lhs: lhs, rhs: rhs) { return true }
+            if compareEqual(lhsNode: lhsNode, rhsNode: rhsNode, lhs: lhs, rhs: rhs) { return lhs < rhs }
+            return false
+        }
+    }
+
+    private func compareEqual(lhsNode: FileNode, rhsNode: FileNode, lhs: UInt32, rhs: UInt32) -> Bool {
+        switch sortKey {
+        case .name:
+            return tree.name(at: lhs).localizedCaseInsensitiveCompare(tree.name(at: rhs)) == .orderedSame
+        case .percentage, .size:
+            return lhsNode.fileSize == rhsNode.fileSize
+        case .allocated:
+            return lhsNode.allocatedSize == rhsNode.allocatedSize
+        case .items:
+            return lhsNode.childCount == rhsNode.childCount
+        case .modified:
+            return lhsNode.modifiedDate == rhsNode.modifiedDate
+        case .reclaimScore:
+            return reclaimScore(for: lhs, isDirectory: lhsNode.isDirectory) ==
+                reclaimScore(for: rhs, isDirectory: rhsNode.isDirectory)
+        }
+    }
+
+    private func reclaimScore(for index: UInt32, isDirectory: Bool) -> UInt8 {
+        guard isDirectory else { return 0 }
+        let idx = Int(index)
+        guard idx < reclaimScores.count else { return 0 }
+        return reclaimScores[idx]
     }
 }
 
@@ -36,6 +129,7 @@ enum TreeSortKey: String {
     case allocated
     case items
     case modified
+    case reclaimScore
 }
 
 // MARK: - TreeTableView
@@ -48,6 +142,7 @@ public struct TreeTableView: View {
     @State private var sortKey: TreeSortKey = .size
     @State private var sortAscending: Bool = false
     @State private var expandedFolders: Set<UInt32> = []
+    @State private var scrollGeneration: UInt64 = 0
 
     public init(appState: AppState) {
         self.appState = appState
@@ -72,13 +167,18 @@ public struct TreeTableView: View {
         VStack(spacing: 0) {
             headerRow
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    let items = flattenedVisibleItems(tree: tree)
-                    ForEach(items) { item in
-                        treeRowContainer(item, tree: tree)
-                        Divider().padding(.leading, CGFloat(item.depth) * 18 + 12)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        let items = flattenedVisibleItems(tree: tree)
+                        ForEach(items) { item in
+                            treeRowContainer(item, tree: tree)
+                            Divider().padding(.leading, CGFloat(item.depth) * 18 + 12)
+                        }
                     }
+                }
+                .onChange(of: appState.selectedNodeIndex) { _, newValue in
+                    revealAndScroll(to: newValue, tree: tree, proxy: proxy)
                 }
             }
         }
@@ -138,7 +238,11 @@ public struct TreeTableView: View {
             TreeRow(
                 item: item,
                 parentSize: parentSize(for: item, tree: tree),
-                isSelected: appState.selectedNodeIndex == item.id
+                isSelected: appState.selectedNodeIndex == item.id,
+                extensionPalette: appState.extensionPalette,
+                reclaimScore: item.isDirectory && Int(item.id) < appState.reclaimScores.count
+                    ? appState.reclaimScores[Int(item.id)]
+                    : nil
             )
         }
         .padding(.trailing, 8)
@@ -146,6 +250,7 @@ public struct TreeTableView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             appState.selectedNodeIndex = item.id
+            ensureVisibleInTreemap(item.id, tree: tree)
         }
         .background(
             appState.selectedNodeIndex == item.id
@@ -164,6 +269,7 @@ public struct TreeTableView: View {
             headerButton("Allocated", key: .allocated, minWidth: 80, alignment: .trailing)
             headerButton("Items", key: .items, minWidth: 60, alignment: .trailing)
             headerButton("Modified", key: .modified, minWidth: 100, alignment: .trailing)
+            headerButton("Score", key: .reclaimScore, minWidth: 65, alignment: .trailing)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
@@ -194,14 +300,87 @@ public struct TreeTableView: View {
         .frame(minWidth: minWidth)
     }
 
+    // MARK: - Selection Sync
+
+    /// Expand all ancestors of the selected node and scroll it into view.
+    private func revealAndScroll(to nodeIndex: UInt32?, tree: FileTree, proxy: ScrollViewProxy) {
+        guard let nodeIndex else { return }
+        let nodes = tree.nodesSnapshot()
+        let i = Int(nodeIndex)
+        guard i < nodes.count else { return }
+
+        // Walk parent chain, expand each ancestor (with max-hop guard)
+        var current = nodes[i].parentIndex
+        var hops = 0
+        while current != FileNode.invalid && Int(current) < nodes.count && hops < nodes.count {
+            expandedFolders.insert(current)
+            current = nodes[Int(current)].parentIndex
+            hops += 1
+        }
+
+        // Scroll after SwiftUI processes the expansion.
+        // Generation token prevents stale closures from scrolling to outdated selections.
+        scrollGeneration &+= 1
+        let gen = scrollGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            guard gen == scrollGeneration else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(nodeIndex, anchor: .center)
+            }
+        }
+    }
+
+    /// If the node is not under the current treemap root, navigate treemap to show it.
+    private func ensureVisibleInTreemap(_ nodeIndex: UInt32, tree: FileTree) {
+        let nodes = tree.nodesSnapshot()
+        let root = appState.treemapRootIndex
+
+        // Walk parent chain — if we hit the current root, node is already visible
+        var current = nodeIndex
+        var hops = 0
+        while current != FileNode.invalid && Int(current) < nodes.count && hops < nodes.count {
+            if current == root { return }
+            current = nodes[Int(current)].parentIndex
+            hops += 1
+        }
+
+        // Not under current root — navigate treemap to parent dir.
+        // showNodeInTreemap also sets selectedNodeIndex, but we already set it
+        // in onTapGesture — the duplicate write is harmless (same value).
+        appState.showNodeInTreemap(nodeIndex)
+    }
+
     // MARK: - Helpers
 
     private func rootChildren(tree: FileTree) -> [TreeNodeItem] {
-        let sorted = tree.childrenSortedBySize(of: 0)
+        let sorted = TreeNodeItem(
+            id: 0,
+            tree: tree,
+            depth: -1,
+            reclaimScores: appState.reclaimScores,
+            sortKey: sortKey,
+            sortAscending: sortAscending
+        ).children.map(\.id)
         if sorted.isEmpty {
-            return [TreeNodeItem(id: 0, tree: tree, depth: 0)]
+            return [TreeNodeItem(
+                id: 0,
+                tree: tree,
+                depth: 0,
+                reclaimScores: appState.reclaimScores,
+                sortKey: sortKey,
+                sortAscending: sortAscending
+            )]
         }
-        return sorted.map { TreeNodeItem(id: $0, tree: tree, depth: 0) }
+        return sorted.map {
+            TreeNodeItem(
+                id: $0,
+                tree: tree,
+                depth: 0,
+                reclaimScores: appState.reclaimScores,
+                sortKey: sortKey,
+                sortAscending: sortAscending
+            )
+        }
     }
 
     private func parentSize(for item: TreeNodeItem, tree: FileTree) -> UInt64 {
@@ -218,6 +397,8 @@ private struct TreeRow: View {
     let item: TreeNodeItem
     let parentSize: UInt64
     let isSelected: Bool
+    let extensionPalette: ExtensionPalette
+    let reclaimScore: UInt8?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -247,6 +428,10 @@ private struct TreeRow: View {
             Text(formattedDate)
                 .font(.system(size: 11))
                 .frame(minWidth: 100, alignment: .trailing)
+
+            // Reclaim score column
+            reclaimScoreColumn
+                .frame(minWidth: 65, alignment: .trailing)
         }
     }
 
@@ -300,13 +485,31 @@ private struct TreeRow: View {
         }
     }
 
+    private var reclaimScoreColumn: some View {
+        Group {
+            if item.isDirectory, let score = reclaimScore {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(scoreColor(score))
+                        .frame(width: 8, height: 8)
+                    Text("\(score)")
+                        .font(.system(size: 11, design: .monospaced))
+                }
+            } else {
+                Text("-")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private var categoryColor: Color {
         if item.isDirectory {
             return .blue.opacity(0.6)
         }
-        return ExtensionColorMap.shared.category(forHash: item.node.extensionHash).color
+        return extensionPalette.swiftUIColor(forHash: item.node.extensionHash)
     }
 
     private static let sharedDateFormatter: DateFormatter = {
@@ -320,5 +523,18 @@ private struct TreeRow: View {
         guard item.node.modifiedDate > 0 else { return "-" }
         let date = Date(timeIntervalSince1970: TimeInterval(item.node.modifiedDate))
         return Self.sharedDateFormatter.string(from: date)
+    }
+
+    private func scoreColor(_ score: UInt8) -> Color {
+        switch score {
+        case 70...100:
+            return .red
+        case 40...69:
+            return .orange
+        case 15...39:
+            return .yellow
+        default:
+            return .green
+        }
     }
 }

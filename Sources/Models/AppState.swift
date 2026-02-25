@@ -33,8 +33,49 @@ public final class AppState {
     /// Per-extension-name stats for the Extensions tab (individual file types).
     public var fileTypeStats: [FileTypeStat] = []
 
+    /// WinDirStat-style per-extension color palette (top 17 by size).
+    public var extensionPalette = ExtensionPalette()
+
     /// Duplicate file groups (populated after duplicate scan).
     public var duplicateGroups: [DuplicateGroup] = []
+
+    /// Per-node reclaim score (0-100). Files are always 0.
+    public var reclaimScores: [UInt8] = []
+
+    /// Per-node Spotlight recency factor [0,1] (1=recently used, 0=stale/unindexed).
+    public var recencyFactors: [Float] = []
+
+    /// Bumped each time recencyFactors is updated, for GPU change detection.
+    public var recencyGeneration: UInt64 = 0
+
+    /// Whether the recency heatmap overlay is active.
+    public var isRecencyOverlayEnabled: Bool = false
+
+    /// Whether a Spotlight recency query is in progress.
+    public var isRecencyQueryRunning: Bool = false
+
+    // MARK: - Temporal Diff
+
+    /// Snapshot loaded from disk for comparison (nil = none taken yet).
+    public var temporalSnapshot: TemporalSnapshot?
+
+    /// Whether the temporal diff overlay is currently active.
+    public var isTemporalDiffEnabled: Bool = false
+
+    /// Whether a snapshot save/build is in progress.
+    public var isSnapshotBuilding: Bool = false
+
+    /// Bumped each time diff results are applied (GPU change detection).
+    public var temporalDiffGeneration: UInt64 = 0
+
+    /// Per-node diff kind (TemporalDiffKind.rawValue). Files are always .none.
+    public var temporalDiffKinds: [UInt8] = []
+
+    /// Per-node blend strength [0,1] for the diff tint.
+    public var temporalDiffStrengths: [Float] = []
+
+    /// Surviving ancestors → count/bytes of deleted descendants (for tooltips).
+    public var temporalDiffDeletedCounts: [UInt32: DeletedSummary] = [:]
 
     /// Whether duplicate scan is in progress.
     public var isDuplicateScanRunning: Bool = false
@@ -46,6 +87,11 @@ public final class AppState {
 
     private var backStack: [UInt32] = []
     private var forwardStack: [UInt32] = []
+
+    /// Token incremented on each new scan; used to discard stale async results.
+    private var recencyToken: UInt64 = 0
+    private var temporalDiffToken: UInt64 = 0
+    private var temporalDiffTask: Task<Void, Never>?
 
     public var canNavigateBack: Bool { !backStack.isEmpty }
     public var canNavigateForward: Bool { !forwardStack.isEmpty }
@@ -149,7 +195,22 @@ public final class AppState {
         selectedNodeIndex = nil
         extensionStats = []
         fileTypeStats = []
+        extensionPalette = ExtensionPalette()
         duplicateGroups = []
+        reclaimScores = []
+        recencyFactors = []
+        recencyGeneration = 0
+        isRecencyOverlayEnabled = false
+        isRecencyQueryRunning = false
+        recencyToken &+= 1
+        temporalDiffKinds = []
+        temporalDiffStrengths = []
+        temporalDiffDeletedCounts = [:]
+        temporalDiffGeneration = 0
+        isTemporalDiffEnabled = false
+        temporalDiffTask?.cancel()
+        temporalDiffTask = nil
+        temporalDiffToken &+= 1
     }
 
     // MARK: - Path Building
@@ -213,6 +274,7 @@ public final class AppState {
             let hash = extensionHash("file.\(ext)")
             return FileTypeStat(
                 extensionName: ext,
+                extensionHash: hash,
                 category: colorMap.category(forHash: hash),
                 totalSize: size,
                 fileCount: countByExt[ext] ?? 0,
@@ -220,6 +282,232 @@ public final class AppState {
             )
         }
         .sorted { $0.totalSize > $1.totalSize }
+
+        // Assign WinDirStat-style palette colors based on extension size ranking.
+        extensionPalette.assign(from: fileTypeStats)
+        computeReclaimScores()
+        loadSnapshotIfAvailable()
+    }
+
+    /// Compute per-directory reclaim score (0-100) using size/staleness/cache/duplicate factors.
+    public func computeReclaimScores() {
+        guard let tree = fileTree else {
+            reclaimScores = []
+            return
+        }
+        let nodes = tree.nodesSnapshot()
+        guard !nodes.isEmpty else {
+            reclaimScores = []
+            return
+        }
+
+        // Step 1: Bottom-up pass for cache bytes per node.
+        let colorMap = ExtensionColorMap.shared
+        var cacheBytesPerNode = Array(repeating: UInt64(0), count: nodes.count)
+        for i in stride(from: nodes.count - 1, through: 0, by: -1) {
+            let node = nodes[i]
+            if !node.isDirectory, colorMap.category(forHash: node.extensionHash) == .caches {
+                cacheBytesPerNode[i] = node.fileSize
+            }
+            let parentIndex = node.parentIndex
+            if parentIndex != FileNode.invalid {
+                let parentInt = Int(parentIndex)
+                if parentInt < cacheBytesPerNode.count {
+                    cacheBytesPerNode[parentInt] += cacheBytesPerNode[i]
+                }
+            }
+        }
+
+        // Step 2: Duplicate wasted bytes by directory from duplicateGroups paths.
+        var dupWastedByDir: [UInt32: UInt64] = [:]
+        if !duplicateGroups.isEmpty {
+            var pathToIndex: [String: UInt32] = [:]
+            pathToIndex.reserveCapacity(nodes.count)
+            for i in 0..<nodes.count {
+                pathToIndex[tree.path(at: UInt32(i))] = UInt32(i)
+            }
+
+            for group in duplicateGroups where group.paths.count > 1 {
+                for path in group.paths.dropFirst() {
+                    guard let fileIndex = pathToIndex[path] else { continue }
+                    var current = fileIndex
+                    var hops = 0
+                    while current != FileNode.invalid, hops < nodes.count {
+                        let currentInt = Int(current)
+                        guard currentInt < nodes.count else { break }
+                        let currentNode = nodes[currentInt]
+                        if currentNode.isDirectory {
+                            dupWastedByDir[current, default: 0] += group.fileSize
+                        }
+                        current = currentNode.parentIndex
+                        hops += 1
+                    }
+                }
+            }
+        }
+
+        // Step 3: Max child size per parent (sibling normalization).
+        var maxChildSizeByParent: [UInt32: UInt64] = [:]
+        maxChildSizeByParent.reserveCapacity(nodes.count / 2)
+        for i in 0..<nodes.count {
+            let parentIndex = nodes[i].parentIndex
+            if parentIndex == FileNode.invalid { continue }
+            let childSize = nodes[i].fileSize
+            if childSize > (maxChildSizeByParent[parentIndex] ?? 0) {
+                maxChildSizeByParent[parentIndex] = childSize
+            }
+        }
+
+        // Step 4: Direct-file modified timestamps per directory.
+        var childTimestamps: [UInt32: [UInt32]] = [:]
+        childTimestamps.reserveCapacity(nodes.count / 2)
+        for i in 0..<nodes.count {
+            let node = nodes[i]
+            guard !node.isDirectory else { continue }
+            let parentIndex = node.parentIndex
+            if parentIndex == FileNode.invalid { continue }
+            childTimestamps[parentIndex, default: []].append(node.modifiedDate)
+        }
+
+        // Step 5: Final score per directory.
+        let nowSeconds = UInt32(Date().timeIntervalSince1970)
+        var scores = Array(repeating: UInt8(0), count: nodes.count)
+
+        for i in 0..<nodes.count {
+            let node = nodes[i]
+            guard node.isDirectory else {
+                scores[i] = 0
+                continue
+            }
+
+            let sizeFactor: Double
+            if i == 0 {
+                sizeFactor = 1.0
+            } else if node.parentIndex == FileNode.invalid {
+                sizeFactor = 0
+            } else {
+                let maxSiblingSize = maxChildSizeByParent[node.parentIndex] ?? 0
+                if maxSiblingSize == 0 {
+                    sizeFactor = 0
+                } else {
+                    let numerator = Foundation.log(Double(1 + node.fileSize))
+                    let denominator = Foundation.log(Double(1 + maxSiblingSize))
+                    let raw = denominator > 0 ? numerator / denominator : 0
+                    sizeFactor = min(max(raw, 0), 1)
+                }
+            }
+
+            let stalenessFactor: Double
+            if var timestamps = childTimestamps[UInt32(i)], !timestamps.isEmpty {
+                timestamps.sort()
+                let medianTimestamp = timestamps[timestamps.count / 2]
+                if medianTimestamp == 0 {
+                    stalenessFactor = 0
+                } else {
+                    let ageSeconds = nowSeconds > medianTimestamp ? nowSeconds - medianTimestamp : 0
+                    let ageDays = Double(ageSeconds) / 86_400.0
+                    stalenessFactor = min(ageDays, 730.0) / 730.0
+                }
+            } else {
+                stalenessFactor = 0
+            }
+
+            let totalBytes = node.fileSize
+            let cacheFactor: Double = totalBytes > 0
+                ? Double(cacheBytesPerNode[i]) / Double(totalBytes)
+                : 0
+
+            let dupWasted = dupWastedByDir[UInt32(i)] ?? 0
+            let dupFactor: Double = totalBytes > 0
+                ? min(Double(dupWasted) / Double(totalBytes), 1.0)
+                : 0
+
+            let weighted = (0.35 * sizeFactor) +
+                (0.25 * stalenessFactor) +
+                (0.25 * cacheFactor) +
+                (0.15 * dupFactor)
+            let score = Int((weighted * 100.0).rounded())
+            scores[i] = UInt8(clamping: min(max(score, 0), 100))
+        }
+
+        reclaimScores = scores
+    }
+
+    // MARK: - Recency
+
+    /// Apply recency factors — discards stale results from a superseded scan.
+    public func applyRecencyFactors(_ factors: [Float], token: UInt64) {
+        guard token == recencyToken else { return }
+        recencyFactors = factors
+        recencyGeneration &+= 1
+        isRecencyQueryRunning = false
+    }
+
+    /// Start a Spotlight recency query if one is not already running.
+    public func startRecencyQueryIfNeeded() {
+        guard !isRecencyQueryRunning, let tree = fileTree else { return }
+        isRecencyQueryRunning = true
+        recencyToken &+= 1
+        let token = recencyToken
+        let service = RecencyQueryService()
+        Task {
+            let factors = await service.queryRecency(tree: tree)
+            await MainActor.run {
+                self.applyRecencyFactors(factors, token: token)
+            }
+        }
+    }
+
+    // MARK: - Temporal Diff
+
+    /// Build a snapshot from the current scan and persist it to disk.
+    public func takeSnapshot() {
+        guard !isSnapshotBuilding, let tree = fileTree else { return }
+        isSnapshotBuilding = true
+        Task.detached(priority: .utility) {
+            let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
+            try? snapshot.save()
+            await MainActor.run {
+                self.temporalSnapshot = snapshot
+                self.isSnapshotBuilding = false
+            }
+        }
+    }
+
+    /// Try to load a persisted snapshot matching the current scan root.
+    public func loadSnapshotIfAvailable() {
+        guard let tree = fileTree else { return }
+        Task.detached(priority: .background) {
+            let rootPath = tree.path(at: 0)
+            guard let snapshot = try? TemporalSnapshot.load(for: rootPath) else { return }
+            await MainActor.run {
+                self.temporalSnapshot = snapshot
+            }
+        }
+    }
+
+    /// Apply a diff result — discards stale results from a superseded scan.
+    public func applyTemporalDiff(_ result: TemporalDiffResult, token: UInt64) {
+        guard token == temporalDiffToken else { return }
+        temporalDiffKinds = result.kinds
+        temporalDiffStrengths = result.strengths
+        temporalDiffDeletedCounts = result.deletedByNode
+        temporalDiffGeneration &+= 1
+    }
+
+    /// Start diff computation between the current tree and the loaded snapshot.
+    public func startTemporalDiff() {
+        guard let snapshot = temporalSnapshot, let tree = fileTree else { return }
+        temporalDiffTask?.cancel()
+        temporalDiffToken &+= 1
+        let token = temporalDiffToken
+        temporalDiffTask = Task.detached(priority: .utility) {
+            let result = await TemporalDiffService.computeDiff(
+                currentTree: tree, snapshot: snapshot)
+            await MainActor.run {
+                self.applyTemporalDiff(result, token: token)
+            }
+        }
     }
 
     private static func extractExtension(from name: String) -> String {
@@ -289,6 +577,7 @@ public struct ExtensionStat: Identifiable, Sendable {
 public struct FileTypeStat: Identifiable, Sendable {
     public let id = UUID()
     public let extensionName: String
+    public let extensionHash: UInt16
     public let category: FileCategory
     public let totalSize: UInt64
     public let fileCount: Int

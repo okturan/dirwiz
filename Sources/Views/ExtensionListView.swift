@@ -4,14 +4,16 @@ import SwiftUI
 public struct ExtensionListView: View {
     let fileTypeStats: [FileTypeStat]
     let totalSize: UInt64
+    let extensionPalette: ExtensionPalette
 
     @State private var sortOrder: SortOrder = .size
     @State private var sortAscending: Bool = false
     @State private var searchText: String = ""
 
-    public init(fileTypeStats: [FileTypeStat], totalSize: UInt64) {
+    public init(fileTypeStats: [FileTypeStat], totalSize: UInt64, extensionPalette: ExtensionPalette) {
         self.fileTypeStats = fileTypeStats
         self.totalSize = totalSize
+        self.extensionPalette = extensionPalette
     }
 
     public var body: some View {
@@ -134,11 +136,13 @@ public struct ExtensionListView: View {
     // MARK: - Row
 
     private func extensionRow(_ stat: FileTypeStat) -> some View {
-        HStack(spacing: 0) {
+        let paletteColor = extensionPalette.swiftUIColor(forHash: stat.extensionHash)
+
+        return HStack(spacing: 0) {
             // Extension name with color dot.
             HStack(spacing: 6) {
                 Circle()
-                    .fill(stat.category.color)
+                    .fill(paletteColor)
                     .frame(width: 8, height: 8)
                 Text(".\(stat.extensionName)")
                     .font(.system(size: 12, design: .monospaced))
@@ -165,7 +169,7 @@ public struct ExtensionListView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.secondary.opacity(0.12))
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(stat.category.color.opacity(0.7))
+                            .fill(paletteColor.opacity(0.7))
                             .frame(width: max(0, geo.size.width * stat.percentage))
                     }
                 }

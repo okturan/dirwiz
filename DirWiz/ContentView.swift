@@ -6,7 +6,6 @@ struct ContentView: View {
     @Bindable var appState: AppState
 
     @State private var showLegend: Bool = true
-    @State private var selectedCategory: FileCategory? = nil
     @State private var activeScanner: FileScanner?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var splitRatio: CGFloat = 0.4
@@ -20,6 +19,60 @@ struct ContentView: View {
         }
         .navigationTitle("")
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                HStack(spacing: 6) {
+                    // Recency heatmap spinner + toggle
+                    if appState.isRecencyQueryRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                            .help("Querying Spotlight for file recency…")
+                    }
+                    Toggle(isOn: Binding(
+                        get: { appState.isRecencyOverlayEnabled },
+                        set: { enabled in
+                            appState.isRecencyOverlayEnabled = enabled
+                            if enabled { appState.startRecencyQueryIfNeeded() }
+                        }
+                    )) {
+                        Image(systemName: "clock.arrow.circlepath")
+                    }
+                    .help("Recency Heatmap — dim files unused for 2+ years (Cmd+Opt+R)")
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                    .disabled(!appState.scanProgress.scanComplete)
+
+                    Divider().frame(height: 16)
+
+                    // Take Snapshot
+                    if appState.isSnapshotBuilding {
+                        ProgressView()
+                            .controlSize(.small)
+                            .help("Saving snapshot…")
+                    } else {
+                        Button {
+                            appState.takeSnapshot()
+                        } label: {
+                            Image(systemName: "camera")
+                        }
+                        .help("Take Snapshot for Temporal Diff (Cmd+Opt+S)")
+                        .keyboardShortcut("s", modifiers: [.command, .option])
+                        .disabled(!appState.scanProgress.scanComplete)
+                    }
+
+                    // Temporal Diff toggle
+                    Toggle(isOn: Binding(
+                        get: { appState.isTemporalDiffEnabled },
+                        set: { enabled in
+                            appState.isTemporalDiffEnabled = enabled
+                            if enabled { appState.startTemporalDiff() }
+                        }
+                    )) {
+                        Image(systemName: "timelapse")
+                    }
+                    .help("Temporal Diff — highlight changes since snapshot (Cmd+Opt+D)")
+                    .keyboardShortcut("d", modifiers: [.command, .option])
+                    .disabled(!appState.scanProgress.scanComplete || appState.temporalSnapshot == nil)
+                }
+            }
             ToolbarItem(placement: .automatic) {
                 Toggle(isOn: $showLegend) {
                     Image(systemName: "sidebar.trailing")
@@ -105,7 +158,8 @@ struct ContentView: View {
                                 case .extensions:
                                     ExtensionListView(
                                         fileTypeStats: appState.fileTypeStats,
-                                        totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0
+                                        totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0,
+                                        extensionPalette: appState.extensionPalette
                                     )
                                 case .duplicates:
                                     DuplicateFilesView(appState: appState)
@@ -120,6 +174,12 @@ struct ContentView: View {
                         // Resizable drag divider.
                         splitDivider(totalHeight: geo.size.height)
 
+                        // Temporal diff status banner.
+                        if appState.isTemporalDiffEnabled,
+                           let snap = appState.temporalSnapshot {
+                            diffStatusBanner(snapshot: snap)
+                        }
+
                         // Bottom: treemap.
                         InteractiveTreemapView(appState: appState)
                             .frame(minHeight: 100)
@@ -132,9 +192,8 @@ struct ContentView: View {
             if showLegend {
                 Divider()
                 ExtensionLegend(
-                    extensionStats: appState.extensionStats,
-                    totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0,
-                    selectedCategory: $selectedCategory
+                    palette: appState.extensionPalette,
+                    totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0
                 )
                 .frame(width: 220)
             }
@@ -163,6 +222,37 @@ struct ContentView: View {
                         splitRatio = max(0.1, min(0.85, newRatio))
                     }
             )
+    }
+
+    private func diffStatusBanner(snapshot: TemporalSnapshot) -> some View {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let dateStr = formatter.string(from: snapshot.meta.createdAt)
+        return HStack(spacing: 6) {
+            Image(systemName: "timelapse")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            Text("Comparing to snapshot from \(dateStr)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Text(snapshot.meta.rootPath)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer()
+            Button("Clear") {
+                appState.isTemporalDiffEnabled = false
+            }
+            .font(.system(size: 11))
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Color.orange.opacity(0.08))
     }
 
     private var tabBar: some View {

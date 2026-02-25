@@ -111,10 +111,19 @@ enum CushionShaderSource {
             litColor += float3(0.12);
         }
 
+        // Recency heatmap: desaturate stale files toward dark grayscale.
+        // recencyFactor is encoded in baseColor.a: 1.0 = recent, 0.0 = stale.
+        float recencyFactor = in.baseColor.a;
+        if (recencyFactor < 0.99) {
+            float luma = dot(litColor, float3(0.299, 0.587, 0.114));
+            float3 staleColor = float3(luma) * 0.30;
+            litColor = mix(staleColor, litColor, recencyFactor);
+        }
+
         // Clamp and gamma-correct: linear -> sRGB.
         float3 result = linearToSrgb(clamp(litColor, 0.0, 1.0));
 
-        return float4(result, in.baseColor.a);
+        return float4(result, 1.0);
     }
     """
 }
