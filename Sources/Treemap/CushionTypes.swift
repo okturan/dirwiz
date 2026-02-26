@@ -27,33 +27,19 @@ enum CushionConstants {
     static let F: Float = 0.90   // depth falloff factor
 }
 
-/// Accumulate parabolic ridge cushion coefficients from ancestor rectangles.
-/// Each nesting level adds a parabolic ridge in both x and y directions.
-func computeCushionCoefficients(for rect: TreemapRect) -> SIMD4<Float> {
-    var coefs = SIMD4<Float>(0, 0, 0, 0)
-
-    // Process each ancestor level.
-    for (level, ancestor) in rect.ancestors.enumerated() {
-        let h = CushionConstants.H * powf(CushionConstants.F, Float(level))
-        addRidge(&coefs, rect: rect, ancestorX: ancestor.x, ancestorY: ancestor.y,
-                 ancestorW: ancestor.w, ancestorH: ancestor.h, h: h)
-    }
-
-    return coefs
-}
-
-/// Add a parabolic ridge for one nesting level.
+/// Add a parabolic ridge for one nesting level (flat param version).
 /// The ridge creates a bump across the ancestor rectangle, normalized to the leaf's [0..1] space.
-func addRidge(_ coefs: inout SIMD4<Float>, rect: TreemapRect,
-              ancestorX: Float, ancestorY: Float,
-              ancestorW: Float, ancestorH: Float, h: Float) {
-    guard rect.width > 0, rect.height > 0 else { return }
+func addRidge(_ coefs: inout SIMD4<Float>,
+              rectX: Float, rectY: Float, rectW: Float, rectH: Float,
+              ancestorX: Float, ancestorY: Float, ancestorW: Float, ancestorH: Float,
+              h: Float) {
+    guard rectW > 0, rectH > 0 else { return }
 
     // Map ancestor bounds into the leaf rect's [0..1] parametric space.
-    let x1 = (ancestorX - rect.x) / rect.width
-    let x2 = (ancestorX + ancestorW - rect.x) / rect.width
-    let y1 = (ancestorY - rect.y) / rect.height
-    let y2 = (ancestorY + ancestorH - rect.y) / rect.height
+    let x1 = (ancestorX - rectX) / rectW
+    let x2 = (ancestorX + ancestorW - rectX) / rectW
+    let y1 = (ancestorY - rectY) / rectH
+    let y2 = (ancestorY + ancestorH - rectY) / rectH
 
     let dx = x2 - x1
     let dy = y2 - y1
@@ -69,4 +55,21 @@ func addRidge(_ coefs: inout SIMD4<Float>, rect: TreemapRect,
     let invDy2 = 1.0 / (dy * dy)
     coefs.z += -4.0 * h * invDy2
     coefs.w += 4.0 * h * (y1 + y2) * invDy2
+}
+
+/// Compute cushion coefficients inline from flat rect + ancestor array.
+/// Used by SquarifyLayout during layout to avoid storing ancestors on TreemapRect.
+func computeCoefs(
+    rectX: Float, rectY: Float, rectW: Float, rectH: Float,
+    ancestors: [(x: Float, y: Float, w: Float, h: Float)]
+) -> SIMD4<Float> {
+    var coefs = SIMD4<Float>.zero
+    for (level, anc) in ancestors.enumerated() {
+        let h = CushionConstants.H * powf(CushionConstants.F, Float(level))
+        addRidge(&coefs,
+                 rectX: rectX, rectY: rectY, rectW: rectW, rectH: rectH,
+                 ancestorX: anc.x, ancestorY: anc.y, ancestorW: anc.w, ancestorH: anc.h,
+                 h: h)
+    }
+    return coefs
 }

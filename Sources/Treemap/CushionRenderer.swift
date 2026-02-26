@@ -41,14 +41,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     var isTemporalDiffEnabled: Bool = false
     var temporalDiffGeneration: UInt64 = 0
 
-    /// Layout throttling — minimum interval between layout recomputes.
-    private var lastLayoutTime: CFAbsoluteTime = 0
+    /// Pending async layout task (cancelled when a new layout is needed).
+    private var pendingLayoutTask: Task<Void, Never>?
+    private var pendingLayoutSize: CGSize = .zero
     private var needsForceLayout: Bool = false
 
     /// Instance buffer dirty tracking — skip rebuild when nothing changed.
     var instanceBufferDirty: Bool = true
     private var lastSelectedNodeIndex: UInt32? = nil
-    private var lastHoveredNodeIndex: UInt32? = nil
 
     /// Callbacks for interaction.
     var onClick: ((UInt32) -> Void)?
@@ -112,9 +112,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
 
     // MARK: - Layout Computation
 
-    /// Recompute layout if inputs have changed. Uses a node snapshot to avoid lock contention.
+    /// Recompute layout if inputs have changed.
+    /// Immediately scale-previews existing rects (Fix 3), then launches layout off the main
+    /// thread (Fix 2). The background task replaces cachedLayout when it finishes.
     func recomputeLayoutIfNeeded(viewportSize: CGSize) {
         guard let tree = currentFileTree, !tree.isEmpty else {
+            pendingLayoutTask?.cancel()
+            pendingLayoutTask = nil
             cachedLayout = []
             cachedSnapshot = []
             spatialGrid = nil
@@ -122,61 +126,89 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         }
 
         let sizeChanged = viewportSize != currentViewportSize
-        if !sizeChanged && !cachedLayout.isEmpty && !needsForceLayout {
-            return // No change needed.
+        if !sizeChanged && !needsForceLayout && !cachedLayout.isEmpty {
+            return // Nothing changed.
         }
 
-        // Throttle layout recomputes to avoid blocking the main thread during scanning.
-        // Allow immediate layout for: first display, forced navigation, or after enough time.
-        if !cachedLayout.isEmpty && !needsForceLayout {
-            let now = CFAbsoluteTimeGetCurrent()
-            if (now - lastLayoutTime) < 1.0 {
-                return // Too soon since last layout.
-            }
+        // Dedup: if a task is already in flight for this exact size, skip relaunching.
+        if pendingLayoutTask != nil && pendingLayoutSize == viewportSize && !needsForceLayout {
+            return
         }
 
+        let wasForced = needsForceLayout
         needsForceLayout = false
-        lastLayoutTime = CFAbsoluteTimeGetCurrent()
+        pendingLayoutTask?.cancel()
+
+        // Fix 3: Immediately scale existing rects to fill the new viewport.
+        // Coefs remain valid — they're computed in normalized [0,1] space per rect,
+        // so uniform proportional scaling leaves them unchanged.
+        if !cachedLayout.isEmpty && !wasForced && currentViewportSize != .zero && sizeChanged {
+            let sx = Float(viewportSize.width / currentViewportSize.width)
+            let sy = Float(viewportSize.height / currentViewportSize.height)
+            cachedLayout = cachedLayout.map { r in
+                TreemapRect(
+                    nodeIndex: r.nodeIndex,
+                    x: r.x * sx, y: r.y * sy,
+                    width: r.width * sx, height: r.height * sy,
+                    depth: r.depth,
+                    cachedCoefs: r.cachedCoefs,
+                    isBackground: r.isBackground
+                )
+            }
+            spatialGrid = nil // Stale; rebuilt when background layout completes.
+            instanceBufferDirty = true
+        }
+
         currentViewportSize = viewportSize
+        pendingLayoutSize = viewportSize
 
         // Snapshot nodes ONCE — single lock acquisition, then layout runs lock-free.
         let snapshot = tree.nodesSnapshot()
-        cachedSnapshot = snapshot
-
+        let rootIndex = currentRootIndex
         let bounds = CGRect(origin: .zero, size: viewportSize)
-        cachedLayout = SquarifyLayout.layout(
-            nodes: snapshot,
-            rootIndex: currentRootIndex,
-            bounds: bounds,
-            maxDepth: 20,
-            minPixelSize: 1.0
-        )
 
-        // Cache cushion coefficients for each rect (avoids recomputing every instance buffer rebuild).
-        for i in 0..<cachedLayout.count {
-            cachedLayout[i].cachedCoefs = computeCushionCoefficients(for: cachedLayout[i])
+        // Fix 2: Run layout off the main thread to avoid frame drops.
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else { return }
+            let layout = SquarifyLayout.layout(
+                nodes: snapshot,
+                rootIndex: rootIndex,
+                bounds: bounds,
+                maxDepth: 20,
+                minPixelSize: 1.0
+            )
+            guard !Task.isCancelled else { return }
+            let grid = SpatialGrid(
+                viewportWidth: Float(bounds.width),
+                viewportHeight: Float(bounds.height),
+                rects: layout
+            )
+            await MainActor.run { [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                self.cachedLayout = layout
+                self.cachedSnapshot = snapshot
+                self.spatialGrid = grid
+                self.instanceBufferDirty = true
+                self.onLayoutUpdate?(layout)
+                self.mtkView?.needsDisplay = true
+            }
         }
-
-        // Build spatial grid for O(1) hit testing.
-        spatialGrid = SpatialGrid(
-            viewportWidth: Float(viewportSize.width),
-            viewportHeight: Float(viewportSize.height),
-            rects: cachedLayout
-        )
-
-        instanceBufferDirty = true
-        onLayoutUpdate?(cachedLayout)
+        pendingLayoutTask = task
     }
 
     /// Force a layout recompute immediately (e.g., user navigation).
     func forceLayoutInvalidation() {
+        pendingLayoutTask?.cancel()
+        pendingLayoutTask = nil
         currentViewportSize = .zero
         needsForceLayout = true
     }
 
-    /// Soft layout invalidation (e.g., scan revision change). Subject to throttling.
+    /// Soft layout invalidation (e.g., scan revision change).
     func invalidateLayout() {
-        currentViewportSize = .zero // Force recompute on next draw, subject to throttle.
+        pendingLayoutTask?.cancel()
+        pendingLayoutTask = nil
+        currentViewportSize = .zero
     }
 
     // MARK: - Instance Buffer
@@ -188,14 +220,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         }
 
         // Skip rebuild if nothing changed.
+        // Hover is handled via the hoveredIndex uniform — no per-instance buffer rebuild needed.
         let selectionChanged = selectedNodeIndex != lastSelectedNodeIndex
-        let hoverChanged = hoveredNodeIndex != lastHoveredNodeIndex
-        if !instanceBufferDirty && !selectionChanged && !hoverChanged {
+        if !instanceBufferDirty && !selectionChanged {
             return
         }
         instanceBufferDirty = false
         lastSelectedNodeIndex = selectedNodeIndex
-        lastHoveredNodeIndex = hoveredNodeIndex
 
         let palette = extensionPalette
         let nodes = cachedSnapshot

@@ -9,11 +9,7 @@ public struct TreemapRect: Sendable {
     public let height: Float
     public let depth: Int // nesting depth for cushion calculation
 
-    /// Ancestry rects for cushion coefficient accumulation.
-    /// Stores (x, y, w, h) for each ancestor level from root to this rect's parent.
-    public let ancestors: [(x: Float, y: Float, w: Float, h: Float)]
-
-    /// Cached cushion coefficients (ax2, bx, ay2, by). Computed once during layout caching.
+    /// Cached cushion coefficients (ax2, bx, ay2, by). Computed inline during layout.
     public var cachedCoefs: SIMD4<Float> = .zero
 
     /// True for directory background rects (drawn first so sub-pixel children expose dir color).
@@ -111,7 +107,7 @@ public struct SquarifyLayout {
                     width: rect.w,
                     height: rect.h,
                     depth: depth,
-                    ancestors: ancestors
+                    cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
                 ))
             }
             return
@@ -127,7 +123,7 @@ public struct SquarifyLayout {
                     width: rect.w,
                     height: rect.h,
                     depth: depth,
-                    ancestors: ancestors
+                    cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
                 ))
             }
             return
@@ -143,7 +139,7 @@ public struct SquarifyLayout {
                     width: rect.w,
                     height: rect.h,
                     depth: depth,
-                    ancestors: ancestors
+                    cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
                 ))
             }
             return
@@ -160,7 +156,7 @@ public struct SquarifyLayout {
                 width: rect.w,
                 height: rect.h,
                 depth: depth,
-                ancestors: ancestors
+                cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
             ))
             return
         }
@@ -168,17 +164,16 @@ public struct SquarifyLayout {
         // Emit the directory as a background rect before its children.
         // Children are drawn on top; any sub-pixel-culled children expose this
         // rect instead of the near-black clearColor.
-        var bgRect = TreemapRect(
+        result.append(TreemapRect(
             nodeIndex: index,
             x: rect.x,
             y: rect.y,
             width: rect.w,
             height: rect.h,
             depth: depth,
-            ancestors: ancestors
-        )
-        bgRect.isBackground = true
-        result.append(bgRect)
+            cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors),
+            isBackground: true
+        ))
 
         // Compute total size of children.
         let totalSize = childIndices.reduce(Float(0)) { sum, idx in
