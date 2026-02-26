@@ -10,7 +10,6 @@ enum TreeSortKey: String {
     case allocated
     case items
     case modified
-    case reclaimScore
 }
 
 // MARK: - Tree Node Wrapper
@@ -21,7 +20,6 @@ struct TreeNodeItem: Identifiable {
     let id: UInt32 // node index in the FileTree
     let tree: FileTree
     let depth: Int
-    let reclaimScores: [UInt8]
     let sortKey: TreeSortKey
     let sortAscending: Bool
 
@@ -29,14 +27,12 @@ struct TreeNodeItem: Identifiable {
         id: UInt32,
         tree: FileTree,
         depth: Int,
-        reclaimScores: [UInt8] = [],
         sortKey: TreeSortKey = .size,
         sortAscending: Bool = false
     ) {
         self.id = id
         self.tree = tree
         self.depth = depth
-        self.reclaimScores = reclaimScores
         self.sortKey = sortKey
         self.sortAscending = sortAscending
     }
@@ -57,14 +53,8 @@ struct TreeNodeItem: Identifiable {
         let childIndices = tree.children(of: id).map { UInt32($0) }
         let sorted = childIndices.sorted(by: compare)
         return sorted.map {
-            TreeNodeItem(
-                id: $0,
-                tree: tree,
-                depth: depth + 1,
-                reclaimScores: reclaimScores,
-                sortKey: sortKey,
-                sortAscending: sortAscending
-            )
+            TreeNodeItem(id: $0, tree: tree, depth: depth + 1,
+                         sortKey: sortKey, sortAscending: sortAscending)
         }
     }
 
@@ -86,10 +76,6 @@ struct TreeNodeItem: Identifiable {
             cmp = nodeA.childCount > nodeB.childCount
         case .modified:
             cmp = nodeA.modifiedDate > nodeB.modifiedDate
-        case .reclaimScore:
-            let scoreA = Int(a) < reclaimScores.count ? reclaimScores[Int(a)] : 0
-            let scoreB = Int(b) < reclaimScores.count ? reclaimScores[Int(b)] : 0
-            cmp = scoreA > scoreB
         }
         return sortAscending ? !cmp : cmp
     }

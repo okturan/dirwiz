@@ -185,7 +185,6 @@ public struct DuplicateFilesView: View {
             }
             await MainActor.run {
                 appState.duplicateGroups = groups
-                appState.computeReclaimScores()
                 appState.isDuplicateScanRunning = false
             }
         }
@@ -207,7 +206,6 @@ public struct DuplicateFilesView: View {
                 paths: remaining
             )
         }
-        appState.computeReclaimScores()
         checkedPaths.removeAll()
     }
 }

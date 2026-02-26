@@ -6,40 +6,24 @@ struct TreeRow: View {
     let parentSize: UInt64
     let isSelected: Bool
     let extensionPalette: ExtensionPalette
-    let reclaimScore: UInt8?
 
     var body: some View {
         HStack(spacing: 0) {
-            // Name column
             nameColumn
                 .frame(minWidth: 200, alignment: .leading)
-
-            // Percentage bar column
             percentageColumn
                 .frame(minWidth: 100, alignment: .leading)
-
-            // Size column
             Text(SizeFormatter.shared.format(item.node.fileSize))
                 .font(.system(size: 11, design: .monospaced))
                 .frame(minWidth: 80, alignment: .trailing)
-
-            // Allocated column
             Text(SizeFormatter.shared.format(item.node.allocatedSize))
                 .font(.system(size: 11, design: .monospaced))
                 .frame(minWidth: 80, alignment: .trailing)
-
-            // Items count column
             itemsColumn
                 .frame(minWidth: 60, alignment: .trailing)
-
-            // Modified date column
             Text(formattedDate)
                 .font(.system(size: 11))
                 .frame(minWidth: 100, alignment: .trailing)
-
-            // Reclaim score column
-            reclaimScoreColumn
-                .frame(minWidth: 65, alignment: .trailing)
         }
     }
 
@@ -93,24 +77,6 @@ struct TreeRow: View {
         }
     }
 
-    private var reclaimScoreColumn: some View {
-        Group {
-            if item.isDirectory, let score = reclaimScore {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(scoreColor(score))
-                        .frame(width: 8, height: 8)
-                    Text("\(score)")
-                        .font(.system(size: 11, design: .monospaced))
-                }
-            } else {
-                Text("-")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
     // MARK: - Helpers
 
     private var categoryColor: Color {
@@ -133,16 +99,4 @@ struct TreeRow: View {
         return Self.sharedDateFormatter.string(from: date)
     }
 
-    private func scoreColor(_ score: UInt8) -> Color {
-        switch score {
-        case 70...100:
-            return .red
-        case 40...69:
-            return .orange
-        case 15...39:
-            return .yellow
-        default:
-            return .green
-        }
-    }
 }

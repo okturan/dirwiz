@@ -143,10 +143,7 @@ public struct TreeTableView: View {
                 item: item,
                 parentSize: parentSize(for: item, tree: tree),
                 isSelected: appState.selectedNodeIndex == item.id,
-                extensionPalette: appState.extensionPalette,
-                reclaimScore: item.isDirectory && Int(item.id) < appState.reclaimScores.count
-                    ? appState.reclaimScores[Int(item.id)]
-                    : nil
+                extensionPalette: appState.extensionPalette
             )
         }
         .padding(.trailing, 8)
@@ -211,7 +208,6 @@ public struct TreeTableView: View {
             headerButton("Allocated", key: .allocated, minWidth: 80, alignment: .trailing)
             headerButton("Items", key: .items, minWidth: 60, alignment: .trailing)
             headerButton("Modified", key: .modified, minWidth: 100, alignment: .trailing)
-            headerButton("Score", key: .reclaimScore, minWidth: 65, alignment: .trailing)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
@@ -429,15 +425,11 @@ public struct TreeTableView: View {
         // depth: -1 so children are created at depth 0.
         let children = TreeNodeItem(
             id: 0, tree: tree, depth: -1,
-            reclaimScores: appState.reclaimScores,
             sortKey: sortKey, sortAscending: sortAscending
         ).children
         if children.isEmpty {
-            return [TreeNodeItem(
-                id: 0, tree: tree, depth: 0,
-                reclaimScores: appState.reclaimScores,
-                sortKey: sortKey, sortAscending: sortAscending
-            )]
+            return [TreeNodeItem(id: 0, tree: tree, depth: 0,
+                                 sortKey: sortKey, sortAscending: sortAscending)]
         }
         return children
     }

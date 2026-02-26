@@ -43,9 +43,6 @@ public final class AppState {
     /// Duplicate file groups (populated after duplicate scan).
     public var duplicateGroups: [DuplicateGroup] = []
 
-    /// Per-node reclaim score (0-100). Files are always 0.
-    public var reclaimScores: [UInt8] = []
-
     /// Per-node Spotlight recency factor [0,1] (1=recently used, 0=stale/unindexed).
     public var recencyFactors: [Float] = []
 
@@ -122,7 +119,6 @@ public final class AppState {
         fileTypeStats = []
         extensionPalette = ExtensionPalette()
         duplicateGroups = []
-        reclaimScores = []
         recencyFactors = []
         recencyGeneration = 0
         isRecencyOverlayEnabled = false
