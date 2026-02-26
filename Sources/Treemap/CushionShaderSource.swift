@@ -15,8 +15,9 @@ enum CushionShaderSource {
         float2 viewportSize;
         float  ambient;
         float  padding1;
-        float3 lightDir;
+        float4 lightDir;      // w unused; matches Swift SIMD4<Float> layout exactly
         int    hoveredIndex;
+        // padding to 16-byte alignment handled by Metal automatically
     };
 
     struct VertexOut {
@@ -79,7 +80,7 @@ enum CushionShaderSource {
         float3 N = normalize(float3(nx, ny, nz));
 
         // Lighting vectors.
-        float3 lightDir = normalize(uniforms.lightDir);
+        float3 lightDir = normalize(uniforms.lightDir.xyz);
         float3 viewDir = float3(0.0, 0.0, 1.0);
 
         // Diffuse (Lambertian).

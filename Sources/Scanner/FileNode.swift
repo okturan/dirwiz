@@ -11,7 +11,7 @@ public struct FileNode: Sendable {
     public var childCount: UInt32
     public var fileSize: UInt64
     public var allocatedSize: UInt64
-    public var extensionHash: UInt16
+    public var extensionHash: UInt32
     public var flags: UInt8
     public var modifiedDate: UInt32
 
@@ -40,7 +40,7 @@ public struct FileNode: Sendable {
         childCount: UInt32 = 0,
         fileSize: UInt64 = 0,
         allocatedSize: UInt64 = 0,
-        extensionHash: UInt16 = 0,
+        extensionHash: UInt32 = 0,
         flags: UInt8 = 0,
         modifiedDate: UInt32 = 0
     ) {
@@ -218,7 +218,9 @@ public final class FileTree: @unchecked Sendable {
     public func updateNode(at index: UInt32, _ mutate: (inout FileNode) -> Void) {
         lock.lock()
         defer { lock.unlock() }
-        mutate(&nodes[Int(index)])
+        let i = Int(index)
+        guard i < nodes.count else { return }
+        mutate(&nodes[i])
     }
 
     /// Batch-add children for a parent. Returns the index of the first child.
@@ -249,11 +251,14 @@ public final class FileTree: @unchecked Sendable {
     public func accumulateSize(from index: UInt32, fileSize: UInt64, allocatedSize: UInt64) {
         lock.lock()
         defer { lock.unlock() }
+        guard Int(index) < nodes.count else { return }
         var current = nodes[Int(index)].parentIndex
         while current != FileNode.invalid {
-            nodes[Int(current)].fileSize += fileSize
-            nodes[Int(current)].allocatedSize += allocatedSize
-            current = nodes[Int(current)].parentIndex
+            let ci = Int(current)
+            guard ci < nodes.count else { break }
+            nodes[ci].fileSize += fileSize
+            nodes[ci].allocatedSize += allocatedSize
+            current = nodes[ci].parentIndex
         }
     }
 
@@ -295,7 +300,7 @@ public final class FileTree: @unchecked Sendable {
 
 // MARK: - Extension Hash
 
-public func extensionHash(_ name: String) -> UInt16 {
+public func extensionHash(_ name: String) -> UInt32 {
     guard let dotIndex = name.lastIndex(of: ".") else { return 0 }
     let ext = name[name.index(after: dotIndex)...].lowercased()
     guard !ext.isEmpty else { return 0 }
@@ -303,5 +308,5 @@ public func extensionHash(_ name: String) -> UInt16 {
     for byte in ext.utf8 {
         hash = ((hash &<< 5) &+ hash) &+ UInt32(byte)
     }
-    return UInt16(hash & 0xFFFF)
+    return hash
 }

@@ -58,17 +58,24 @@ private let kOffsetModTime:  Int = 40
 private let kOffsetFileID:   Int = 56  // 40 + sizeof(timespec)=16
 private let kOffsetFileData: Int = 64  // 56 + sizeof(uint64)=8
 
+// MARK: - Inode Key
+
+/// Proper composite key for (dev, inode) pairs — avoids XOR hash collisions.
+private struct InodeKey: Hashable {
+    let dev: Int32
+    let inode: UInt64
+}
+
 // MARK: - Visited Directory Tracker
 
 /// Thread-safe set tracking visited (dev, inode) pairs to avoid firmlink/hardlink loops.
 private final class VisitedDirectories: @unchecked Sendable {
-    private var seen = Set<UInt64>()
+    private var seen = Set<InodeKey>()
     private let lock = NSLock()
 
     /// Returns true if this is the first time seeing this (dev, inode) pair.
     func insert(dev: Int32, inode: UInt64) -> Bool {
-        // Combine dev and inode into a single key. dev_t is 32 bits.
-        let key = (UInt64(bitPattern: Int64(dev)) << 32) ^ inode
+        let key = InodeKey(dev: dev, inode: inode)
         lock.lock()
         defer { lock.unlock() }
         return seen.insert(key).inserted
@@ -220,7 +227,7 @@ public final class FileScanner {
         // Finalize progress — publish final counters before marking complete
         let totalElapsed = CFAbsoluteTimeGetCurrent() - startTime
         await MainActor.run {
-            progress.publishCounters()
+            progress.publishCounters(forceLayoutRevision: true)
             progress.elapsedTime = totalElapsed
             progress.isScanning = false
             progress.scanComplete = true
@@ -274,6 +281,7 @@ public final class FileScanner {
             let count = getattrlistbulk(fd, &attrList, buffer, kBufferSize, UInt64(FSOPT_PACK_INVAL_ATTRS))
             if count <= 0 { break }
 
+            let bufferEnd = buffer.advanced(by: kBufferSize)
             var entryPtr = buffer
             for _ in 0..<count {
                 let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
@@ -361,7 +369,9 @@ public final class FileScanner {
                     fileCount += 1
                 }
 
-                entryPtr = entryPtr.advanced(by: entryLength)
+                let next = entryPtr.advanced(by: entryLength)
+                guard next <= bufferEnd else { break }
+                entryPtr = next
             }
         }
 
@@ -414,12 +424,11 @@ public final class FileScanner {
         var totalFileSize: UInt64 = 0
         var totalAllocatedSize: UInt64 = 0
         var stack: [String] = [path]
-        var seen = Set<UInt64>()
+        var seen = Set<InodeKey>()
 
         var rootStat = Darwin.stat()
         if lstat(path, &rootStat) == 0 {
-            let rootKey = (UInt64(bitPattern: Int64(rootStat.st_dev)) << 32) ^ rootStat.st_ino
-            seen.insert(rootKey)
+            seen.insert(InodeKey(dev: rootStat.st_dev, inode: rootStat.st_ino))
         }
 
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: kBufferSize, alignment: 16)
@@ -439,6 +448,7 @@ public final class FileScanner {
             while !isCancelled {
                 let count = getattrlistbulk(fd, &attrList, buffer, kBufferSize, UInt64(FSOPT_PACK_INVAL_ATTRS))
                 if count <= 0 { break }
+                let bufferEnd = buffer.advanced(by: kBufferSize)
                 var entryPtr = buffer
                 for _ in 0..<count {
                     let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
@@ -447,8 +457,12 @@ public final class FileScanner {
                     let objType = entry.advanced(by: kOffsetObjType).loadUnaligned(as: UInt32.self)
                     let isDir = (objType == VDIR.rawValue)
                     let isSymlink = (objType == VLNK.rawValue)
+
+                    let next = entryPtr.advanced(by: entryLength)
+                    guard next <= bufferEnd else { break }
+
                     guard !isSymlink else {
-                        entryPtr = entryPtr.advanced(by: entryLength)
+                        entryPtr = next
                         continue
                     }
 
@@ -462,8 +476,7 @@ public final class FileScanner {
                         if !entryName.isEmpty, entryName != ".", entryName != ".." {
                             let devID = entry.advanced(by: kOffsetDevID).loadUnaligned(as: Int32.self)
                             let fileID = entry.advanced(by: kOffsetFileID).loadUnaligned(as: UInt64.self)
-                            let key = (UInt64(bitPattern: Int64(devID)) << 32) ^ fileID
-                            if seen.insert(key).inserted {
+                            if seen.insert(InodeKey(dev: devID, inode: fileID)).inserted {
                                 stack.append(currentDir + "/" + entryName)
                             }
                         }
@@ -474,7 +487,7 @@ public final class FileScanner {
                         totalAllocatedSize += allocSize
                     }
 
-                    entryPtr = entryPtr.advanced(by: entryLength)
+                    entryPtr = next
                 }
             }
         }

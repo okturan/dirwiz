@@ -28,8 +28,14 @@ public final class ScanProgress: @unchecked Sendable {
     @ObservationIgnored private var _hotTotalSize: UInt64 = 0
     @ObservationIgnored private var _hotAllocatedBytes: UInt64 = 0
     @ObservationIgnored private var _hotPath: String = ""
+    @ObservationIgnored private var _publishCount: Int = 0
 
     private let lock = NSLock()
+
+    /// Bumped every ~10 publishCounters() calls (≈2.5s) and once at scan end.
+    /// Used as the treemap layout revision signal to avoid re-layout on every
+    /// progress update (which would cancel in-flight layout tasks continuously).
+    public private(set) var treeLayoutRevision: Int = 0
 
     public init() {}
 
@@ -58,6 +64,7 @@ public final class ScanProgress: @unchecked Sendable {
         _hotTotalSize = 0
         _hotAllocatedBytes = 0
         _hotPath = ""
+        _publishCount = 0
         lock.unlock()
 
         isScanning = false
@@ -71,6 +78,7 @@ public final class ScanProgress: @unchecked Sendable {
         estimatedTotalItems = 0
         estimatedTotalBytes = 0
         scannedAllocatedBytes = 0
+        treeLayoutRevision = 0
     }
 
     /// Called from scanner background threads. Does NOT trigger @Observable.
@@ -98,13 +106,16 @@ public final class ScanProgress: @unchecked Sendable {
 
     /// Sync hot counters to observable properties.
     /// Must be called on the main thread at throttled intervals.
-    public func publishCounters() {
+    /// Pass `forceLayoutRevision: true` at scan completion to guarantee a final layout.
+    @MainActor public func publishCounters(forceLayoutRevision: Bool = false) {
         lock.lock()
         let files = _hotFiles
         let dirs = _hotDirs
         let size = _hotTotalSize
         let allocated = _hotAllocatedBytes
         let path = _hotPath
+        _publishCount += 1
+        let count = _publishCount
         lock.unlock()
 
         filesScanned = files
@@ -112,5 +123,10 @@ public final class ScanProgress: @unchecked Sendable {
         totalSize = size
         scannedAllocatedBytes = allocated
         currentPath = path
+
+        // Bump layout revision every 10 publishes (≈2.5s) or when forced at scan end.
+        if count % 10 == 0 || forceLayoutRevision {
+            treeLayoutRevision &+= 1
+        }
     }
 }

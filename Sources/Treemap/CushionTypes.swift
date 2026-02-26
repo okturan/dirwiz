@@ -11,12 +11,15 @@ struct CushionInstance {
 }
 
 /// Uniform buffer matching the Metal shader struct layout.
+/// IMPORTANT: float3/SIMD3 is padded to 16 bytes in Metal but not guaranteed in Swift structs.
+/// Using SIMD4<Float> for lightDir ensures identical layout on both sides.
 struct CushionUniforms {
     var viewportSize: SIMD2<Float>
     var ambient: Float
     var padding1: Float
-    var lightDir: SIMD3<Float>
+    var lightDir: SIMD4<Float>   // w unused; matches Metal float4 layout exactly
     var hoveredIndex: Int32
+    var padding2: (Float, Float, Float) = (0, 0, 0)  // 12-byte tail padding; keep stride 48
 }
 
 // MARK: - Cushion Coefficient Calculation

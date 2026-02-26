@@ -151,6 +151,7 @@ public enum SearchEngine {
         needle: UnsafePointer<UInt8>,
         needleLen: Int
     ) -> Bool {
+        guard needleLen > 0 else { return true }
         let limit = haystackLen - needleLen
         guard limit >= 0 else { return false }
         let firstByte = needle[0]

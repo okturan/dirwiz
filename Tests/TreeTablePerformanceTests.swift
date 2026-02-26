@@ -24,7 +24,9 @@ struct TreeTablePerformanceTests {
 
     @Test("revealScrollDelayIsAdequate")
     func revealScrollDelayIsAdequate() throws {
-        let sourcePath = "Sources/Views/TreeTableView.swift"
+        let testDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let repoRoot = testDir.deletingLastPathComponent()
+        let sourcePath = repoRoot.appendingPathComponent("Sources/Views/TreeTableView.swift").path
         let source = try String(contentsOfFile: sourcePath, encoding: .utf8)
         let pattern = #"\.now\(\)\s*\+\s*([0-9]*\.?[0-9]+)"#
         let regex = try NSRegularExpression(pattern: pattern)
@@ -51,7 +53,7 @@ struct TreeTablePerformanceTests {
 
         var root = FileNode()
         root.isDirectory = true
-        root.fileSize = 500 * (100 + (9 * 10))
+        root.fileSize = 500 * (100 + ((10...18).reduce(0, +)))
         _ = tree.addNode(root, name: "root")
 
         var rootChildren: [(node: FileNode, name: String)] = []
@@ -60,7 +62,7 @@ struct TreeTablePerformanceTests {
         for i in 0..<500 {
             var dir = FileNode()
             dir.isDirectory = true
-            dir.fileSize = 100 + (9 * 10)
+            dir.fileSize = 100 + ((10...18).reduce(0, +))
             rootChildren.append((node: dir, name: "dir\(i)"))
         }
 

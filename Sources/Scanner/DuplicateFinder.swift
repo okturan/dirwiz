@@ -216,16 +216,14 @@ public final class DuplicateFinder {
         guard fstat(fd, &fileInfo) == 0 else { return nil }
         let byteCount = Int(fileInfo.st_size)
 
-        if byteCount == 0 {
-            return SHA256.hash(data: Data()).withUnsafeBytes { $0.load(as: UInt64.self) }
-        }
+        if byteCount == 0 { return nil }  // Cannot hash zero-byte or sparse files
 
         let mapped = mmap(nil, byteCount, PROT_READ, MAP_PRIVATE, fd, 0)
         guard mapped != MAP_FAILED, let mapped else { return nil }
         defer { munmap(mapped, byteCount) }
 
         let data = Data(bytesNoCopy: mapped, count: byteCount, deallocator: .none)
-        return SHA256.hash(data: data).withUnsafeBytes { $0.load(as: UInt64.self) }
+        return SHA256.hash(data: data).withUnsafeBytes { $0.loadUnaligned(as: UInt64.self) }
     }
 }
 

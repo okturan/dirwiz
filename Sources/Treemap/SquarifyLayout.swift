@@ -282,9 +282,17 @@ public struct SquarifyLayout {
         let horizontal = rect.w >= rect.h
         var offset: Float = horizontal ? rowRect.y : rowRect.x
 
+        let rowEndEdge: Float = horizontal ? rowRect.y + rowRect.h : rowRect.x + rowRect.w
+
         for i in startIndex..<rowEnd {
+            let isLastInRow = (i == rowEnd - 1)
             let itemArea = children[i].area
-            let itemLength = rowLength > 0 ? itemArea / rowLength : 0
+            var itemLength = rowLength > 0 ? itemArea / rowLength : 0
+
+            // Snap the last item to the remaining space to prevent FP drift.
+            if isLastInRow {
+                itemLength = rowEndEdge - offset
+            }
 
             var itemRect: LayoutRect
             if horizontal {
