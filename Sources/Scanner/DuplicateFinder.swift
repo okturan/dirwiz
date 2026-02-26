@@ -72,8 +72,10 @@ public final class DuplicateFinder {
                 group.addTask {
                     var results: [(FileHashKey, UInt32)] = []
                     for nodeIndex in sizeGroup {
-                        let path = tree.path(at: nodeIndex)
-                        if let hash = self.partialHash(path: path, fileSize: fileSize) {
+                        let hash = tree.withCPath(at: nodeIndex) { cPath in
+                            self.partialHash(cPath: cPath, fileSize: fileSize)
+                        }
+                        if let hash {
                             let key = FileHashKey(size: fileSize, hash: hash)
                             results.append((key, nodeIndex))
                         }
@@ -119,8 +121,10 @@ public final class DuplicateFinder {
                 group.addTask {
                     var results: [(FileHashKey, UInt32)] = []
                     for nodeIndex in indices {
-                        let path = tree.path(at: nodeIndex)
-                        if let hash = self.fullFileHash(path: path) {
+                        let hash = tree.withCPath(at: nodeIndex) { cPath in
+                            self.fullFileHash(cPath: cPath)
+                        }
+                        if let hash {
                             let key = FileHashKey(size: partialKey.size, hash: hash)
                             results.append((key, nodeIndex))
                         }
@@ -172,8 +176,8 @@ public final class DuplicateFinder {
 
     /// Read first 4KB + last 4KB and compute a combined hash.
     /// For files <= 8KB, reads the entire file.
-    private func partialHash(path: String, fileSize: UInt64) -> UInt64? {
-        let fd = open(path, O_RDONLY)
+    private func partialHash(cPath: UnsafePointer<CChar>, fileSize: UInt64) -> UInt64? {
+        let fd = open(cPath, O_RDONLY)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
 
@@ -207,8 +211,8 @@ public final class DuplicateFinder {
     }
 
     /// Compute full-file SHA-256 hash and fold it down to 64 bits.
-    private func fullFileHash(path: String) -> UInt64? {
-        let fd = open(path, O_RDONLY)
+    private func fullFileHash(cPath: UnsafePointer<CChar>) -> UInt64? {
+        let fd = open(cPath, O_RDONLY)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
 

@@ -2,19 +2,16 @@ import Foundation
 
 /// Builds snapshots and computes temporal diffs between two scans.
 ///
-/// All heavy work runs on `DispatchQueue.global(qos: .utility)` via
-/// `withCheckedContinuation`, keeping the MainActor free.
+/// All heavy work runs on `Task.detached` to keep the MainActor free.
 public struct TemporalDiffService {
 
     // MARK: - Snapshot Building
 
     /// Build a snapshot from the current file tree (directories only).
     public static func buildSnapshot(tree: FileTree) async -> TemporalSnapshot {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: buildSnapshotSync(tree: tree))
-            }
-        }
+        await Task.detached(priority: .utility) {
+            buildSnapshotSync(tree: tree)
+        }.value
     }
 
     private static func buildSnapshotSync(tree: FileTree) -> TemporalSnapshot {
@@ -50,12 +47,9 @@ public struct TemporalDiffService {
         currentTree: FileTree,
         snapshot: TemporalSnapshot
     ) async -> TemporalDiffResult {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: computeDiffSync(
-                    currentTree: currentTree, snapshot: snapshot))
-            }
-        }
+        await Task.detached(priority: .utility) {
+            computeDiffSync(currentTree: currentTree, snapshot: snapshot)
+        }.value
     }
 
     private static func computeDiffSync(

@@ -314,23 +314,28 @@ public struct TreeTableView: View {
         guard i < nodes.count else { return }
 
         // Walk parent chain, expand each ancestor (with depth guard).
+        var didExpand = false
         var current = nodes[i].parentIndex
         var hops = 0
         while current != FileNode.invalid && Int(current) < nodes.count && hops < 512 {
-            expandedFolders.insert(current)
+            if expandedFolders.insert(current).inserted {
+                didExpand = true
+            }
             current = nodes[Int(current)].parentIndex
             hops += 1
         }
 
-        // Scroll after SwiftUI processes the expansion.
-        // Generation token prevents stale closures from scrolling to outdated selections.
-        scrollGeneration &+= 1
-        let gen = scrollGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            guard gen == scrollGeneration else { return }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(nodeIndex, anchor: .center)
+        if didExpand {
+            // Ancestors were expanded — wait for SwiftUI to lay out new rows, then scroll.
+            scrollGeneration &+= 1
+            let gen = scrollGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                guard gen == scrollGeneration else { return }
+                proxy.scrollTo(nodeIndex)
             }
+        } else {
+            // Node already visible in the list — minimal scroll, no delay.
+            proxy.scrollTo(nodeIndex)
         }
     }
 

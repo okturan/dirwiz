@@ -30,9 +30,11 @@ public struct ScanProgressView: View {
                 if let fraction = scanProgress.fractionCompleted {
                     ProgressView(value: fraction)
                         .progressViewStyle(.linear)
+                        .animation(.linear(duration: 0.25), value: fraction)
                     Text("\(Int(fraction * 100))%")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 } else {
                     ProgressView()
                         .progressViewStyle(.linear)
@@ -45,6 +47,7 @@ public struct ScanProgressView: View {
                             .foregroundStyle(.secondary)
                         Text(SizeFormatter.shared.formatCount(scanProgress.filesScanned))
                             .font(.system(.body, design: .monospaced))
+                            .contentTransition(.numericText())
                     }
 
                     GridRow {
@@ -52,6 +55,7 @@ public struct ScanProgressView: View {
                             .foregroundStyle(.secondary)
                         Text(SizeFormatter.shared.formatCount(scanProgress.directoriesScanned))
                             .font(.system(.body, design: .monospaced))
+                            .contentTransition(.numericText())
                     }
 
                     GridRow {
@@ -59,6 +63,7 @@ public struct ScanProgressView: View {
                             .foregroundStyle(.secondary)
                         Text(SizeFormatter.shared.format(scanProgress.totalSize))
                             .font(.system(.body, design: .monospaced))
+                            .contentTransition(.numericText())
                     }
 
                     GridRow {
@@ -66,6 +71,7 @@ public struct ScanProgressView: View {
                             .foregroundStyle(.secondary)
                         Text(formatElapsed(scanProgress.elapsedTime))
                             .font(.system(.body, design: .monospaced))
+                            .contentTransition(.numericText())
                     }
 
                     GridRow {
@@ -73,9 +79,11 @@ public struct ScanProgressView: View {
                             .foregroundStyle(.secondary)
                         Text(formatRate(scanProgress.filesPerSecond))
                             .font(.system(.body, design: .monospaced))
+                            .contentTransition(.numericText())
                     }
                 }
                 .font(.callout)
+                .animation(.linear(duration: 0.25), value: scanProgress.filesScanned)
 
                 // Current path being scanned.
                 if !scanProgress.currentPath.isEmpty {

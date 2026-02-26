@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // MARK: - Full Disk Access Detection
 
@@ -61,7 +62,7 @@ private let kOffsetFileData: Int = 64  // 56 + sizeof(uint64)=8
 // MARK: - Inode Key
 
 /// Proper composite key for (dev, inode) pairs — avoids XOR hash collisions.
-private struct InodeKey: Hashable {
+private struct InodeKey: Hashable, Sendable {
     let dev: Int32
     let inode: UInt64
 }
@@ -69,16 +70,13 @@ private struct InodeKey: Hashable {
 // MARK: - Visited Directory Tracker
 
 /// Thread-safe set tracking visited (dev, inode) pairs to avoid firmlink/hardlink loops.
-private final class VisitedDirectories: @unchecked Sendable {
-    private var seen = Set<InodeKey>()
-    private let lock = NSLock()
+private final class VisitedDirectories: Sendable {
+    private let seen = Mutex(Set<InodeKey>())
 
     /// Returns true if this is the first time seeing this (dev, inode) pair.
     func insert(dev: Int32, inode: UInt64) -> Bool {
         let key = InodeKey(dev: dev, inode: inode)
-        lock.lock()
-        defer { lock.unlock() }
-        return seen.insert(key).inserted
+        return seen.withLock { $0.insert(key).inserted }
     }
 }
 
@@ -106,22 +104,17 @@ private func parseFileSizes(from entry: UnsafeRawPointer) -> (dataLength: UInt64
 
 public final class FileScanner {
 
-    private var cancelled = false
-    private let cancelLock = NSLock()
+    private let cancelState = Mutex(false)
 
     public init() {}
 
     /// Cancel an in-progress scan. Safe to call from any thread.
     public func cancel() {
-        cancelLock.lock()
-        cancelled = true
-        cancelLock.unlock()
+        cancelState.withLock { $0 = true }
     }
 
     private var isCancelled: Bool {
-        cancelLock.lock()
-        defer { cancelLock.unlock() }
-        return cancelled
+        cancelState.withLock { $0 }
     }
 
     // MARK: - Public API
@@ -185,15 +178,15 @@ public final class FileScanner {
         queue.qualityOfService = .userInitiated
 
         // Throttle progress updates
-        let lastProgressUpdate = NSLock()
-        var lastUpdateTime: CFAbsoluteTime = 0
+        let progressThrottle = Mutex(CFAbsoluteTime(0))
 
         func maybeUpdateProgress(currentDir: String) {
             let now = CFAbsoluteTimeGetCurrent()
-            lastProgressUpdate.lock()
-            let shouldUpdate = (now - lastUpdateTime) >= 0.25
-            if shouldUpdate { lastUpdateTime = now }
-            lastProgressUpdate.unlock()
+            let shouldUpdate = progressThrottle.withLock { lastUpdate -> Bool in
+                let should = (now - lastUpdate) >= 0.25
+                if should { lastUpdate = now }
+                return should
+            }
 
             if shouldUpdate {
                 let elapsed = now - startTime
@@ -228,7 +221,9 @@ public final class FileScanner {
 
         enqueueDirectory(dirPath: path, parentIndex: 0)
 
-        // Wait for all operations to finish
+        // Wait for all operations to finish.
+        // Uses GCD (not Task.detached) because group.wait() is blocking
+        // and must not occupy a cooperative thread pool thread.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 group.wait()

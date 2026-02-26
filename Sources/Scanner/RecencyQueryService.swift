@@ -17,11 +17,9 @@ public struct RecencyQueryService {
     /// Query Spotlight for recency factors. Returns a `[Float]` parallel array
     /// (same length as `tree.nodesSnapshot()`). Safe to call from any async context.
     public func queryRecency(tree: FileTree) async -> [Float] {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: Self.runFullQuery(tree: tree))
-            }
-        }
+        await Task.detached(priority: .utility) {
+            Self.runFullQuery(tree: tree)
+        }.value
     }
 
     // MARK: - Private
