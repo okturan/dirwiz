@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import DirWizLib
 
 /// Root view with NavigationSplitView layout.
@@ -8,6 +9,9 @@ struct ContentView: View {
     @State private var showLegend: Bool = true
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var splitRatio: CGFloat = 0.4
+    @State private var exportAlertTitle: String = ""
+    @State private var exportAlertMessage: String = ""
+    @State private var showExportAlert: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,6 +78,14 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .automatic) {
+                    Button { exportReport() } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .help("Export Report as CSV (Cmd+Opt+E)")
+                    .keyboardShortcut("e", modifiers: [.command, .option])
+                    .disabled(appState.fileTree == nil)
+                }
+                ToolbarItem(placement: .automatic) {
                     Toggle(isOn: $showLegend) {
                         Image(systemName: "sidebar.trailing")
                     }
@@ -83,6 +95,11 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .searchRequested)) { _ in
                 appState.activeTab = .search
+            }
+            .alert(exportAlertTitle, isPresented: $showExportAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(exportAlertMessage)
             }
 
             Divider()
@@ -218,6 +235,8 @@ struct ContentView: View {
                                     )
                                 case .duplicates:
                                     DuplicateFilesView(appState: appState)
+                                case .hardlinks:
+                                    HardlinkView(appState: appState)
                                 case .search:
                                     SearchView(appState: appState)
                                 }
@@ -390,5 +409,96 @@ struct ContentView: View {
 
     private func cancelScan() {
         appState.activeScanner?.cancel()
+    }
+
+    // MARK: - Export Report
+
+    private func exportReport() {
+        guard let tree = appState.fileTree else { return }
+
+        let panel = NSSavePanel()
+        panel.title = "Export Report"
+        panel.nameFieldStringValue = "DirWiz Report.csv"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let rootIndex = appState.navigation.treemapRootIndex
+        let csv = buildCSV(tree: tree, rootIndex: rootIndex)
+
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            exportAlertTitle = "Export Successful"
+            exportAlertMessage = "Report saved to \(url.lastPathComponent)."
+        } catch {
+            exportAlertTitle = "Export Failed"
+            exportAlertMessage = error.localizedDescription
+        }
+        showExportAlert = true
+    }
+
+    /// Walk the tree depth-first from `rootIndex`, collecting the top 500 rows sorted
+    /// largest-first (children already pre-sorted by sortAllChildren()).
+    private func buildCSV(tree: FileTree, rootIndex: UInt32) -> String {
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+
+        struct StackEntry { var index: UInt32; var depth: Int }
+        var stack: [StackEntry] = [StackEntry(index: rootIndex, depth: 0)]
+        var lines: [String] = ["Path,Type,Size (bytes),Size (human),Extension,Depth"]
+        lines.reserveCapacity(502)
+
+        while !stack.isEmpty && lines.count <= 500 {
+            let entry = stack.removeLast()
+            let i = Int(entry.index)
+            guard i < nodes.count else { continue }
+            let node = nodes[i]
+
+            let path = FileTree.pathFromSnapshot(
+                at: entry.index, nodes: nodes, stringPool: stringPool, rootPath: rootPath
+            )
+            let ext: String
+            if node.isDirectory {
+                ext = ""
+            } else {
+                let nameStart = Int(node.nameOffset)
+                let nameEnd = min(nameStart + Int(node.nameLength), stringPool.count)
+                if let name = String(data: stringPool[nameStart..<nameEnd], encoding: .utf8),
+                   let dot = name.range(of: ".", options: .backwards),
+                   dot.lowerBound != name.startIndex {
+                    ext = String(name[name.index(after: dot.lowerBound)...])
+                } else {
+                    ext = ""
+                }
+            }
+
+            lines.append([
+                csvQuote(path),
+                node.isDirectory ? "directory" : "file",
+                "\(node.fileSize)",
+                csvQuote(SizeFormatter.shared.format(node.fileSize)),
+                csvQuote(ext),
+                "\(entry.depth)",
+            ].joined(separator: ","))
+
+            guard node.isDirectory, node.firstChildIndex != FileNode.invalid,
+                  node.childCount > 0 else { continue }
+            let start = Int(node.firstChildIndex)
+            let end = min(start + Int(node.childCount), nodes.count)
+            guard start < end else { continue }
+            // Push in reverse so largest (first child) comes off stack first.
+            for ci in stride(from: end - 1, through: start, by: -1) {
+                stack.append(StackEntry(index: UInt32(ci), depth: entry.depth + 1))
+            }
+        }
+
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private func csvQuote(_ value: String) -> String {
+        guard value.contains(",") || value.contains("\"") || value.contains("\n") else {
+            return value
+        }
+        return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 }

@@ -29,6 +29,11 @@ public final class AppState {
     /// Duplicate scan state (groups, checked paths, progress).
     public var duplicate = DuplicateState()
 
+    /// Hardlink groups (populated after hardlink scan).
+    public var hardlinkGroups: [HardlinkGroup] = []
+    public var hardlinkExpandedGroups: Set<UUID> = []
+    public var isHardlinkScanRunning: Bool = false
+
     /// Temporal diff overlay state (snapshot, kinds, strengths, generation).
     public var temporalDiff = TemporalDiffState()
 
@@ -91,6 +96,9 @@ public final class AppState {
         search.reset()
         duplicate.reset()
         temporalDiff.reset()
+        hardlinkGroups = []
+        hardlinkExpandedGroups = []
+        isHardlinkScanRunning = false
         selectedNodeIndex = nil
         fileTypeStats = []
         extensionPalette = ExtensionPalette()
@@ -116,6 +124,7 @@ public enum DetailTab: String, CaseIterable, Identifiable {
     case treeView = "Tree View"
     case extensions = "Extensions"
     case duplicates = "Duplicates"
+    case hardlinks = "Hardlinks"
     case search = "Search"
 
     public var id: String { rawValue }

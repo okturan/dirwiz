@@ -13,6 +13,28 @@ struct TreemapColorResolver {
     let temporalDiffStrengths: [Float]
     let isTemporalDiffEnabled: Bool
 
+    init(
+        palette: ExtensionPalette = ExtensionPalette(),
+        recencyFactors: [Float] = [],
+        isRecencyOverlayEnabled: Bool = false,
+        temporalDiffKinds: [UInt8] = [],
+        temporalDiffStrengths: [Float] = [],
+        isTemporalDiffEnabled: Bool = false
+    ) {
+        self.palette = palette
+        self.recencyFactors = recencyFactors
+        self.isRecencyOverlayEnabled = isRecencyOverlayEnabled
+        self.temporalDiffKinds = temporalDiffKinds
+        self.temporalDiffStrengths = temporalDiffStrengths
+        self.isTemporalDiffEnabled = isTemporalDiffEnabled
+    }
+
+    /// Convenience overload for tests and one-off calls — allocates a local scratch dict.
+    func resolveColor(for rect: TreemapRect, nodes: [FileNode]) -> SIMD4<Float> {
+        var scratch: [UInt32: UInt64] = [:]
+        return resolveColor(for: rect, nodes: nodes, scratchSizeByExt: &scratch)
+    }
+
     /// Compute the final RGBA color for one treemap rect.
     ///
     /// - Parameters:
@@ -90,7 +112,7 @@ struct TreemapColorResolver {
     // MARK: - Internal Helpers
 
     /// Depth-based directory base color using subtle hue shifts.
-    private func directoryBaseColor(depth: Int) -> SIMD3<Float> {
+    func directoryBaseColor(depth: Int) -> SIMD3<Float> {
         let h: Float  // hue in degrees
         let s: Float  // saturation
         let b: Float  // brightness
