@@ -273,9 +273,6 @@ public struct SquarifyLayout {
 
         // Layout the finalized row within the rect.
         let (rowRect, remainingRect) = layoutRow(
-            children: children,
-            from: startIndex,
-            to: rowEnd,
             rowArea: rowArea,
             rect: rect
         )
@@ -343,9 +340,6 @@ public struct SquarifyLayout {
 
     /// Split the rect into the row region and the remaining region.
     private static func layoutRow(
-        children: [(index: UInt32, area: Float)],
-        from: Int,
-        to: Int,
         rowArea: Float,
         rect: LayoutRect
     ) -> (row: LayoutRect, remaining: LayoutRect) {

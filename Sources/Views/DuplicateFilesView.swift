@@ -229,7 +229,7 @@ private struct DuplicateGroupRow: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.orange)
 
-                    Text("\(group.count) copies")
+                    Text("\(group.paths.count) copies")
                         .font(.system(size: 12, weight: .medium))
 
                     Spacer()
@@ -262,7 +262,7 @@ private struct DuplicateGroupRow: View {
                                         if isChecked {
                                             // Ensure at least one copy remains unchecked.
                                             let checkedInGroup = group.paths.filter { checkedPaths.contains($0) }.count
-                                            if checkedInGroup < group.count - 1 {
+                                            if checkedInGroup < group.paths.count - 1 {
                                                 checkedPaths.insert(path)
                                             }
                                         } else {

@@ -124,10 +124,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         coordinator.onHover = onHover
         coordinator.onLayoutUpdate = onLayoutUpdate
 
-        // User navigation gets immediate layout; scan updates are throttled.
-        if treeChanged || rootChanged {
-            coordinator.forceLayoutInvalidation()
-        } else if revisionChanged {
+        if treeChanged || rootChanged || revisionChanged {
             coordinator.invalidateLayout()
         }
 

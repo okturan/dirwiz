@@ -384,7 +384,7 @@ public struct TreeTableView: View {
     private func collapseOrGoParent(tree: FileTree, proxy: ScrollViewProxy) {
         guard let selected = appState.selectedNodeIndex else { return }
         if expandedFolders.contains(selected) {
-            _ = withAnimation(.easeInOut(duration: 0.12)) {
+            withAnimation(.easeInOut(duration: 0.12)) {
                 expandedFolders.remove(selected)
             }
             return
@@ -406,7 +406,7 @@ public struct TreeTableView: View {
         guard i < nodes.count, nodes[i].isDirectory else { return }
         guard !nodes[i].isBundle else { return }
         if !expandedFolders.contains(selected) {
-            _ = withAnimation(.easeInOut(duration: 0.12)) {
+            withAnimation(.easeInOut(duration: 0.12)) {
                 expandedFolders.insert(selected)
             }
         } else {

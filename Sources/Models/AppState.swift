@@ -237,6 +237,4 @@ public struct DuplicateGroup: Identifiable, Sendable {
     public var wastedSpace: UInt64 {
         fileSize * UInt64(max(0, paths.count - 1))
     }
-
-    public var count: Int { paths.count }
 }

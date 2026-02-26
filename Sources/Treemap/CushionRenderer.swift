@@ -196,14 +196,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         pendingLayoutTask = task
     }
 
-    /// Force a layout recompute on next draw (navigation, root change).
-    func forceLayoutInvalidation() {
-        pendingLayoutTask?.cancel()
-        pendingLayoutTask = nil
-        currentViewportSize = .zero
-    }
-
-    /// Soft layout invalidation (scan revision change).
     func invalidateLayout() {
         pendingLayoutTask?.cancel()
         pendingLayoutTask = nil
