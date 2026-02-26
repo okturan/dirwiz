@@ -179,7 +179,9 @@ public struct DuplicateFilesView: View {
             let finder = DuplicateFinder()
             let groups = await finder.findDuplicates(in: tree) { processed, total in
                 Task { @MainActor in
-                    appState.duplicateProgress = (processed, total)
+                    // Ensure progress only goes up (tasks complete out of order).
+                    let clamped = max(appState.duplicateProgress.processed, processed)
+                    appState.duplicateProgress = (clamped, total)
                 }
             }
             await MainActor.run {

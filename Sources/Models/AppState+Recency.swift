@@ -19,8 +19,10 @@ extension AppState {
         recencyToken &+= 1
         let token = recencyToken
         let service = RecencyQueryService()
-        Task {
+        recencyTask = Task {
             let factors = await service.queryRecency(tree: tree)
+            // Don't apply results if cancelled (superseded scan).
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 self.applyRecencyFactors(factors, token: token)
             }

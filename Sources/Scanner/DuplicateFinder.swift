@@ -63,31 +63,39 @@ public final class DuplicateFinder {
         // ---------------------------------------------------------------
         let processedCount = Mutex(0)
 
-        // Collect partial-hash groups using TaskGroup for concurrency
+        // Collect partial-hash groups using TaskGroup for concurrency.
+        // Batch small size groups into chunks to avoid spawning one task per group
+        // (e.g., 50K groups of 2 files each → 50K tasks). Each task opens files
+        // sequentially, so the concurrent FD count is bounded by the cooperative
+        // thread pool size (~CPU count), well within OPEN_MAX.
+        let maxGroupsPerTask = 64
         let partialGroups: [PartialHashKey: [UInt32]] = await withTaskGroup(
             of: [(PartialHashKey, UInt32)].self,
             returning: [PartialHashKey: [UInt32]].self
         ) { group in
-            // Process each size group in parallel
-            for sizeGroup in candidateGroups {
-                let fileSize = snapshot[Int(sizeGroup[0])].fileSize
+            // Batch size groups into chunks to reduce task overhead
+            for chunkStart in stride(from: 0, to: candidateGroups.count, by: maxGroupsPerTask) {
+                let chunkEnd = min(chunkStart + maxGroupsPerTask, candidateGroups.count)
+                let chunk = candidateGroups[chunkStart..<chunkEnd]
                 group.addTask {
                     var results: [(PartialHashKey, UInt32)] = []
-                    for nodeIndex in sizeGroup {
-                        let hash = tree.withCPath(at: nodeIndex) { cPath in
-                            self.partialHash(cPath: cPath, fileSize: fileSize)
-                        }
-                        if let hash {
-                            let key = PartialHashKey(size: fileSize, hash: hash)
-                            results.append((key, nodeIndex))
-                        }
-                        // Update progress
-                        let current = processedCount.withLock { state -> Int in
-                            state += 1
-                            return state
-                        }
-                        if current % 500 == 0 {
-                            progress?(current, totalCandidates)
+                    for sizeGroup in chunk {
+                        let fileSize = snapshot[Int(sizeGroup[0])].fileSize
+                        for nodeIndex in sizeGroup {
+                            let hash = tree.withCPath(at: nodeIndex) { cPath in
+                                self.partialHash(cPath: cPath, fileSize: fileSize)
+                            }
+                            if let hash {
+                                let key = PartialHashKey(size: fileSize, hash: hash)
+                                results.append((key, nodeIndex))
+                            }
+                            let current = processedCount.withLock { state -> Int in
+                                state += 1
+                                return state
+                            }
+                            if current % 500 == 0 {
+                                progress?(current, totalCandidates)
+                            }
                         }
                     }
                     return results
@@ -115,20 +123,25 @@ public final class DuplicateFinder {
         // ---------------------------------------------------------------
         // Pass 3: Full-file hash for remaining candidates
         // ---------------------------------------------------------------
+        let partialMatchArray = Array(partialMatches)
         let fullGroups: [FullHashKey: [UInt32]] = await withTaskGroup(
             of: [(FullHashKey, UInt32)].self,
             returning: [FullHashKey: [UInt32]].self
         ) { group in
-            for (partialKey, indices) in partialMatches {
+            for chunkStart in stride(from: 0, to: partialMatchArray.count, by: maxGroupsPerTask) {
+                let chunkEnd = min(chunkStart + maxGroupsPerTask, partialMatchArray.count)
+                let chunk = partialMatchArray[chunkStart..<chunkEnd]
                 group.addTask {
                     var results: [(FullHashKey, UInt32)] = []
-                    for nodeIndex in indices {
-                        let digest = tree.withCPath(at: nodeIndex) { cPath in
-                            self.fullFileHash(cPath: cPath)
-                        }
-                        if let digest {
-                            let key = FullHashKey(size: partialKey.size, lo: digest.lo, hi: digest.hi)
-                            results.append((key, nodeIndex))
+                    for (partialKey, indices) in chunk {
+                        for nodeIndex in indices {
+                            let digest = tree.withCPath(at: nodeIndex) { cPath in
+                                self.fullFileHash(cPath: cPath)
+                            }
+                            if let digest {
+                                let key = FullHashKey(size: partialKey.size, lo: digest.lo, hi: digest.hi)
+                                results.append((key, nodeIndex))
+                            }
                         }
                     }
                     return results

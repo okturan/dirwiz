@@ -16,6 +16,7 @@ public struct RecencyQueryService {
 
     /// Query Spotlight for recency factors. Returns a `[Float]` parallel array
     /// (same length as `tree.nodesSnapshot()`). Safe to call from any async context.
+    /// Checks `Task.isCancelled` at key points to bail early on superseded scans.
     public func queryRecency(tree: FileTree) async -> [Float] {
         await Task.detached(priority: .utility) {
             Self.runFullQuery(tree: tree)
@@ -39,6 +40,9 @@ public struct RecencyQueryService {
             let p = FileTree.pathFromSnapshot(at: UInt32(i), nodes: nodes, stringPool: stringPool, rootPath: rootPath)
             pathToIndex[p.precomposedStringWithCanonicalMapping] = i
         }
+
+        // Bail early if the scan was superseded while we built the path map.
+        guard !Task.isCancelled else { return Array(repeating: Float(1), count: nodes.count) }
 
         let nowSeconds = Date().timeIntervalSince1970
         let recentCutoff = nowSeconds - 30.0 * 86_400    // 30 days

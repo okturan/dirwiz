@@ -27,7 +27,7 @@ public final class ScanProgress: @unchecked Sendable {
     public var estimatedTotalItems: Int = 0
     public var scannedAllocatedBytes: UInt64 = 0
 
-    /// Directories that could not be read (permission denied).
+    /// Directories that could not be read (permission denied or I/O error).
     public var skippedDirectories: Int = 0
 
     // MARK: - Hot counters (written from scanner threads, NOT observable)

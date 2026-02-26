@@ -97,6 +97,7 @@ public final class FileTree: @unchecked Sendable {
 
     /// Set the root path. Must be called exactly once, before concurrent access begins.
     public func setRootPath(_ path: String) {
+        precondition(nodes.isEmpty, "setRootPath must be called before any nodes are added")
         rootPath = path
     }
 
@@ -282,11 +283,13 @@ public final class FileTree: @unchecked Sendable {
             n.nameOffset = UInt32(stringPool.count)
             n.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
             stringPool.append(contentsOf: utf8)
+            // Use Unicode-aware lowercasing so that Ü→ü, É→é, etc. are searchable.
+            // The lowercased name may have a different UTF-8 length than the original
+            // (e.g., ß → ss), so store its own offset+length in lowercaseNameEntries.
             let lcOffset = UInt32(lowercaseNamePool.count)
-            for byte in utf8 {
-                lowercaseNamePool.append((byte >= 0x41 && byte <= 0x5A) ? (byte | 0x20) : byte)
-            }
-            lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(utf8.count, Int(UInt16.max)))))
+            let lcUTF8 = Array(name.lowercased().utf8)
+            lowercaseNamePool.append(contentsOf: lcUTF8)
+            lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
             nodes.append(n)
             return index
         }
@@ -315,10 +318,9 @@ public final class FileTree: @unchecked Sendable {
                 node.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
                 stringPool.append(contentsOf: utf8)
                 let lcOffset = UInt32(lowercaseNamePool.count)
-                for byte in utf8 {
-                    lowercaseNamePool.append((byte >= 0x41 && byte <= 0x5A) ? (byte | 0x20) : byte)
-                }
-                lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(utf8.count, Int(UInt16.max)))))
+                let lcUTF8 = Array(childName.lowercased().utf8)
+                lowercaseNamePool.append(contentsOf: lcUTF8)
+                lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
                 nodes.append(node)
             }
             nodes[p].firstChildIndex = firstIndex

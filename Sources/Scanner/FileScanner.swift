@@ -282,9 +282,9 @@ public final class FileScanner {
         // Open directory — O_NOFOLLOW prevents following symlinks
         let fd = open(dirPath, O_RDONLY | O_NOFOLLOW)
         guard fd >= 0 else {
-            if errno == EACCES || errno == EPERM {
-                progress.incrementSkippedDirectories()
-            }
+            // Track all failures that cause us to skip a directory (permission denied,
+            // I/O errors, too many open files, etc.) so the user knows results are incomplete.
+            progress.incrementSkippedDirectories()
             return
         }
         defer { close(fd) }
@@ -338,7 +338,11 @@ public final class FileScanner {
                 let isDir = (objType == VDIR.rawValue)
                 let isSymlink = (objType == VLNK.rawValue)
 
-                // Skip symlinks entirely — they cause double-counting and loops
+                // Skip symlinks entirely — following them causes double-counting (the target
+                // is already counted at its real location) and potential infinite loops.
+                // Symlinks themselves use negligible disk space (a few bytes for the target path).
+                // For a disk space analyzer, this is the correct behavior: the user sees where
+                // the actual bytes live, not where aliases point.
                 guard !isSymlink else {
                     entryPtr = entryPtr.advanced(by: entryLength)
                     continue
