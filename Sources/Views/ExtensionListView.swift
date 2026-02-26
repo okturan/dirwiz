@@ -130,6 +130,7 @@ public struct ExtensionListView: View {
                 }
             }
             .frame(width: width, alignment: alignment)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

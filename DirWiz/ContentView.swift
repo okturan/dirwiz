@@ -306,6 +306,7 @@ struct ContentView: View {
                         .font(.system(size: 12, weight: appState.activeTab == tab ? .semibold : .regular))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                         .background(
                             appState.activeTab == tab
                                 ? Color.accentColor.opacity(0.12)

@@ -139,6 +139,7 @@ public struct TreeTableView: View {
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 20, height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {
@@ -241,6 +242,7 @@ public struct TreeTableView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: alignment)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .frame(minWidth: minWidth)
