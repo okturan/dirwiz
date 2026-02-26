@@ -1,5 +1,4 @@
 import Quartz
-import AppKit
 
 /// Hosts the QLPreviewPanel data source / controller for the application.
 /// Stored on AppState so any view can call openQuickLook() / closeQuickLook().

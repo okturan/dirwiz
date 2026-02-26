@@ -135,15 +135,6 @@ public final class FileTree: @unchecked Sendable {
         return String(data: stringPool[start..<end], encoding: .utf8) ?? ""
     }
 
-    public func name(of node: FileNode) -> String {
-        lock.lock()
-        defer { lock.unlock() }
-        let start = Int(node.nameOffset)
-        let end = start + Int(node.nameLength)
-        guard end <= stringPool.count else { return "" }
-        return String(data: stringPool[start..<end], encoding: .utf8) ?? ""
-    }
-
     /// Build full path for a node by walking up the parent chain.
     public func path(at index: UInt32) -> String {
         lock.lock()
@@ -178,20 +169,6 @@ public final class FileTree: @unchecked Sendable {
         return start..<end
     }
 
-    /// Get child indices sorted by size descending (for treemap layout).
-    public func childrenSortedBySize(of index: UInt32) -> [UInt32] {
-        lock.lock()
-        defer { lock.unlock() }
-        let i = Int(index)
-        guard i < nodes.count else { return [] }
-        let node = nodes[i]
-        guard node.firstChildIndex != FileNode.invalid else { return [] }
-        let start = Int(node.firstChildIndex)
-        let end = min(start + Int(node.childCount), nodes.count)
-        guard start < end else { return [] }
-        return (start..<end).map { UInt32($0) }
-            .sorted { nodes[Int($0)].fileSize > nodes[Int($1)].fileSize }
-    }
 
     // MARK: - Thread-safe Mutation (used during scanning)
 

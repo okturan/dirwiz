@@ -18,7 +18,6 @@ public final class ScanProgress: @unchecked Sendable {
     public var scanComplete: Bool = false
     public var error: String?
     public var estimatedTotalItems: Int = 0
-    public var estimatedTotalBytes: UInt64 = 0
     public var scannedAllocatedBytes: UInt64 = 0
 
     // MARK: - Hot counters (written from scanner threads, NOT observable)
@@ -76,7 +75,6 @@ public final class ScanProgress: @unchecked Sendable {
         scanComplete = false
         error = nil
         estimatedTotalItems = 0
-        estimatedTotalBytes = 0
         scannedAllocatedBytes = 0
         treeLayoutRevision = 0
     }

@@ -306,7 +306,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                         case .grown:              tint = SIMD3(0.20, 0.55, 0.95)
                         case .shrunk:             tint = SIMD3(0.95, 0.72, 0.20)
                         case .deletedDescendants: tint = SIMD3(0.90, 0.25, 0.25)
-                        case .none:               tint = SIMD3(0, 0, 0)
+                        case .none:               tint = .zero
                         }
                         let t = 0.25 + 0.45 * strength
                         baseColor.x += (tint.x - baseColor.x) * t

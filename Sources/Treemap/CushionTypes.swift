@@ -1,5 +1,4 @@
 import Foundation
-import MetalKit
 
 // MARK: - GPU Data Structures
 

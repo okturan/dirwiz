@@ -31,9 +31,6 @@ public final class AppState {
     /// Active tab in detail area.
     public var activeTab: DetailTab = .treeView
 
-    /// Extension size stats computed after scan (per-extension-hash).
-    public var extensionStats: [ExtensionStat] = []
-
     /// Per-extension-name stats for the Extensions tab (individual file types).
     public var fileTypeStats: [FileTypeStat] = []
 
@@ -137,7 +134,6 @@ public final class AppState {
         treemapRootIndex = 0
         treemapPath = [0]
         selectedNodeIndex = nil
-        extensionStats = []
         fileTypeStats = []
         extensionPalette = ExtensionPalette()
         duplicateGroups = []
@@ -210,15 +206,6 @@ public struct VolumeInfo: Identifiable, Sendable {
         self.availableCapacity = available
         self.usedCapacity = total > available ? total - available : 0
     }
-}
-
-public struct ExtensionStat: Identifiable, Sendable {
-    public let id = UUID()
-    public let extensionHash: UInt32
-    public let category: FileCategory
-    public let totalSize: UInt64
-    public let fileCount: Int
-    public let percentage: Double
 }
 
 /// Per-extension-name stat for the file types list.

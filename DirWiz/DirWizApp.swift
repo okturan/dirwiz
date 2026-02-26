@@ -38,14 +38,6 @@ struct DirWizApp: App {
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1200, height: 800)
         .commands {
-            // File menu
-            CommandGroup(after: .newItem) {
-                Button("Scan Volume...") {
-                    NotificationCenter.default.post(name: .scanVolumeRequested, object: nil)
-                }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
-            }
-
             // Edit menu: Cmd+F -> Find
             CommandGroup(after: .textEditing) {
                 Button("Find...") {
@@ -54,13 +46,6 @@ struct DirWizApp: App {
                 .keyboardShortcut("f", modifiers: .command)
             }
 
-            // View menu
-            CommandGroup(after: .toolbar) {
-                Button("Toggle Legend") {
-                    NotificationCenter.default.post(name: .toggleLegendRequested, object: nil)
-                }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
-            }
         }
     }
 
@@ -73,7 +58,5 @@ struct DirWizApp: App {
 // MARK: - Notification Names
 
 extension Notification.Name {
-    static let scanVolumeRequested = Notification.Name("scanVolumeRequested")
-    static let toggleLegendRequested = Notification.Name("toggleLegendRequested")
     static let searchRequested = Notification.Name("searchRequested")
 }

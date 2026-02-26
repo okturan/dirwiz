@@ -30,31 +30,12 @@ public enum FileCategory: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    public var color: Color {
-        let c = rgb
-        return Color(red: c.r, green: c.g, blue: c.b)
-    }
-
     /// SIMD4 color for Metal rendering.
     public var simdColor: SIMD4<Float> {
         let c = rgb
         return SIMD4(Float(c.r), Float(c.g), Float(c.b), 1.0)
     }
 
-    public var fileTypeDescription: String {
-        switch self {
-        case .documents:    return "Documents & Text"
-        case .images:       return "Images & Graphics"
-        case .video:        return "Video Files"
-        case .audio:        return "Audio & Music"
-        case .code:         return "Source Code"
-        case .archives:     return "Archives & Compressed"
-        case .applications: return "Applications & Bundles"
-        case .system:       return "System & Config"
-        case .caches:       return "Cache & Temp Files"
-        case .other:        return "Other Files"
-        }
-    }
 }
 
 /// Maps file extensions to categories.
@@ -138,15 +119,6 @@ public struct ExtensionColorMap: Sendable {
         extensionToCategory[ext.lowercased()] ?? .other
     }
 
-    public func color(forHash hash: UInt32) -> SIMD4<Float> {
-        category(forHash: hash).simdColor
-    }
-
-    /// Get all extensions grouped by category, sorted by category.
-    public var extensionsByCategory: [(category: FileCategory, extensions: [String])] {
-        Self.extensionMap.map { (category: $0.key, extensions: $0.value) }
-            .sorted { $0.category.rawValue < $1.category.rawValue }
-    }
 }
 
 // MARK: - Extension Palette (WinDirStat-style)
