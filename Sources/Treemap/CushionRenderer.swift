@@ -49,6 +49,9 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     var instanceBufferDirty: Bool = true
     private var lastSelectedNodeIndex: UInt32? = nil
 
+    /// Maps nodeIndex -> visible instance index for O(1) hover lookup.
+    private var nodeToInstanceIndex: [UInt32: Int32] = [:]
+
     /// Callbacks for interaction.
     var onClick: ((UInt32) -> Void)?
     var onDoubleClick: ((UInt32) -> Void)?
@@ -185,6 +188,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             )
             await MainActor.run { [weak self] in
                 guard let self, !Task.isCancelled else { return }
+                guard self.currentRootIndex == rootIndex else { return }
                 self.cachedLayout = layout
                 self.cachedSnapshot = snapshot
                 self.spatialGrid = grid
@@ -323,6 +327,18 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             writeIdx += 1
         }
         instanceCount = writeIdx
+
+        // Rebuild O(1) hover lookup: nodeIndex -> visible instance index.
+        var lookup: [UInt32: Int32] = [:]
+        lookup.reserveCapacity(writeIdx)
+        var idx: Int32 = 0
+        for i in 0..<layoutCount {
+            let r = cachedLayout[i]
+            guard r.width >= 0.5, r.height >= 0.5 else { continue }
+            lookup[r.nodeIndex] = idx
+            idx += 1
+        }
+        nodeToInstanceIndex = lookup
     }
 
     /// Depth-based directory base color using subtle hue shifts.
@@ -358,7 +374,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// Dominant extension among direct file children (by bytes). Uses snapshot array directly.
-    private func dominantDirectFileExtensionHash(in directoryIndex: UInt32, nodes: [FileNode]) -> UInt16? {
+    private func dominantDirectFileExtensionHash(in directoryIndex: UInt32, nodes: [FileNode]) -> UInt32? {
         let i = Int(directoryIndex)
         guard i < nodes.count else { return nil }
         let node = nodes[i]
@@ -367,7 +383,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         let end = min(start + Int(node.childCount), nodes.count)
         guard start < end else { return nil }
 
-        var sizeByExt: [UInt16: UInt64] = [:]
+        var sizeByExt: [UInt32: UInt64] = [:]
         for childIndex in start..<end {
             let child = nodes[childIndex]
             guard !child.isDirectory else { continue }
@@ -408,8 +424,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
 
         guard instanceCount > 0, let instanceBuffer = instanceBuffer else {
             // Draw a clear frame.
-            let commandBuffer = commandQueue.makeCommandBuffer()!
-            let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc)!
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
+                commandBuffer.commit()
+                return
+            }
             encoder.endEncoding()
             commandBuffer.present(drawable)
             commandBuffer.commit()
@@ -417,28 +436,18 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         }
 
         // Set up uniforms.
-        // Map hoveredNodeIndex to a visible instance index for the shader.
-        // With culling, instance indices differ from layout indices, so we walk
-        // the layout and count only visible rects to find the match.
+        // Map hoveredNodeIndex to a visible instance index for the shader via O(1) lookup.
         var hoveredInstance: Int32 = -1
         if let hovered = hoveredNodeIndex {
-            var visibleIdx: Int32 = 0
-            for i in 0..<cachedLayout.count {
-                let r = cachedLayout[i]
-                guard r.width >= 0.5, r.height >= 0.5 else { continue }
-                if r.nodeIndex == hovered {
-                    hoveredInstance = visibleIdx
-                    break
-                }
-                visibleIdx += 1
-            }
+            hoveredInstance = nodeToInstanceIndex[hovered] ?? -1
         }
 
+        let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
         var uniforms = CushionUniforms(
             viewportSize: SIMD2<Float>(Float(logicalSize.width), Float(logicalSize.height)),
             ambient: 0.25,
             padding1: 0,
-            lightDir: normalize(SIMD3<Float>(0.5, 0.5, 1.0)),
+            lightDir: SIMD4<Float>(ld.x, ld.y, ld.z, 0),
             hoveredIndex: hoveredInstance
         )
 
@@ -448,14 +457,18 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                 options: .storageModeShared
             )
         }
-        uniformBuffer!.contents().copyMemory(
+        guard let uniformBuffer else { return }
+        uniformBuffer.contents().copyMemory(
             from: &uniforms,
             byteCount: MemoryLayout<CushionUniforms>.stride
         )
 
         // Render.
-        let commandBuffer = commandQueue.makeCommandBuffer()!
-        let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc)!
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
+            commandBuffer.commit()
+            return
+        }
 
         encoder.setRenderPipelineState(pipelineState)
         encoder.setVertexBuffer(instanceBuffer, offset: 0, index: 0)

@@ -94,7 +94,10 @@ extension AppState {
     /// Rescan the selected volume from scratch (e.g., after trashing a file).
     public func rescanVolume() {
         guard let volumeURL = selectedVolume else { return }
+        // Cancel any in-progress scan (user-initiated or previous rescan).
+        activeScanner?.cancel()
         let scanner = FileScanner()
+        activeScanner = scanner
         let newTree = FileTree()
         fileTree = newTree
         resetForNewScan()
@@ -103,6 +106,7 @@ extension AppState {
             await scanner.scan(path: volumeURL.path, progress: scanProgress, tree: newTree)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                activeScanner = nil
                 setTreemapRoot(0, recordHistory: false)
                 computeExtensionStats()
             }

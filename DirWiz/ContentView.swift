@@ -6,7 +6,6 @@ struct ContentView: View {
     @Bindable var appState: AppState
 
     @State private var showLegend: Bool = true
-    @State private var activeScanner: FileScanner?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var splitRatio: CGFloat = 0.4
 
@@ -345,8 +344,10 @@ struct ContentView: View {
 
     private func startScan() {
         guard let volumeURL = appState.selectedVolume else { return }
+        // Cancel any existing scan (user may rescan without waiting).
+        appState.activeScanner?.cancel()
         let scanner = FileScanner()
-        activeScanner = scanner
+        appState.activeScanner = scanner
         let path = volumeURL.path
 
         // Create tree upfront so the UI can observe it growing during scan.
@@ -360,14 +361,14 @@ struct ContentView: View {
             await scanner.scan(path: path, progress: appState.scanProgress, tree: tree)
             await MainActor.run {
                 appState.scanDuration = CFAbsoluteTimeGetCurrent() - appState.scanStartTime
+                appState.activeScanner = nil
                 appState.setTreemapRoot(0, recordHistory: false)
                 appState.computeExtensionStats()
-                activeScanner = nil
             }
         }
     }
 
     private func cancelScan() {
-        activeScanner?.cancel()
+        appState.activeScanner?.cancel()
     }
 }

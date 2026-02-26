@@ -7,8 +7,8 @@ extension AppState {
     /// Build extension statistics from the file tree.
     public func computeExtensionStats() {
         guard let tree = fileTree else { return }
-        var sizeByHash: [UInt16: UInt64] = [:]
-        var countByHash: [UInt16: Int] = [:]
+        var sizeByHash: [UInt32: UInt64] = [:]
+        var countByHash: [UInt32: Int] = [:]
         var sizeByExt: [String: UInt64] = [:]
         var countByExt: [String: Int] = [:]
         let colorMap = ExtensionColorMap.shared
@@ -43,27 +43,17 @@ extension AppState {
         .sorted { $0.totalSize > $1.totalSize }
 
         // Per-extension-name stats (for file types list).
-        // Key by extensionHash (same value the scanner stores on each node) so that
-        // palette lookups in the treemap and the Extensions list use the same hash.
-        var sizeByExtHash: [UInt16: (name: String, size: UInt64, count: Int)] = [:]
-        for (ext, size) in sizeByExt {
+        // Key by extension name (collision-safe), then derive hash for palette lookups.
+        fileTypeStats = sizeByExt.map { ext, size in
             let hash = extensionHash(".\(ext)")  // matches scanner: hash(part after last dot)
-            if var e = sizeByExtHash[hash] {
-                e.size += size
-                e.count += countByExt[ext] ?? 0
-                sizeByExtHash[hash] = e
-            } else {
-                sizeByExtHash[hash] = (name: ext, size: size, count: countByExt[ext] ?? 0)
-            }
-        }
-        fileTypeStats = sizeByExtHash.map { hash, e in
-            FileTypeStat(
-                extensionName: e.name,
+            let count = countByExt[ext] ?? 0
+            return FileTypeStat(
+                extensionName: ext,
                 extensionHash: hash,
                 category: colorMap.category(forHash: hash),
-                totalSize: e.size,
-                fileCount: e.count,
-                percentage: totalSize > 0 ? Double(e.size) / Double(totalSize) : 0
+                totalSize: size,
+                fileCount: count,
+                percentage: totalSize > 0 ? Double(size) / Double(totalSize) : 0
             )
         }
         .sorted { $0.totalSize > $1.totalSize }

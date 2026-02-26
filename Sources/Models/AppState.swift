@@ -112,6 +112,10 @@ public final class AppState {
 
     // MARK: - Internal State (used by extensions in other files)
 
+    /// The currently active scanner. Set by both ContentView.startScan() and rescanVolume()
+    /// so the Cancel button always targets the right scanner.
+    @ObservationIgnored public var activeScanner: FileScanner?
+
     var backStack: [UInt32] = []
     var forwardStack: [UInt32] = []
 
@@ -210,7 +214,7 @@ public struct VolumeInfo: Identifiable, Sendable {
 
 public struct ExtensionStat: Identifiable, Sendable {
     public let id = UUID()
-    public let extensionHash: UInt16
+    public let extensionHash: UInt32
     public let category: FileCategory
     public let totalSize: UInt64
     public let fileCount: Int
@@ -221,7 +225,7 @@ public struct ExtensionStat: Identifiable, Sendable {
 public struct FileTypeStat: Identifiable, Sendable {
     public let id = UUID()
     public let extensionName: String
-    public let extensionHash: UInt16
+    public let extensionHash: UInt32
     public let category: FileCategory
     public let totalSize: UInt64
     public let fileCount: Int

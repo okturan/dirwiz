@@ -11,7 +11,14 @@ func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void)
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Move to Trash")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { action() }
+        if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window) { response in
+                if response == .alertFirstButtonReturn { action() }
+            }
+        } else {
+            // No key window available — skip confirmation for safety.
+            action()
+        }
     } else {
         action()
     }
@@ -166,7 +173,7 @@ public struct InteractiveTreemapView: View {
         ZStack(alignment: .topLeading) {
             CushionTreemapView(
                 fileTree: appState.fileTree,
-                treeRevision: appState.scanProgress.totalItems,
+                treeRevision: appState.scanProgress.treeLayoutRevision,
                 rootIndex: appState.treemapRootIndex,
                 selectedNodeIndex: appState.selectedNodeIndex,
                 extensionPalette: appState.extensionPalette,
@@ -246,7 +253,7 @@ public struct InteractiveTreemapView: View {
     private var textLabelOverlay: some View {
         let tree = appState.fileTree
         return ZStack(alignment: .topLeading) {
-            ForEach(Array(labelRects.enumerated()), id: \.element.nodeIndex) { _, rect in
+            ForEach(Array(labelRects.enumerated()), id: \.offset) { _, rect in
                 treemapLabel(for: rect, tree: tree)
             }
         }
@@ -300,6 +307,8 @@ public struct InteractiveTreemapView: View {
         let nodes = tree.nodesSnapshot()
         let currentRoot = appState.treemapRootIndex
 
+        guard Int(nodeIndex) < nodes.count else { return nil }
+
         // Walk up from the node's parent to find the child of currentRoot.
         var current = nodes[Int(nodeIndex)].parentIndex
         var child = nodeIndex
@@ -311,14 +320,17 @@ public struct InteractiveTreemapView: View {
         }
 
         // If we found the current root, the 'child' is the direct child to zoom into.
-        if current == currentRoot && nodes[Int(child)].isDirectory {
-            return child
+        if current == currentRoot {
+            guard Int(child) < nodes.count else { return nil }
+            if nodes[Int(child)].isDirectory { return child }
         }
 
         // Fallback: zoom into immediate parent.
+        guard Int(nodeIndex) < nodes.count else { return nil }
         let parent = nodes[Int(nodeIndex)].parentIndex
-        if parent != FileNode.invalid && nodes[Int(parent)].isDirectory {
-            return parent
+        if parent != FileNode.invalid {
+            guard Int(parent) < nodes.count else { return nil }
+            if nodes[Int(parent)].isDirectory { return parent }
         }
 
         return nil

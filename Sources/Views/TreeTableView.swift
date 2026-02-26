@@ -11,6 +11,8 @@ public struct TreeTableView: View {
     @State private var scrollGeneration: UInt64 = 0
     @State private var minSizeFilter: UInt64 = 0
     @FocusState private var isFocused: Bool
+    /// Cached visible items for keyboard navigation — avoids O(n) recompute on every keypress.
+    @State private var cachedItems: [TreeNodeItem] = []
 
     public init(appState: AppState) {
         self.appState = appState
@@ -69,6 +71,11 @@ public struct TreeTableView: View {
                     expandOrGoFirstChild(tree: tree, proxy: proxy)
                     return .handled
                 }
+                .onAppear { cachedItems = flattenedVisibleItems(tree: tree) }
+                .onChange(of: sortKey) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
+                .onChange(of: sortAscending) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
+                .onChange(of: minSizeFilter) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
+                .onChange(of: expandedFolders) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onKeyPress(.space) {
                     guard let sel = appState.selectedNodeIndex,
                           let tree = appState.fileTree else { return .ignored }
@@ -370,7 +377,7 @@ public struct TreeTableView: View {
     // MARK: - Keyboard Navigation
 
     private func moveSelection(by delta: Int, tree: FileTree, proxy: ScrollViewProxy) {
-        let items = flattenedVisibleItems(tree: tree)
+        let items = cachedItems.isEmpty ? flattenedVisibleItems(tree: tree) : cachedItems
         guard !items.isEmpty else { return }
         let currentIdx = items.firstIndex { $0.id == appState.selectedNodeIndex }
         let fromIdx = currentIdx ?? (delta > 0 ? -1 : items.count)
@@ -411,7 +418,7 @@ public struct TreeTableView: View {
                 _ = expandedFolders.insert(selected)
             }
         } else {
-            let items = flattenedVisibleItems(tree: tree)
+            let items = cachedItems.isEmpty ? flattenedVisibleItems(tree: tree) : cachedItems
             if let idx = items.firstIndex(where: { $0.id == selected }), idx + 1 < items.count {
                 let child = items[idx + 1]
                 appState.selectedNodeIndex = child.id
