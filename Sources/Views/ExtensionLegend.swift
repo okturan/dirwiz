@@ -55,11 +55,9 @@ private struct ExtensionRow: View {
                     .fill(entry.swiftUIColor)
                     .frame(width: 10, height: 10)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.extensionName == "Other" ? "Other" : ".\(entry.extensionName)")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .lineLimit(1)
-                }
+                Text(entry.extensionName == "Other" ? "Other" : ".\(entry.extensionName)")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .lineLimit(1)
 
                 Spacer()
 

@@ -43,15 +43,27 @@ extension AppState {
         .sorted { $0.totalSize > $1.totalSize }
 
         // Per-extension-name stats (for file types list).
-        fileTypeStats = sizeByExt.map { ext, size in
-            let hash = extensionHash("file.\(ext)")
-            return FileTypeStat(
-                extensionName: ext,
+        // Key by extensionHash (same value the scanner stores on each node) so that
+        // palette lookups in the treemap and the Extensions list use the same hash.
+        var sizeByExtHash: [UInt16: (name: String, size: UInt64, count: Int)] = [:]
+        for (ext, size) in sizeByExt {
+            let hash = extensionHash(".\(ext)")  // matches scanner: hash(part after last dot)
+            if var e = sizeByExtHash[hash] {
+                e.size += size
+                e.count += countByExt[ext] ?? 0
+                sizeByExtHash[hash] = e
+            } else {
+                sizeByExtHash[hash] = (name: ext, size: size, count: countByExt[ext] ?? 0)
+            }
+        }
+        fileTypeStats = sizeByExtHash.map { hash, e in
+            FileTypeStat(
+                extensionName: e.name,
                 extensionHash: hash,
                 category: colorMap.category(forHash: hash),
-                totalSize: size,
-                fileCount: countByExt[ext] ?? 0,
-                percentage: totalSize > 0 ? Double(size) / Double(totalSize) : 0
+                totalSize: e.size,
+                fileCount: e.count,
+                percentage: totalSize > 0 ? Double(e.size) / Double(totalSize) : 0
             )
         }
         .sorted { $0.totalSize > $1.totalSize }
@@ -148,10 +160,7 @@ extension AppState {
 
         for i in 0..<nodes.count {
             let node = nodes[i]
-            guard node.isDirectory else {
-                scores[i] = 0
-                continue
-            }
+            guard node.isDirectory else { continue }
 
             let sizeFactor: Double
             if i == 0 {

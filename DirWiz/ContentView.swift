@@ -264,11 +264,15 @@ struct ContentView: View {
             )
     }
 
+    private static let diffDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
     private func diffStatusBanner(snapshot: TemporalSnapshot) -> some View {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        let dateStr = formatter.string(from: snapshot.meta.createdAt)
+        let dateStr = Self.diffDateFormatter.string(from: snapshot.meta.createdAt)
         return HStack(spacing: 6) {
             Image(systemName: "timelapse")
                 .font(.system(size: 11))

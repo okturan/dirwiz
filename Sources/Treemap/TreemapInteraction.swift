@@ -2,17 +2,34 @@ import SwiftUI
 
 /// SwiftUI view that wraps the Metal treemap with interaction overlays.
 /// Provides breadcrumb navigation, hover tooltips, and context menus.
+/// Show a confirmation alert before trashing large items; call action() immediately for small ones.
+func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void) {
+    if size > 100_000_000 {
+        let alert = NSAlert()
+        alert.messageText = "Move \"\(name)\" to Trash?"
+        alert.informativeText = "This item is \(SizeFormatter.shared.format(size)). It will be moved to the Trash."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { action() }
+    } else {
+        action()
+    }
+}
+
 public struct InteractiveTreemapView: View {
     @Bindable var appState: AppState
 
     @State private var hoveredNodeIndex: UInt32?
     @State private var hoverPoint: CGPoint?
     @State private var labelRects: [TreemapRect] = []
-    @State private var layoutRects: [UInt32: CGRect] = [:]
+    @State private var layoutCache: [TreemapRect] = []
 
     private var selectedLayoutRect: CGRect? {
         guard let idx = appState.selectedNodeIndex else { return nil }
-        return layoutRects[idx]
+        guard let r = layoutCache.first(where: { $0.nodeIndex == idx }) else { return nil }
+        return CGRect(x: CGFloat(r.x), y: CGFloat(r.y),
+                      width: CGFloat(r.width), height: CGFloat(r.height))
     }
 
     /// Whether navigation (zoom) is allowed — disabled during scanning.
@@ -189,11 +206,7 @@ public struct InteractiveTreemapView: View {
                 },
                 onHover: { nodeIndex, point in
                     hoveredNodeIndex = nodeIndex
-                    if let point = point {
-                        hoverPoint = CGPoint(x: point.x, y: point.y)
-                    } else {
-                        hoverPoint = nil
-                    }
+                    hoverPoint = point
                 },
                 onLayoutUpdate: { rects in
                     labelRects = Array(
@@ -202,15 +215,7 @@ public struct InteractiveTreemapView: View {
                             .sorted { $0.width * $0.height > $1.width * $1.height }
                             .prefix(80)
                     )
-                    var dict = [UInt32: CGRect]()
-                    dict.reserveCapacity(rects.count)
-                    for r in rects {
-                        dict[r.nodeIndex] = CGRect(
-                            x: CGFloat(r.x), y: CGFloat(r.y),
-                            width: CGFloat(r.width), height: CGFloat(r.height)
-                        )
-                    }
-                    layoutRects = dict
+                    layoutCache = rects
                 }
             )
             .contextMenu {
@@ -399,22 +404,6 @@ public struct InteractiveTreemapView: View {
         return CGPoint(x: x, y: y)
     }
 
-    private func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void) {
-        if size > 100_000_000 {
-            let alert = NSAlert()
-            alert.messageText = "Move \"\(name)\" to Trash?"
-            alert.informativeText = "This item is \(SizeFormatter.shared.format(size)). It will be moved to the Trash."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Move to Trash")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn {
-                action()
-            }
-        } else {
-            action()
-        }
-    }
-
     // MARK: - Context Menu
 
     @ViewBuilder
@@ -437,21 +426,8 @@ public struct InteractiveTreemapView: View {
             Button("Move to Trash") {
                 let url = URL(fileURLWithPath: path)
                 confirmTrash(name: tree.name(at: nodeIndex), size: node.fileSize) {
-                    if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil,
-                       let volumeURL = appState.selectedVolume {
-                        let scanner = FileScanner()
-                        let scanPath = volumeURL.path
-                        let newTree = FileTree()
-                        appState.fileTree = newTree
-                        appState.resetForNewScan()
-                        appState.activeTab = .treeView
-                        Task {
-                            await scanner.scan(path: scanPath, progress: appState.scanProgress, tree: newTree)
-                            await MainActor.run {
-                                appState.setTreemapRoot(0, recordHistory: false)
-                                appState.computeExtensionStats()
-                            }
-                        }
+                    if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
+                        appState.rescanVolume()
                     }
                 }
             }

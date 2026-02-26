@@ -89,6 +89,26 @@ extension AppState {
         selectedNodeIndex = nodeIndex
     }
 
+    // MARK: - Rescan
+
+    /// Rescan the selected volume from scratch (e.g., after trashing a file).
+    public func rescanVolume() {
+        guard let volumeURL = selectedVolume else { return }
+        let scanner = FileScanner()
+        let newTree = FileTree()
+        fileTree = newTree
+        resetForNewScan()
+        activeTab = .treeView
+        Task {
+            await scanner.scan(path: volumeURL.path, progress: scanProgress, tree: newTree)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                setTreemapRoot(0, recordHistory: false)
+                computeExtensionStats()
+            }
+        }
+    }
+
     // MARK: - Path Building
 
     /// Build canonical path from root (0) to the given node index by walking parent chain.

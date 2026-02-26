@@ -101,7 +101,8 @@ public struct ExtensionListView: View {
             sortButton("Extension", key: .name, width: 100, alignment: .leading)
             sortButton("Category", key: .category, width: 90, alignment: .leading)
             sortButton("Size", key: .size, width: 80, alignment: .trailing)
-            sortButton("% Total", key: .size, width: 65, alignment: .trailing)
+            Text("% Total")
+                .frame(width: 65, alignment: .trailing)
             sortButton("Files", key: .count, width: 65, alignment: .trailing)
             Spacer()
         }

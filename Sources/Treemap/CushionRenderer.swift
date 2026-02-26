@@ -44,7 +44,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     /// Pending async layout task (cancelled when a new layout is needed).
     private var pendingLayoutTask: Task<Void, Never>?
     private var pendingLayoutSize: CGSize = .zero
-    private var needsForceLayout: Bool = false
 
     /// Instance buffer dirty tracking — skip rebuild when nothing changed.
     var instanceBufferDirty: Bool = true
@@ -126,23 +125,24 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         }
 
         let sizeChanged = viewportSize != currentViewportSize
-        if !sizeChanged && !needsForceLayout && !cachedLayout.isEmpty {
+        if !sizeChanged && !cachedLayout.isEmpty {
             return // Nothing changed.
         }
 
         // Dedup: if a task is already in flight for this exact size, skip relaunching.
-        if pendingLayoutTask != nil && pendingLayoutSize == viewportSize && !needsForceLayout {
+        if pendingLayoutTask != nil && pendingLayoutSize == viewportSize {
             return
         }
 
-        let wasForced = needsForceLayout
-        needsForceLayout = false
+        // freshStart: currentViewportSize == .zero means force/invalidate was called —
+        // skip scale preview since the layout data or root has changed.
+        let freshStart = currentViewportSize == .zero
         pendingLayoutTask?.cancel()
 
         // Fix 3: Immediately scale existing rects to fill the new viewport.
         // Coefs remain valid — they're computed in normalized [0,1] space per rect,
         // so uniform proportional scaling leaves them unchanged.
-        if !cachedLayout.isEmpty && !wasForced && currentViewportSize != .zero && sizeChanged {
+        if !cachedLayout.isEmpty && !freshStart && sizeChanged {
             let sx = Float(viewportSize.width / currentViewportSize.width)
             let sy = Float(viewportSize.height / currentViewportSize.height)
             cachedLayout = cachedLayout.map { r in
@@ -196,15 +196,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         pendingLayoutTask = task
     }
 
-    /// Force a layout recompute immediately (e.g., user navigation).
+    /// Force a layout recompute on next draw (navigation, root change).
     func forceLayoutInvalidation() {
         pendingLayoutTask?.cancel()
         pendingLayoutTask = nil
         currentViewportSize = .zero
-        needsForceLayout = true
     }
 
-    /// Soft layout invalidation (e.g., scan revision change).
+    /// Soft layout invalidation (scan revision change).
     func invalidateLayout() {
         pendingLayoutTask?.cancel()
         pendingLayoutTask = nil

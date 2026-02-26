@@ -175,21 +175,8 @@ public struct TreeTableView: View {
                     let url = URL(fileURLWithPath: path)
                     let size = tree.node(at: item.id)?.fileSize ?? 0
                     confirmTrash(name: item.name, size: size) {
-                        if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil,
-                           let volumeURL = appState.selectedVolume {
-                            let scanner = FileScanner()
-                            let scanPath = volumeURL.path
-                            let newTree = FileTree()
-                            appState.fileTree = newTree
-                            appState.resetForNewScan()
-                            appState.activeTab = .treeView
-                            Task {
-                                await scanner.scan(path: scanPath, progress: appState.scanProgress, tree: newTree)
-                                await MainActor.run {
-                                    appState.setTreemapRoot(0, recordHistory: false)
-                                    appState.computeExtensionStats()
-                                }
-                            }
+                        if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
+                            appState.rescanVolume()
                         }
                     }
                 }
@@ -439,34 +426,20 @@ public struct TreeTableView: View {
     // MARK: - Helpers
 
     private func rootChildren(tree: FileTree) -> [TreeNodeItem] {
-        let sorted = TreeNodeItem(
-            id: 0,
-            tree: tree,
-            depth: -1,
+        // depth: -1 so children are created at depth 0.
+        let children = TreeNodeItem(
+            id: 0, tree: tree, depth: -1,
             reclaimScores: appState.reclaimScores,
-            sortKey: sortKey,
-            sortAscending: sortAscending
-        ).children.map(\.id)
-        if sorted.isEmpty {
+            sortKey: sortKey, sortAscending: sortAscending
+        ).children
+        if children.isEmpty {
             return [TreeNodeItem(
-                id: 0,
-                tree: tree,
-                depth: 0,
+                id: 0, tree: tree, depth: 0,
                 reclaimScores: appState.reclaimScores,
-                sortKey: sortKey,
-                sortAscending: sortAscending
+                sortKey: sortKey, sortAscending: sortAscending
             )]
         }
-        return sorted.map {
-            TreeNodeItem(
-                id: $0,
-                tree: tree,
-                depth: 0,
-                reclaimScores: appState.reclaimScores,
-                sortKey: sortKey,
-                sortAscending: sortAscending
-            )
-        }
+        return children
     }
 
     private func parentSize(for item: TreeNodeItem, tree: FileTree) -> UInt64 {
@@ -475,19 +448,5 @@ public struct TreeTableView: View {
         return tree.node(at: parentIdx)?.fileSize ?? item.node.fileSize
     }
 
-    private func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void) {
-        if size > 100_000_000 {
-            let alert = NSAlert()
-            alert.messageText = "Move \"\(name)\" to Trash?"
-            alert.informativeText = "This item is \(SizeFormatter.shared.format(size)). It will be moved to the Trash."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Move to Trash")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn {
-                action()
-            }
-        } else {
-            action()
-        }
-    }
 }
+
