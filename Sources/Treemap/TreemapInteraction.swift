@@ -88,16 +88,16 @@ public struct InteractiveTreemapView: View {
     private var breadcrumbBar: some View {
         HStack(spacing: 4) {
             // Navigation buttons.
-            navButton(systemName: "chevron.left", enabled: canNavigate && appState.canNavigateBack, help: "Back (Cmd+[)") {
+            navButton(systemName: "chevron.left", enabled: canNavigate && appState.navigation.canNavigateBack, help: "Back (Cmd+[)") {
                 appState.navigateBack()
             }
-            navButton(systemName: "chevron.right", enabled: canNavigate && appState.canNavigateForward, help: "Forward (Cmd+])") {
+            navButton(systemName: "chevron.right", enabled: canNavigate && appState.navigation.canNavigateForward, help: "Forward (Cmd+])") {
                 appState.navigateForward()
             }
-            navButton(systemName: "arrow.up", enabled: canNavigate && appState.canNavigateUp, help: "Up (Esc)") {
+            navButton(systemName: "arrow.up", enabled: canNavigate && appState.navigation.canNavigateUp, help: "Up (Esc)") {
                 appState.navigateUp()
             }
-            navButton(systemName: "house", enabled: canNavigate && appState.treemapRootIndex != 0, help: "Home") {
+            navButton(systemName: "house", enabled: canNavigate && appState.navigation.treemapRootIndex != 0, help: "Home") {
                 appState.navigateHome()
             }
 
@@ -108,7 +108,7 @@ public struct InteractiveTreemapView: View {
             // Scrollable breadcrumb path.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    ForEach(Array(appState.treemapPath.enumerated()), id: \.offset) { pathIndex, nodeIndex in
+                    ForEach(Array(appState.navigation.treemapPath.enumerated()), id: \.offset) { pathIndex, nodeIndex in
                         if pathIndex > 0 {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9))
@@ -120,11 +120,11 @@ public struct InteractiveTreemapView: View {
                             appState.navigateTo(pathIndex: pathIndex)
                         }) {
                             Text(breadcrumbLabel(for: nodeIndex, at: pathIndex))
-                                .font(.system(size: 12, weight: pathIndex == appState.treemapPath.count - 1 ? .semibold : .regular))
+                                .font(.system(size: 12, weight: pathIndex == appState.navigation.treemapPath.count - 1 ? .semibold : .regular))
                                 .lineLimit(1)
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(pathIndex == appState.treemapPath.count - 1 ? .primary : .secondary)
+                        .foregroundStyle(pathIndex == appState.navigation.treemapPath.count - 1 ? .primary : .secondary)
                         .disabled(!canNavigate)
                     }
                 }
@@ -134,7 +134,7 @@ public struct InteractiveTreemapView: View {
 
             // Show size of current root.
             if let tree = appState.fileTree,
-               let rootNode = tree.node(at: appState.treemapRootIndex) {
+               let rootNode = tree.node(at: appState.navigation.treemapRootIndex) {
                 Text(SizeFormatter.shared.format(rootNode.fileSize))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -175,7 +175,7 @@ public struct InteractiveTreemapView: View {
             CushionTreemapView(
                 fileTree: appState.fileTree,
                 treeRevision: appState.scanProgress.treeLayoutRevision,
-                rootIndex: appState.treemapRootIndex,
+                rootIndex: appState.navigation.treemapRootIndex,
                 selectedNodeIndex: appState.selectedNodeIndex,
                 extensionPalette: appState.extensionPalette,
                 recencyFactors: appState.recencyFactors,
@@ -308,7 +308,7 @@ public struct InteractiveTreemapView: View {
     /// This provides "one level at a time" zooming.
     private func progressiveZoomTarget(for nodeIndex: UInt32, tree: FileTree) -> UInt32? {
         let nodes = tree.nodesSnapshot()
-        let currentRoot = appState.treemapRootIndex
+        let currentRoot = appState.navigation.treemapRootIndex
 
         guard Int(nodeIndex) < nodes.count else { return nil }
 
@@ -462,19 +462,19 @@ public struct InteractiveTreemapView: View {
                     }
                 }
 
-                if appState.canNavigateUp {
+                if appState.navigation.canNavigateUp {
                     Button("Navigate Up (Esc)") {
                         appState.navigateUp()
                     }
                 }
 
-                if appState.treemapRootIndex != 0 {
+                if appState.navigation.treemapRootIndex != 0 {
                     Button("Go to Root") {
                         appState.navigateHome()
                     }
                 }
 
-                if appState.canNavigateBack {
+                if appState.navigation.canNavigateBack {
                     Button("Back (Cmd+[)") {
                         appState.navigateBack()
                     }

@@ -51,26 +51,26 @@ struct DirWizApp: App {
                     appState.navigateBack()
                 }
                 .keyboardShortcut("[", modifiers: .command)
-                .disabled(!appState.canNavigateBack || appState.scanProgress.isScanning)
+                .disabled(!appState.navigation.canNavigateBack || appState.scanProgress.isScanning)
 
                 Button("Forward") {
                     appState.navigateForward()
                 }
                 .keyboardShortcut("]", modifiers: .command)
-                .disabled(!appState.canNavigateForward || appState.scanProgress.isScanning)
+                .disabled(!appState.navigation.canNavigateForward || appState.scanProgress.isScanning)
 
                 Button("Enclosing Folder") {
                     appState.navigateUp()
                 }
                 .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(!appState.canNavigateUp || appState.scanProgress.isScanning)
+                .disabled(!appState.navigation.canNavigateUp || appState.scanProgress.isScanning)
 
                 Divider()
 
                 Button("Go to Root") {
                     appState.navigateHome()
                 }
-                .disabled(appState.treemapRootIndex == 0 || appState.scanProgress.isScanning)
+                .disabled(appState.navigation.treemapRootIndex == 0 || appState.scanProgress.isScanning)
             }
         }
     }

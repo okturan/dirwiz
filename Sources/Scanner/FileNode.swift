@@ -75,6 +75,9 @@ public final class FileTree: @unchecked Sendable {
     /// access begins (in `FileScanner.scan()`) and never mutated after. All reads occur
     /// under the lock where the value is captured, so no data race is possible.
     public private(set) var rootPath: String = "/"
+    /// Whether the scanned volume is case-sensitive (e.g., case-sensitive APFS).
+    /// When true, the search index stores original-case names instead of lowercased.
+    public private(set) var isCaseSensitive: Bool = false
     private var lowercaseNamePool: Data = Data()
     private var lowercaseNameEntries: [(offset: UInt32, length: UInt16)] = []
 
@@ -99,6 +102,11 @@ public final class FileTree: @unchecked Sendable {
     public func setRootPath(_ path: String) {
         precondition(nodes.isEmpty, "setRootPath must be called before any nodes are added")
         rootPath = path
+    }
+
+    /// Set whether the volume is case-sensitive. Must be called before concurrent access begins.
+    public func setCaseSensitivity(_ caseSensitive: Bool) {
+        isCaseSensitive = caseSensitive
     }
 
     // MARK: - Thread-safe Reads
@@ -283,11 +291,11 @@ public final class FileTree: @unchecked Sendable {
             n.nameOffset = UInt32(stringPool.count)
             n.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
             stringPool.append(contentsOf: utf8)
-            // Use Unicode-aware lowercasing so that Ü→ü, É→é, etc. are searchable.
-            // The lowercased name may have a different UTF-8 length than the original
-            // (e.g., ß → ss), so store its own offset+length in lowercaseNameEntries.
+            // Build the search-index entry. On case-insensitive volumes, use Unicode-aware
+            // lowercasing so that Ü→ü, É→é, etc. are searchable. On case-sensitive volumes,
+            // store the original name to avoid merging directories that differ only in case.
             let lcOffset = UInt32(lowercaseNamePool.count)
-            let lcUTF8 = Array(name.lowercased().utf8)
+            let lcUTF8 = isCaseSensitive ? utf8 : Array(name.lowercased().utf8)
             lowercaseNamePool.append(contentsOf: lcUTF8)
             lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
             nodes.append(n)
@@ -318,7 +326,7 @@ public final class FileTree: @unchecked Sendable {
                 node.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
                 stringPool.append(contentsOf: utf8)
                 let lcOffset = UInt32(lowercaseNamePool.count)
-                let lcUTF8 = Array(childName.lowercased().utf8)
+                let lcUTF8 = isCaseSensitive ? utf8 : Array(childName.lowercased().utf8)
                 lowercaseNamePool.append(contentsOf: lcUTF8)
                 lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
                 nodes.append(node)
@@ -330,6 +338,8 @@ public final class FileTree: @unchecked Sendable {
     }
 
     /// Accumulate size up the parent chain (thread-safe with atomics approach via lock).
+    /// Note: For bulk scanning, prefer propagateSizes() after all nodes are added — it's O(n)
+    /// with a single pass and avoids lock contention from 32 concurrent threads.
     public func accumulateSize(from index: UInt32, fileSize: UInt64, allocatedSize: UInt64) {
         lock.withLock { _ in
             guard Int(index) < nodes.count else { return }
@@ -340,6 +350,22 @@ public final class FileTree: @unchecked Sendable {
                 nodes[ci].fileSize += fileSize
                 nodes[ci].allocatedSize += allocatedSize
                 current = nodes[ci].parentIndex
+            }
+        }
+    }
+
+    /// Single-pass bottom-up size propagation. Call after all nodes are added (post-scan).
+    /// Each node's fileSize starts as its own direct size. This walk adds each node's size
+    /// to its parent, naturally bubbling totals up to the root in O(n) time.
+    /// Replaces thousands of per-directory accumulateSize() calls that each walk the full
+    /// parent chain under lock contention.
+    public func propagateSizes() {
+        lock.withLock { _ in
+            for i in stride(from: nodes.count - 1, through: 0, by: -1) {
+                let parentIdx = Int(nodes[i].parentIndex)
+                guard nodes[i].parentIndex != FileNode.invalid, parentIdx < nodes.count else { continue }
+                nodes[parentIdx].fileSize += nodes[i].fileSize
+                nodes[parentIdx].allocatedSize += nodes[i].allocatedSize
             }
         }
     }
@@ -363,13 +389,21 @@ public final class FileTree: @unchecked Sendable {
                 let end = start + Int(nodes[i].childCount)
                 guard end <= nodes.count, end <= lowercaseNameEntries.count else { continue }
 
-                // Sort by size descending via index permutation.
+                // Sort by size descending via index permutation, then apply in-place
+                // using cycle sort to avoid allocating temporary copies of nodes/entries.
                 let perm = (start..<end).sorted { nodes[$0].fileSize > nodes[$1].fileSize }
-                let sortedNodes = perm.map { nodes[$0] }
-                let sortedEntries = perm.map { lowercaseNameEntries[$0] }
-                for j in 0..<sortedNodes.count {
-                    nodes[start + j] = sortedNodes[j]
-                    lowercaseNameEntries[start + j] = sortedEntries[j]
+                var localPerm = perm.map { $0 - start }
+                for k in 0..<localPerm.count {
+                    var j = localPerm[k]
+                    if j == k { continue } // already in place
+                    while j != k {
+                        nodes.swapAt(start + k, start + j)
+                        lowercaseNameEntries.swapAt(start + k, start + j)
+                        let next = localPerm[j]
+                        localPerm[j] = j // mark as done
+                        j = next
+                    }
+                    localPerm[k] = k
                 }
             }
             // Fix parentIndex on all children. After reordering, a child's parentIndex

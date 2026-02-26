@@ -5,28 +5,38 @@ import Foundation
 @Suite("FileScanner Tests")
 struct FileScannerTests {
 
-    @Test("Scan /Applications returns non-empty tree")
-    func scanApplications() async {
+    /// Standard fixture: 3 files across 2 directories.
+    private static let standardLayout: [String: UInt64] = [
+        "docs/readme.txt": 100,
+        "docs/notes.md": 200,
+        "images/photo.jpg": 500,
+    ]
+
+    @Test("Scan returns non-empty tree")
+    func scanReturnsNonEmptyTree() async throws {
+        let (path, cleanup) = try createTempTree(Self.standardLayout)
+        defer { cleanup() }
+
         let scanner = FileScanner()
         let progress = ScanProgress()
-
-        // /Applications is small enough for a quick test.
         let tree = FileTree()
-        await scanner.scan(path: "/Applications", progress: progress, tree: tree)
+        await scanner.scan(path: path, progress: progress, tree: tree)
 
-        #expect(tree.count > 0, "Tree should have nodes after scanning /Applications")
+        #expect(tree.count > 0, "Tree should have nodes after scanning")
         #expect(progress.scanComplete, "Scan should be marked complete")
         #expect(!progress.isScanning, "Should not be scanning after completion")
         #expect(progress.filesScanned > 0, "Should have scanned some files")
     }
 
     @Test("Root node is a directory with accumulated size")
-    func rootNodeIsDirectory() async {
+    func rootNodeIsDirectory() async throws {
+        let (path, cleanup) = try createTempTree(Self.standardLayout)
+        defer { cleanup() }
+
         let scanner = FileScanner()
         let progress = ScanProgress()
-
         let tree = FileTree()
-        await scanner.scan(path: "/Applications", progress: progress, tree: tree)
+        await scanner.scan(path: path, progress: progress, tree: tree)
 
         guard !tree.isEmpty else {
             Issue.record("Tree should not be empty")
@@ -40,12 +50,14 @@ struct FileScannerTests {
     }
 
     @Test("All children reference valid parent indices")
-    func validParentReferences() async {
+    func validParentReferences() async throws {
+        let (path, cleanup) = try createTempTree(Self.standardLayout)
+        defer { cleanup() }
+
         let scanner = FileScanner()
         let progress = ScanProgress()
-
         let tree = FileTree()
-        await scanner.scan(path: "/Applications", progress: progress, tree: tree)
+        await scanner.scan(path: path, progress: progress, tree: tree)
 
         for i in 1..<tree.count {
             let node = tree.nodes[i]
@@ -57,12 +69,20 @@ struct FileScannerTests {
     }
 
     @Test("Directory child count matches actual children")
-    func directoryChildCount() async {
+    func directoryChildCount() async throws {
+        let layout: [String: UInt64] = [
+            "docs/readme.txt": 100,
+            "docs/notes.md": 200,
+            "images/photo.jpg": 500,
+            "empty_dir/": 0,
+        ]
+        let (path, cleanup) = try createTempTree(layout)
+        defer { cleanup() }
+
         let scanner = FileScanner()
         let progress = ScanProgress()
-
         let tree = FileTree()
-        await scanner.scan(path: "/Applications", progress: progress, tree: tree)
+        await scanner.scan(path: path, progress: progress, tree: tree)
 
         for i in 0..<tree.count {
             let node = tree.nodes[i]
@@ -75,29 +95,33 @@ struct FileScannerTests {
     }
 
     @Test("File names are non-empty")
-    func fileNamesNonEmpty() async {
+    func fileNamesNonEmpty() async throws {
+        let (path, cleanup) = try createTempTree(Self.standardLayout)
+        defer { cleanup() }
+
         let scanner = FileScanner()
         let progress = ScanProgress()
-
         let tree = FileTree()
-        await scanner.scan(path: "/Applications", progress: progress, tree: tree)
+        await scanner.scan(path: path, progress: progress, tree: tree)
 
-        for i in 0..<min(tree.count, 100) { // Check first 100 nodes
+        for i in 0..<tree.count {
             let name = tree.name(at: UInt32(i))
             #expect(!name.isEmpty, "Node \(i) should have a non-empty name")
         }
     }
 
     @Test("Elapsed time is reasonable")
-    func elapsedTimeReasonable() async {
+    func elapsedTimeReasonable() async throws {
+        let (path, cleanup) = try createTempTree(Self.standardLayout)
+        defer { cleanup() }
+
         let scanner = FileScanner()
         let progress = ScanProgress()
-
         let tree = FileTree()
-        await scanner.scan(path: "/Applications", progress: progress, tree: tree)
+        await scanner.scan(path: path, progress: progress, tree: tree)
 
         #expect(progress.elapsedTime > 0, "Elapsed time should be positive")
-        #expect(progress.elapsedTime < 60, "Scanning /Applications should take less than 60 seconds")
+        #expect(progress.elapsedTime < 5, "Scanning a small fixture should take less than 5 seconds")
     }
 
     @Test("Scan non-existent path returns minimal tree")

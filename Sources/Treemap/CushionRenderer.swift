@@ -9,12 +9,15 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private var commandQueue: MTLCommandQueue?
     private var pipelineState: MTLRenderPipelineState?
-    private var instanceBuffer: MTLBuffer?
-    private var uniformBuffer: MTLBuffer?
+    private let maxFramesInFlight = 3
+    private let frameSemaphore = DispatchSemaphore(value: 3)
+    private var currentBufferIndex = 0
+    private var instanceBuffers: [MTLBuffer?] = [nil, nil, nil]
+    private var uniformBuffers: [MTLBuffer?] = [nil, nil, nil]
+    private var instanceBufferCapacities: [Int] = [0, 0, 0]
     weak var mtkView: MTKView?
 
     private var instanceCount: Int = 0
-    private var instanceBufferCapacity: Int = 0
 
     /// Cached layout from the most recent computation.
     var cachedLayout: [TreemapRect] = []
@@ -53,12 +56,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
 
     /// Scratch dictionary reused by dominantDirectFileExtensionHash to avoid per-call allocation.
     private var scratchSizeByExt: [UInt32: UInt64] = [:]
-
-    /// Tracks the last submitted command buffer so we can ensure GPU completion
-    /// before overwriting shared buffers. For this on-demand renderer (isPaused=true),
-    /// waitUntilCompleted() returns near-instantly since GPU finishes in <1ms
-    /// and draws are spaced by at least one display refresh (~16ms).
-    private var lastCommandBuffer: MTLCommandBuffer?
 
     /// Callbacks for interaction.
     var onClick: ((UInt32) -> Void)?
@@ -252,13 +249,17 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
 
         // Resize buffer if needed.
         let requiredSize = visibleCount * MemoryLayout<CushionInstance>.stride
-        if instanceBuffer == nil || requiredSize > instanceBufferCapacity {
-            let newCapacity = max(requiredSize, instanceBufferCapacity * 2)
-            instanceBuffer = device.makeBuffer(length: newCapacity, options: .storageModeShared)
-            instanceBufferCapacity = newCapacity
+        if instanceBuffers[currentBufferIndex] == nil
+            || requiredSize > instanceBufferCapacities[currentBufferIndex] {
+            let newCapacity = max(requiredSize, instanceBufferCapacities[currentBufferIndex] * 2)
+            instanceBuffers[currentBufferIndex] = device.makeBuffer(
+                length: newCapacity,
+                options: .storageModeShared
+            )
+            instanceBufferCapacities[currentBufferIndex] = newCapacity
         }
 
-        guard let buffer = instanceBuffer else { return }
+        guard let buffer = instanceBuffers[currentBufferIndex] else { return }
         let ptr = buffer.contents().bindMemory(to: CushionInstance.self, capacity: visibleCount)
 
         var writeIdx = 0
@@ -417,10 +418,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             return
         }
 
-        // Ensure previous frame's GPU work is complete before overwriting shared buffers.
-        // For this on-demand renderer, this returns near-instantly (GPU finishes in <1ms,
-        // draws are spaced by at least one display refresh).
-        lastCommandBuffer?.waitUntilCompleted()
+        let result = frameSemaphore.wait(timeout: .now() + .milliseconds(16))
+        if result == .timedOut { return }
 
         let viewportSize = view.drawableSize
         let backingScaleFactor = view.window?.backingScaleFactor ?? 2.0
@@ -432,16 +431,24 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         recomputeLayoutIfNeeded(viewportSize: logicalSize)
         updateInstanceBuffer()
 
-        guard instanceCount > 0, let instanceBuffer = instanceBuffer else {
+        guard instanceCount > 0, let instanceBuffer = instanceBuffers[currentBufferIndex] else {
             // Draw a clear frame.
-            guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                frameSemaphore.signal()
+                return
+            }
+            commandBuffer.addCompletedHandler { [weak self] _ in
+                self?.frameSemaphore.signal()
+            }
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
                 commandBuffer.commit()
+                currentBufferIndex = (currentBufferIndex + 1) % maxFramesInFlight
                 return
             }
             encoder.endEncoding()
             commandBuffer.present(drawable)
             commandBuffer.commit()
+            currentBufferIndex = (currentBufferIndex + 1) % maxFramesInFlight
             return
         }
 
@@ -466,22 +473,32 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             selectedIndex: selectedInstance
         )
 
-        if uniformBuffer == nil {
-            uniformBuffer = device.makeBuffer(
+        if uniformBuffers[currentBufferIndex] == nil {
+            uniformBuffers[currentBufferIndex] = device.makeBuffer(
                 length: MemoryLayout<CushionUniforms>.stride,
                 options: .storageModeShared
             )
         }
-        guard let uniformBuffer else { return }
+        guard let uniformBuffer = uniformBuffers[currentBufferIndex] else {
+            frameSemaphore.signal()
+            return
+        }
         uniformBuffer.contents().copyMemory(
             from: &uniforms,
             byteCount: MemoryLayout<CushionUniforms>.stride
         )
 
         // Render.
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            frameSemaphore.signal()
+            return
+        }
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.frameSemaphore.signal()
+        }
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
             commandBuffer.commit()
+            currentBufferIndex = (currentBufferIndex + 1) % maxFramesInFlight
             return
         }
 
@@ -496,7 +513,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
-        lastCommandBuffer = commandBuffer
+        currentBufferIndex = (currentBufferIndex + 1) % maxFramesInFlight
     }
 
     // MARK: - Hit Testing

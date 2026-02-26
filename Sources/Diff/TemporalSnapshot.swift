@@ -33,18 +33,56 @@ public struct TemporalSnapshotMeta: Codable, Sendable {
     public let rootPath: String   // absolute path returned by tree.path(at: 0)
     public let totalBytes: UInt64
     public let dirCount: Int
+    /// Whether the snapshot was taken on a case-sensitive volume.
+    /// Defaults to false for backward compatibility with existing snapshots.
+    public let isCaseSensitive: Bool
+
+    public init(id: UUID, createdAt: Date, rootPath: String, totalBytes: UInt64, dirCount: Int, isCaseSensitive: Bool = false) {
+        self.id = id
+        self.createdAt = createdAt
+        self.rootPath = rootPath
+        self.totalBytes = totalBytes
+        self.dirCount = dirCount
+        self.isCaseSensitive = isCaseSensitive
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        rootPath = try container.decode(String.self, forKey: .rootPath)
+        totalBytes = try container.decode(UInt64.self, forKey: .totalBytes)
+        dirCount = try container.decode(Int.self, forKey: .dirCount)
+        isCaseSensitive = try container.decodeIfPresent(Bool.self, forKey: .isCaseSensitive) ?? false
+    }
 }
 
 /// Slim per-directory record stored in the snapshot file.
+// Legacy JSON support.
 private struct SnapshotEntry: Codable {
     let path: String   // relative from root, lowercased, e.g. "Users/okan/Downloads"
     let size: UInt64
 }
 
 /// Serializable container (metadata + entries).
+// Legacy JSON support.
 private struct SnapshotFile: Codable {
     let meta: TemporalSnapshotMeta
     let entries: [SnapshotEntry]
+}
+
+private enum TemporalSnapshotBinary {
+    static let magic = Data([0x54, 0x44, 0x53, 0x4E]) // "TDSN"
+    /// v1: original format; v2: adds isCaseSensitive byte after rootPath
+    static let version: UInt32 = 2
+}
+
+private enum TemporalSnapshotFormatError: Error {
+    case unsupportedFormat
+    case invalidBinaryHeader
+    case unsupportedBinaryVersion(UInt32)
+    case truncatedBinary
+    case invalidUTF8
 }
 
 // MARK: - TemporalSnapshot
@@ -85,10 +123,7 @@ public struct TemporalSnapshot: Sendable {
         let entries = byPath
             .map { SnapshotEntry(path: $0.key, size: $0.value) }
             .sorted { $0.path < $1.path }
-        let file = SnapshotFile(meta: meta, entries: entries)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(file)
+        let data = try binaryData(entries: entries)
         try data.write(to: url, options: .atomic)
     }
 
@@ -96,6 +131,122 @@ public struct TemporalSnapshot: Sendable {
         let url = snapshotURL(for: rootPath)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let data = try Data(contentsOf: url)
+        if data.starts(with: TemporalSnapshotBinary.magic) {
+            return try loadBinary(data: data)
+        }
+        if data.first == UInt8(ascii: "{") {
+            return try loadLegacyJSON(data: data)
+        }
+        throw TemporalSnapshotFormatError.unsupportedFormat
+    }
+
+    private func binaryData(entries: [SnapshotEntry]) throws -> Data {
+        let rootPathBytes = Array(meta.rootPath.utf8)
+        guard rootPathBytes.count <= Int(UInt16.max) else {
+            throw TemporalSnapshotFormatError.invalidBinaryHeader
+        }
+        guard meta.dirCount >= 0 && meta.dirCount <= Int(UInt32.max) else {
+            throw TemporalSnapshotFormatError.invalidBinaryHeader
+        }
+
+        var data = Data()
+        data.reserveCapacity(64 + rootPathBytes.count + (entries.count * 16))
+
+        data.append(TemporalSnapshotBinary.magic)
+        data.appendLE(TemporalSnapshotBinary.version)
+
+        var uuid = meta.id.uuid
+        withUnsafeBytes(of: &uuid) { data.append(contentsOf: $0) }
+
+        data.appendLE(meta.createdAt.timeIntervalSince1970)
+        data.appendLE(meta.totalBytes)
+        data.appendLE(UInt32(meta.dirCount))
+        data.appendLE(UInt16(rootPathBytes.count))
+        data.append(contentsOf: rootPathBytes)
+        // v2: case-sensitivity flag
+        data.append(meta.isCaseSensitive ? 1 : 0)
+
+        for entry in entries {
+            let pathBytes = Array(entry.path.utf8)
+            guard pathBytes.count <= Int(UInt16.max) else {
+                throw TemporalSnapshotFormatError.invalidBinaryHeader
+            }
+            data.appendLE(UInt16(pathBytes.count))
+            data.append(contentsOf: pathBytes)
+            data.appendLE(entry.size)
+        }
+        return data
+    }
+
+    private static func loadBinary(data: Data) throws -> TemporalSnapshot {
+        var cursor = 0
+
+        guard let magic = data.readBytes(count: 4, at: &cursor), Data(magic) == TemporalSnapshotBinary.magic else {
+            throw TemporalSnapshotFormatError.invalidBinaryHeader
+        }
+
+        let version: UInt32 = try data.readLE(at: &cursor)
+        guard version == 1 || version == 2 else {
+            throw TemporalSnapshotFormatError.unsupportedBinaryVersion(version)
+        }
+
+        guard let uuidBytes = data.readBytes(count: 16, at: &cursor) else {
+            throw TemporalSnapshotFormatError.truncatedBinary
+        }
+        let uuid = uuidBytes.withUnsafeBytes { raw -> UUID in
+            let tuple = raw.bindMemory(to: UInt8.self)
+            return UUID(uuid: (
+                tuple[0], tuple[1], tuple[2], tuple[3],
+                tuple[4], tuple[5], tuple[6], tuple[7],
+                tuple[8], tuple[9], tuple[10], tuple[11],
+                tuple[12], tuple[13], tuple[14], tuple[15]
+            ))
+        }
+
+        let createdAtRaw: Double = try data.readLE(at: &cursor)
+        let totalBytes: UInt64 = try data.readLE(at: &cursor)
+        let dirCountRaw: UInt32 = try data.readLE(at: &cursor)
+        let rootPathLength: UInt16 = try data.readLE(at: &cursor)
+
+        guard let rootPathRaw = data.readBytes(count: Int(rootPathLength), at: &cursor),
+              let rootPath = String(bytes: rootPathRaw, encoding: .utf8) else {
+            throw TemporalSnapshotFormatError.invalidUTF8
+        }
+
+        // v2 adds a case-sensitivity byte; v1 defaults to false.
+        var isCaseSensitive = false
+        if version >= 2 {
+            guard let flagBytes = data.readBytes(count: 1, at: &cursor) else {
+                throw TemporalSnapshotFormatError.truncatedBinary
+            }
+            isCaseSensitive = flagBytes[flagBytes.startIndex] != 0
+        }
+
+        var byPath: [String: UInt64] = [:]
+        byPath.reserveCapacity(Int(dirCountRaw))
+
+        while cursor < data.count {
+            let pathLength: UInt16 = try data.readLE(at: &cursor)
+            guard let pathRaw = data.readBytes(count: Int(pathLength), at: &cursor),
+                  let path = String(bytes: pathRaw, encoding: .utf8) else {
+                throw TemporalSnapshotFormatError.invalidUTF8
+            }
+            let size: UInt64 = try data.readLE(at: &cursor)
+            byPath[path] = size
+        }
+
+        let meta = TemporalSnapshotMeta(
+            id: uuid,
+            createdAt: Date(timeIntervalSince1970: createdAtRaw),
+            rootPath: rootPath,
+            totalBytes: totalBytes,
+            dirCount: Int(dirCountRaw),
+            isCaseSensitive: isCaseSensitive
+        )
+        return TemporalSnapshot(meta: meta, byPath: byPath)
+    }
+
+    private static func loadLegacyJSON(data: Data) throws -> TemporalSnapshot {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let file = try decoder.decode(SnapshotFile.self, from: data)
@@ -105,5 +256,35 @@ public struct TemporalSnapshot: Sendable {
             byPath[entry.path] = entry.size
         }
         return TemporalSnapshot(meta: file.meta, byPath: byPath)
+    }
+}
+
+private extension Data {
+    mutating func appendLE<T: FixedWidthInteger>(_ value: T) {
+        var v = value.littleEndian
+        Swift.withUnsafeBytes(of: &v) { append(contentsOf: $0) }
+    }
+
+    mutating func appendLE(_ value: Double) {
+        appendLE(value.bitPattern)
+    }
+
+    func readBytes(count: Int, at cursor: inout Int) -> Data? {
+        guard count >= 0, cursor >= 0, cursor + count <= self.count else { return nil }
+        defer { cursor += count }
+        return self[cursor..<(cursor + count)]
+    }
+
+    func readLE<T: FixedWidthInteger>(at cursor: inout Int) throws -> T {
+        let width = MemoryLayout<T>.size
+        guard let bytes = readBytes(count: width, at: &cursor) else {
+            throw TemporalSnapshotFormatError.truncatedBinary
+        }
+        return bytes.withUnsafeBytes { $0.loadUnaligned(as: T.self) }.littleEndian
+    }
+
+    func readLE(at cursor: inout Int) throws -> Double {
+        let raw: UInt64 = try readLE(at: &cursor)
+        return Double(bitPattern: raw)
     }
 }

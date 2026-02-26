@@ -12,59 +12,59 @@ extension AppState {
         guard i < nodes.count, nodes[i].isDirectory else { return }
 
         if recordHistory {
-            backStack.append(treemapRootIndex)
-            forwardStack.removeAll()
+            navigation.backStack.append(navigation.treemapRootIndex)
+            navigation.forwardStack.removeAll()
         }
 
-        treemapRootIndex = nodeIndex
-        treemapPath = Self.buildPath(to: nodeIndex, nodes: nodes)
+        navigation.treemapRootIndex = nodeIndex
+        navigation.treemapPath = Self.buildPath(to: nodeIndex, nodes: nodes)
     }
 
     /// Navigate up one level in treemap.
     public func navigateUp() {
-        guard treemapPath.count > 1 else { return }
-        let parentIndex = treemapPath[treemapPath.count - 2]
-        backStack.append(treemapRootIndex)
-        forwardStack.removeAll()
-        treemapRootIndex = parentIndex
-        treemapPath.removeLast()
+        guard navigation.treemapPath.count > 1 else { return }
+        let parentIndex = navigation.treemapPath[navigation.treemapPath.count - 2]
+        navigation.backStack.append(navigation.treemapRootIndex)
+        navigation.forwardStack.removeAll()
+        navigation.treemapRootIndex = parentIndex
+        navigation.treemapPath.removeLast()
     }
 
     /// Navigate to a specific level in breadcrumb.
     public func navigateTo(pathIndex: Int) {
-        guard pathIndex < treemapPath.count else { return }
-        let target = treemapPath[pathIndex]
-        backStack.append(treemapRootIndex)
-        forwardStack.removeAll()
-        treemapRootIndex = target
-        treemapPath = Array(treemapPath.prefix(pathIndex + 1))
+        guard pathIndex < navigation.treemapPath.count else { return }
+        let target = navigation.treemapPath[pathIndex]
+        navigation.backStack.append(navigation.treemapRootIndex)
+        navigation.forwardStack.removeAll()
+        navigation.treemapRootIndex = target
+        navigation.treemapPath = Array(navigation.treemapPath.prefix(pathIndex + 1))
     }
 
     /// Go back to previously viewed directory.
     public func navigateBack() {
-        guard let prev = backStack.popLast() else { return }
+        guard let prev = navigation.backStack.popLast() else { return }
         guard let tree = fileTree else { return }
-        forwardStack.append(treemapRootIndex)
-        treemapRootIndex = prev
-        treemapPath = Self.buildPath(to: prev, nodes: tree.nodesSnapshot())
+        navigation.forwardStack.append(navigation.treemapRootIndex)
+        navigation.treemapRootIndex = prev
+        navigation.treemapPath = Self.buildPath(to: prev, nodes: tree.nodesSnapshot())
     }
 
     /// Go forward after navigating back.
     public func navigateForward() {
-        guard let next = forwardStack.popLast() else { return }
+        guard let next = navigation.forwardStack.popLast() else { return }
         guard let tree = fileTree else { return }
-        backStack.append(treemapRootIndex)
-        treemapRootIndex = next
-        treemapPath = Self.buildPath(to: next, nodes: tree.nodesSnapshot())
+        navigation.backStack.append(navigation.treemapRootIndex)
+        navigation.treemapRootIndex = next
+        navigation.treemapPath = Self.buildPath(to: next, nodes: tree.nodesSnapshot())
     }
 
     /// Navigate to the volume root.
     public func navigateHome() {
-        guard treemapRootIndex != 0 else { return }
-        backStack.append(treemapRootIndex)
-        forwardStack.removeAll()
-        treemapRootIndex = 0
-        treemapPath = [0]
+        guard navigation.treemapRootIndex != 0 else { return }
+        navigation.backStack.append(navigation.treemapRootIndex)
+        navigation.forwardStack.removeAll()
+        navigation.treemapRootIndex = 0
+        navigation.treemapPath = [0]
     }
 
     /// Navigate treemap to show a specific node (from search or tree view).

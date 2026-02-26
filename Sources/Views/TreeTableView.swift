@@ -342,7 +342,7 @@ public struct TreeTableView: View {
     /// If the node is not under the current treemap root, navigate treemap to show it.
     private func ensureVisibleInTreemap(_ nodeIndex: UInt32, tree: FileTree) {
         let nodes = tree.nodesSnapshot()
-        let root = appState.treemapRootIndex
+        let root = appState.navigation.treemapRootIndex
 
         // Walk parent chain — if we hit the current root, node is already visible
         var current = nodeIndex

@@ -436,9 +436,27 @@ public struct SearchView: View {
 
     /// Re-sort existing results without re-searching.
     private func resortIndices() {
-        var indices = appState.searchResults
-        Self.sortIndices(&indices, nodes: cachedNodes, pool: cachedPool, by: sortOrder, ascending: sortAscending)
-        appState.searchResults = indices
+        searchTask?.cancel()
+        searchGeneration &+= 1
+        let thisGeneration = searchGeneration
+        let indices = appState.searchResults
+        let nodes = cachedNodes
+        let pool = cachedPool
+        let order = sortOrder
+        let ascending = sortAscending
+
+        appState.isSearching = true
+        searchTask = Task.detached(priority: .userInitiated) {
+            var sorted = indices
+            Self.sortIndices(&sorted, nodes: nodes, pool: pool, by: order, ascending: ascending)
+            guard !Task.isCancelled else { return }
+            let result = sorted
+            await MainActor.run { [searchGeneration] in
+                guard thisGeneration == searchGeneration else { return }
+                appState.searchResults = result
+                appState.isSearching = false
+            }
+        }
     }
 
     /// Sort indices using direct node field comparison — no String allocation for size/date.

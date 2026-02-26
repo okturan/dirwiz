@@ -20,11 +20,8 @@ public final class AppState {
     /// Coordinator for Quick Look panel — holds data source / controller conformance.
     public let quickLookCoordinator = QLPreviewCoordinator()
 
-    /// Root node for treemap display (navigation into subdirectories).
-    public var treemapRootIndex: UInt32 = 0
-
-    /// Navigation path for treemap breadcrumb — always canonical (root → current).
-    public var treemapPath: [UInt32] = [0]
+    /// Navigation state (treemap root, breadcrumb path, back/forward stacks).
+    public var navigation = NavigationState()
 
     /// Selected volume URL to scan.
     public var selectedVolume: URL?
@@ -117,9 +114,6 @@ public final class AppState {
     /// so the Cancel button always targets the right scanner.
     @ObservationIgnored public var activeScanner: FileScanner?
 
-    var backStack: [UInt32] = []
-    var forwardStack: [UInt32] = []
-
     /// Token incremented on each new scan; used to discard stale async results.
     public var scanToken: UInt64 = 0
     var recencyToken: UInt64 = 0
@@ -127,18 +121,11 @@ public final class AppState {
     var temporalDiffToken: UInt64 = 0
     var temporalDiffTask: Task<Void, Never>?
 
-    public var canNavigateBack: Bool { !backStack.isEmpty }
-    public var canNavigateForward: Bool { !forwardStack.isEmpty }
-    public var canNavigateUp: Bool { treemapPath.count > 1 }
-
     public init() {}
 
     /// Reset navigation state for a new scan.
     public func resetForNewScan() {
-        backStack.removeAll()
-        forwardStack.removeAll()
-        treemapRootIndex = 0
-        treemapPath = [0]
+        navigation.reset()
         selectedNodeIndex = nil
         fileTypeStats = []
         extensionPalette = ExtensionPalette()

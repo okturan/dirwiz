@@ -54,9 +54,9 @@ private func isBundleName(_ name: String) -> Bool {
 ///   offset 36: fsobj_type_t     objtype         (UInt32 = 4 bytes)
 ///   offset 40: timespec         modtime         (16 bytes on 64-bit)
 ///   offset 56: uint64_t         fileid          (8 bytes)
-///   -- file attributes (only for regular files) --
-///   offset 64: off_t            dataLength      (8 bytes)
-///   offset 72: off_t            allocSize       (8 bytes)
+///   -- file attributes (only for regular files, canonical bit order) --
+///   offset 64: off_t            allocSize       (8 bytes)  ATTR_FILE_ALLOCSIZE   0x004
+///   offset 72: off_t            dataLength      (8 bytes)  ATTR_FILE_DATALENGTH  0x200
 
 private let kOffsetName:     Int = 24
 private let kOffsetDevID:    Int = 32
@@ -100,9 +100,10 @@ private func parseEntryName(from entry: UnsafeRawPointer) -> String {
 }
 
 /// Parse logical data length and allocated size from a file entry.
+/// Canonical bit order: ALLOCSIZE (0x004) at offset 64, DATALENGTH (0x200) at offset 72.
 private func parseFileSizes(from entry: UnsafeRawPointer) -> (dataLength: UInt64, allocSize: UInt64) {
-    let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
-    let allocSize = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
+    let allocSize = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
+    let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
     return (dataLength, allocSize)
 }
 
@@ -162,6 +163,28 @@ public final class FileScanner {
 
         // Store scan root path for correct absolute path reconstruction.
         tree.setRootPath(path)
+
+        // Detect volume case sensitivity using getattrlist ATTR_VOL_CAPABILITIES.
+        // On case-sensitive APFS, we skip lowercasing file names to avoid merging
+        // directories that differ only in case (e.g., "Build" vs "build").
+        do {
+            var volAttrList = attrlist()
+            volAttrList.bitmapcount = UInt16(ATTR_BIT_MAP_COUNT)
+            volAttrList.volattr = attrgroup_t(ATTR_VOL_CAPABILITIES)
+
+            struct VolCapBuf {
+                var length: UInt32 = 0
+                var caps: vol_capabilities_attr_t = vol_capabilities_attr_t()
+            }
+            var volBuf = VolCapBuf()
+            if getattrlist(path, &volAttrList, &volBuf, MemoryLayout<VolCapBuf>.size, 0) == 0 {
+                let valid = volBuf.caps.valid.0
+                let caps = volBuf.caps.capabilities.0
+                let caseSensitive = (valid & UInt32(VOL_CAP_FMT_CASE_SENSITIVE)) != 0
+                    && (caps & UInt32(VOL_CAP_FMT_CASE_SENSITIVE)) != 0
+                tree.setCaseSensitivity(caseSensitive)
+            }
+        }
 
         // Add root node
         let rootName = (path as NSString).lastPathComponent
@@ -248,6 +271,12 @@ public final class FileScanner {
         if isCancelled {
             queue.cancelAllOperations()
         }
+
+        // Propagate sizes bottom-up in a single O(n) pass.
+        // During scanning, each node stores only its own direct size (files) or bundle size.
+        // This replaces per-directory accumulateSize() calls that walked the parent chain
+        // under lock, causing heavy contention with 32 concurrent threads.
+        tree.propagateSizes()
 
         // Final sort by size descending
         tree.sortAllChildren()
@@ -412,14 +441,11 @@ public final class FileScanner {
         guard !children.isEmpty else { return }
         let firstChildIndex = tree.addChildren(children, parentIndex: parentIndex)
 
-        // Accumulate total file sizes up the parent chain
-        if totalFileSize > 0 || totalAllocatedSize > 0 {
-            tree.accumulateSize(from: firstChildIndex, fileSize: totalFileSize, allocatedSize: totalAllocatedSize)
-        }
-
-        // Compute and propagate sizes for bundle directories that we intentionally do not recurse into.
+        // Compute sizes for bundle directories that we intentionally do not recurse into.
         // Reuse the scanner's buffer (no longer needed for getattrlistbulk above) to avoid
         // a fresh 128KB allocation per bundle.
+        // Note: sizes are NOT accumulated up the parent chain here — that's deferred to
+        // propagateSizes() after the scan completes, avoiding lock contention from 32 threads.
         for bundle in bundleDirs {
             guard !isCancelled else { break }
             let bundlePath = dirPath + "/" + bundle.name
@@ -430,7 +456,6 @@ public final class FileScanner {
                 node.fileSize = bundleFileSize
                 node.allocatedSize = bundleAllocatedSize
             }
-            tree.accumulateSize(from: bundleTreeIndex, fileSize: bundleFileSize, allocatedSize: bundleAllocatedSize)
         }
 
         // Enqueue subdirectories — skip already-visited (dev, inode) pairs (firmlinks, hardlinks)
