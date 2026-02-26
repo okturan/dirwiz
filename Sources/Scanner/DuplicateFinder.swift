@@ -103,7 +103,7 @@ public final class DuplicateFinder {
     /// - Returns: Array of DuplicateGroup sorted by wastedSpace descending.
     public func findDuplicates(
         in tree: FileTree,
-        progress: ((Int, Int) -> Void)? = nil
+        progress: (@MainActor @Sendable (Int, Int) -> Void)? = nil
     ) async -> [DuplicateGroup] {
 
         // ---------------------------------------------------------------
@@ -133,7 +133,7 @@ public final class DuplicateFinder {
         // ---------------------------------------------------------------
         // Pass 2: Partial hash (first 4KB + last 4KB)
         // ---------------------------------------------------------------
-        let processedCount = Mutex(0)
+        let readSize = partialReadSize
 
         // Collect partial-hash groups using TaskGroup for concurrency.
         // Batch small size groups into chunks to avoid spawning one task per group
@@ -141,8 +141,9 @@ public final class DuplicateFinder {
         // sequentially, so the concurrent FD count is bounded by the cooperative
         // thread pool size (~CPU count), well within OPEN_MAX.
         let maxGroupsPerTask = 64
+        typealias PartialBatch = (matches: [(PartialHashKey, UInt32)], processed: Int)
         let partialGroups: [PartialHashKey: [UInt32]] = await withTaskGroup(
-            of: [(PartialHashKey, UInt32)].self,
+            of: PartialBatch.self,
             returning: [PartialHashKey: [UInt32]].self
         ) { group in
             // Batch size groups into chunks to reduce task overhead
@@ -151,33 +152,33 @@ public final class DuplicateFinder {
                 let chunk = candidateGroups[chunkStart..<chunkEnd]
                 group.addTask {
                     var results: [(PartialHashKey, UInt32)] = []
+                    var processed = 0
                     for sizeGroup in chunk {
                         let fileSize = snapshot[Int(sizeGroup[0])].fileSize
                         for nodeIndex in sizeGroup {
                             let hash = tree.withCPath(at: nodeIndex) { cPath in
-                                self.partialHash(cPath: cPath, fileSize: fileSize)
+                                Self.partialHash(cPath: cPath, fileSize: fileSize, readSize: readSize)
                             }
                             if let hash {
                                 let key = PartialHashKey(size: fileSize, hash: hash)
                                 results.append((key, nodeIndex))
                             }
-                            let current = processedCount.withLock { state -> Int in
-                                state += 1
-                                return state
-                            }
-                            if current % 500 == 0 {
-                                progress?(current, totalCandidates)
-                            }
+                            processed += 1
                         }
                     }
-                    return results
+                    return (results, processed)
                 }
             }
 
             // Collect results
             var collected: [PartialHashKey: [UInt32]] = [:]
+            var processedTotal = 0
             for await batch in group {
-                for (key, nodeIndex) in batch {
+                processedTotal += batch.processed
+                if processedTotal % 500 == 0 || processedTotal == totalCandidates {
+                    await progress?(processedTotal, totalCandidates)
+                }
+                for (key, nodeIndex) in batch.matches {
                     collected[key, default: []].append(nodeIndex)
                 }
             }
@@ -188,7 +189,7 @@ public final class DuplicateFinder {
         let partialMatches = partialGroups.filter { $0.value.count >= 2 }
 
         if partialMatches.isEmpty {
-            progress?(totalCandidates, totalCandidates)
+            await progress?(totalCandidates, totalCandidates)
             return []
         }
 
@@ -208,7 +209,7 @@ public final class DuplicateFinder {
                     for (partialKey, indices) in chunk {
                         for nodeIndex in indices {
                             let digest = tree.withCPath(at: nodeIndex) { cPath in
-                                self.fullFileHash(cPath: cPath)
+                                Self.fullFileHash(cPath: cPath)
                             }
                             if let digest {
                                 let key = FullHashKey(size: partialKey.size, lo: digest.lo, hi: digest.hi)
@@ -245,14 +246,14 @@ public final class DuplicateFinder {
         // Sort by wasted space descending
         results.sort { $0.wastedSpace > $1.wastedSpace }
 
-        progress?(totalCandidates, totalCandidates)
+        await progress?(totalCandidates, totalCandidates)
         return results
     }
 
     // MARK: - Hashing
 
     /// FNV-1a 64-bit hash.
-    private func fnv1a(_ data: UnsafeRawBufferPointer) -> UInt64 {
+    private static func fnv1a(_ data: UnsafeRawBufferPointer) -> UInt64 {
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in data {
             hash ^= UInt64(byte)
@@ -263,7 +264,7 @@ public final class DuplicateFinder {
 
     /// Read first 4KB + last 4KB and compute a combined hash.
     /// For files <= 8KB, reads the entire file.
-    private func partialHash(cPath: UnsafePointer<CChar>, fileSize: UInt64) -> UInt64? {
+    private static func partialHash(cPath: UnsafePointer<CChar>, fileSize: UInt64, readSize: Int) -> UInt64? {
         // Zero-byte files all share the same partial hash.
         if fileSize == 0 { return 0 }
 
@@ -271,7 +272,6 @@ public final class DuplicateFinder {
         guard fd >= 0 else { return nil }
         defer { close(fd) }
 
-        let readSize = partialReadSize
         let totalRead = fileSize <= UInt64(readSize * 2)
             ? Int(fileSize)
             : readSize * 2
@@ -297,7 +297,7 @@ public final class DuplicateFinder {
         }
 
         let rawBuffer = UnsafeRawBufferPointer(start: buffer, count: totalRead)
-        return fnv1a(rawBuffer)
+        return Self.fnv1a(rawBuffer)
     }
 
     /// Compute a full-file 128-bit hash using streaming read(), via StreamingHash128.
@@ -305,7 +305,7 @@ public final class DuplicateFinder {
     /// the file while we're hashing it (mmap would crash the entire app).
     /// Returns 128 bits (two UInt64s) to minimise collision risk without the
     /// overhead of a cryptographic hash function.
-    private func fullFileHash(cPath: UnsafePointer<CChar>) -> (lo: UInt64, hi: UInt64)? {
+    private static func fullFileHash(cPath: UnsafePointer<CChar>) -> (lo: UInt64, hi: UInt64)? {
         let fd = open(cPath, O_RDONLY)
         guard fd >= 0 else { return nil }
         defer { close(fd) }

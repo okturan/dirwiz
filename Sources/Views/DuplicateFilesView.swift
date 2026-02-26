@@ -179,23 +179,27 @@ public struct DuplicateFilesView: View {
 
     private func startDuplicateScan() {
         guard let tree = appState.fileTree else { return }
+        appState.duplicateTask?.cancel()
+        appState.duplicateToken &+= 1
+        let token = appState.duplicateToken
         appState.duplicate.isDuplicateScanRunning = true
         appState.duplicate.duplicateCheckedPaths.removeAll()
         appState.duplicate.duplicateExpandedGroups.removeAll()
         appState.duplicate.duplicateProgress = (0, 0)
 
-        Task {
+        appState.duplicateTask = Task {
             let finder = DuplicateFinder()
-            let groups = await finder.findDuplicates(in: tree) { processed, total in
-                Task { @MainActor in
-                    // Ensure progress only goes up (tasks complete out of order).
-                    let clamped = max(appState.duplicate.duplicateProgress.processed, processed)
-                    appState.duplicate.duplicateProgress = (clamped, total)
-                }
+            let groups = await finder.findDuplicates(in: tree) { [token] processed, total in
+                guard appState.duplicateToken == token else { return }
+                // Ensure progress only goes up (tasks complete out of order).
+                let clamped = max(appState.duplicate.duplicateProgress.processed, processed)
+                appState.duplicate.duplicateProgress = (clamped, total)
             }
             await MainActor.run {
+                guard appState.duplicateToken == token else { return }
                 appState.duplicate.duplicateGroups = groups
                 appState.duplicate.isDuplicateScanRunning = false
+                appState.duplicateTask = nil
             }
         }
     }

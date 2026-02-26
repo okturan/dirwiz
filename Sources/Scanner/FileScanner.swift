@@ -52,7 +52,7 @@ private final class VisitedDirectories: Sendable {
 
 // MARK: - FileScanner
 
-public final class FileScanner {
+public final class FileScanner: @unchecked Sendable {
 
     private let cancelState = Mutex(false)
     let filesystem: FilesystemProvider
@@ -166,6 +166,7 @@ public final class FileScanner {
         // Throttle progress updates
         let progressThrottle = Mutex(CFAbsoluteTime(0))
 
+        @Sendable
         func maybeUpdateProgress(currentDir: String) {
             let now = CFAbsoluteTimeGetCurrent()
             let shouldUpdate = progressThrottle.withLock { lastUpdate -> Bool in
@@ -187,6 +188,7 @@ public final class FileScanner {
         // DispatchGroup to track outstanding work
         let group = DispatchGroup()
 
+        @Sendable
         func enqueueDirectory(dirPath: String, parentIndex: UInt32) {
             guard !self.isCancelled else { return }
             group.enter()
@@ -233,12 +235,13 @@ public final class FileScanner {
 
         // Finalize progress — publish final counters before marking complete
         let totalElapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let wasCancelled = isCancelled
         await MainActor.run {
             progress.publishCounters(forceLayoutRevision: true)
             progress.elapsedTime = totalElapsed
             progress.isScanning = false
             progress.scanComplete = true
-            if self.isCancelled {
+            if wasCancelled {
                 progress.isCancelled = true
             }
         }
@@ -252,8 +255,8 @@ public final class FileScanner {
         tree: FileTree,
         progress: ScanProgress,
         visited: VisitedDirectories,
-        enqueue: @escaping (String, UInt32) -> Void,
-        maybeUpdateProgress: @escaping (String) -> Void
+        enqueue: @escaping @Sendable (String, UInt32) -> Void,
+        maybeUpdateProgress: @escaping @Sendable (String) -> Void
     ) {
         guard !isCancelled else { return }
         maybeUpdateProgress(dirPath)

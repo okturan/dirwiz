@@ -55,7 +55,7 @@ private struct ExtensionRow: View {
                     .fill(entry.swiftUIColor)
                     .frame(width: 10, height: 10)
 
-                Text(entry.extensionName == "Other" ? "Other" : ".\(entry.extensionName)")
+                Text(displayName)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .lineLimit(1)
 
@@ -100,5 +100,15 @@ private struct ExtensionRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 48, alignment: .trailing)
         }
+    }
+
+    private var displayName: String {
+        if entry.extensionName == "Other" {
+            return "Other"
+        }
+        if entry.extensionName.isEmpty {
+            return "(no ext)"
+        }
+        return ".\(entry.extensionName)"
     }
 }

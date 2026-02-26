@@ -4,7 +4,8 @@ import MetalKit
 // MARK: - MTKView Coordinator
 
 /// Metal coordinator that renders the cushion treemap using instanced drawing.
-final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
+@MainActor
+final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sendable {
 
     private let device: MTLDevice
     private var commandQueue: MTLCommandQueue?
@@ -80,26 +81,15 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
 
     // MARK: - Pipeline Setup
 
-    /// Cached compiled Metal library — avoids re-parsing the shader source
-    /// if the coordinator is recreated (e.g., SwiftUI view identity change).
-    /// Keyed by device registryID to handle multi-GPU setups correctly.
-    /// Thread-safe: only accessed from main thread (init is called from makeNSView).
-    private static var cachedLibraries: [UInt64: MTLLibrary] = [:]
-
     private func setupPipeline(mtkView: MTKView) {
         // Compile shaders from embedded source at runtime.
         // SPM doesn't compile .metal files into .metallib, so we embed the source.
         let library: MTLLibrary
-        if let cached = Self.cachedLibraries[device.registryID] {
-            library = cached
-        } else {
-            do {
-                library = try device.makeLibrary(source: CushionShaderSource.source, options: nil)
-                Self.cachedLibraries[device.registryID] = library
-            } catch {
-                print("CushionRenderer: Failed to compile Metal shaders: \(error)")
-                return
-            }
+        do {
+            library = try device.makeLibrary(source: CushionShaderSource.source, options: nil)
+        } catch {
+            print("CushionRenderer: Failed to compile Metal shaders: \(error)")
+            return
         }
 
         guard let vertexFunc = library.makeFunction(name: "cushionVertexShader"),
@@ -183,8 +173,19 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         let rootIndex = currentRootIndex
         let bounds = CGRect(origin: .zero, size: viewportSize)
 
+        let applyLayout: @MainActor @Sendable ([TreemapRect], SpatialGrid) -> Void = { [weak self] layout, grid in
+            guard let self else { return }
+            guard self.currentRootIndex == rootIndex else { return }
+            self.cachedLayout = layout
+            self.cachedSnapshot = snapshot
+            self.spatialGrid = grid
+            self.instanceBufferDirty = true
+            self.onLayoutUpdate?(layout)
+            self.mtkView?.needsDisplay = true
+        }
+
         // Fix 2: Run layout off the main thread to avoid frame drops.
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
+        let task = Task.detached(priority: .userInitiated) {
             guard !Task.isCancelled else { return }
             let layout = SquarifyLayout.layout(
                 nodes: snapshot,
@@ -199,16 +200,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                 viewportHeight: Float(bounds.height),
                 rects: layout
             )
-            await MainActor.run { [weak self] in
-                guard let self, !Task.isCancelled else { return }
-                guard self.currentRootIndex == rootIndex else { return }
-                self.cachedLayout = layout
-                self.cachedSnapshot = snapshot
-                self.spatialGrid = grid
-                self.instanceBufferDirty = true
-                self.onLayoutUpdate?(layout)
-                self.mtkView?.needsDisplay = true
-            }
+            await applyLayout(layout, grid)
         }
         pendingLayoutTask = task
     }
@@ -227,12 +219,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             return
         }
 
-        // Skip rebuild if nothing changed.
-        // Hover and selection are handled via shader uniforms — no per-instance rebuild needed.
-        if !instanceBufferDirty {
+        // Skip rebuild if nothing changed and all per-frame buffers are valid.
+        if !instanceBufferDirty && (instanceCount == 0 || instanceBuffers[currentBufferIndex] != nil) {
             return
         }
-        instanceBufferDirty = false
 
         let nodes = cachedSnapshot
         let layoutCount = cachedLayout.count
@@ -246,21 +236,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             }
         }
 
-        // Resize buffer if needed.
-        let requiredSize = visibleCount * MemoryLayout<CushionInstance>.stride
-        if instanceBuffers[currentBufferIndex] == nil
-            || requiredSize > instanceBufferCapacities[currentBufferIndex] {
-            let newCapacity = max(requiredSize, instanceBufferCapacities[currentBufferIndex] * 2)
-            instanceBuffers[currentBufferIndex] = device.makeBuffer(
-                length: newCapacity,
-                options: .storageModeShared
-            )
-            instanceBufferCapacities[currentBufferIndex] = newCapacity
-        }
-
-        guard let buffer = instanceBuffers[currentBufferIndex] else { return }
-        let ptr = buffer.contents().bindMemory(to: CushionInstance.self, capacity: visibleCount)
-
         let resolver = TreemapColorResolver(
             palette: extensionPalette,
             recencyFactors: recencyFactors,
@@ -270,7 +245,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             isTemporalDiffEnabled: isTemporalDiffEnabled
         )
 
-        var writeIdx = 0
+        var instances: [CushionInstance] = []
+        instances.reserveCapacity(visibleCount)
+
+        var lookup: [UInt32: Int32] = [:]
+        lookup.reserveCapacity(visibleCount)
+
+        var writeIdx: Int32 = 0
         for i in 0..<layoutCount {
             let tmRect = cachedLayout[i]
 
@@ -285,26 +266,48 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             // Use cached coefficients instead of recomputing.
             let coefs = tmRect.cachedCoefs
 
-            ptr[writeIdx] = CushionInstance(
+            instances.append(CushionInstance(
                 rect: SIMD4<Float>(tmRect.x, tmRect.y, tmRect.width, tmRect.height),
                 coefs: coefs,
                 color: baseColor
-            )
+            ))
+            lookup[tmRect.nodeIndex] = writeIdx
             writeIdx += 1
         }
-        instanceCount = writeIdx
 
-        // Rebuild O(1) hover lookup: nodeIndex -> visible instance index.
-        var lookup: [UInt32: Int32] = [:]
-        lookup.reserveCapacity(writeIdx)
-        var idx: Int32 = 0
-        for i in 0..<layoutCount {
-            let r = cachedLayout[i]
-            guard r.width >= 0.5, r.height >= 0.5 else { continue }
-            lookup[r.nodeIndex] = idx
-            idx += 1
-        }
+        instanceCount = instances.count
         nodeToInstanceIndex = lookup
+
+        guard instanceCount > 0 else {
+            instanceBufferDirty = false
+            return
+        }
+
+        let requiredSize = instanceCount * MemoryLayout<CushionInstance>.stride
+        for bufferIndex in 0..<maxFramesInFlight {
+            guard let buffer = ensureInstanceBuffer(at: bufferIndex, requiredSize: requiredSize) else {
+                continue
+            }
+            instances.withUnsafeBytes { raw in
+                guard let src = raw.baseAddress else { return }
+                buffer.contents().copyMemory(from: src, byteCount: requiredSize)
+            }
+        }
+
+        instanceBufferDirty = false
+    }
+
+    private func ensureInstanceBuffer(at index: Int, requiredSize: Int) -> MTLBuffer? {
+        guard index >= 0, index < instanceBuffers.count else { return nil }
+        if instanceBuffers[index] == nil || requiredSize > instanceBufferCapacities[index] {
+            let newCapacity = max(requiredSize, max(instanceBufferCapacities[index] * 2, 1))
+            instanceBuffers[index] = device.makeBuffer(
+                length: newCapacity,
+                options: .storageModeShared
+            )
+            instanceBufferCapacities[index] = newCapacity
+        }
+        return instanceBuffers[index]
     }
 
     // MARK: - MTKViewDelegate
@@ -340,8 +343,9 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                 frameSemaphore.signal()
                 return
             }
-            commandBuffer.addCompletedHandler { [weak self] _ in
-                self?.frameSemaphore.signal()
+            let semaphore = frameSemaphore
+            commandBuffer.addCompletedHandler { _ in
+                semaphore.signal()
             }
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
                 commandBuffer.commit()
@@ -396,8 +400,9 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             frameSemaphore.signal()
             return
         }
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            self?.frameSemaphore.signal()
+        let semaphore = frameSemaphore
+        commandBuffer.addCompletedHandler { _ in
+            semaphore.signal()
         }
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
             commandBuffer.commit()

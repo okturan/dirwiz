@@ -102,11 +102,13 @@ extension AppState {
         fileTree = newTree
         resetForNewScan()
         activeTab = .treeView
+        scanStartTime = CFAbsoluteTimeGetCurrent()
         let token = scanToken
         Task {
             await scanner.scan(path: volumeURL.path, progress: scanProgress, tree: newTree)
             await MainActor.run { [weak self] in
-                guard let self, scanToken == token else { return }
+                guard let self, self.scanToken == token else { return }
+                scanDuration = CFAbsoluteTimeGetCurrent() - scanStartTime
                 activeScanner = nil
                 setTreemapRoot(0, recordHistory: false)
                 computeExtensionStats()

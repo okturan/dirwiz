@@ -197,6 +197,7 @@ struct DuplicateFinderTests {
     // MARK: - Progress callback
 
     @Test("Progress callback is invoked during scan")
+    @MainActor
     func progressCallback() async throws {
         let content = Data(repeating: 0x99, count: 4096)
         let (url, cleanup) = try createTempFiles([
@@ -207,10 +208,11 @@ struct DuplicateFinderTests {
         defer { cleanup() }
 
         let tree = await scanDirectory(url.path)
+        let localFinder = DuplicateFinder()
 
         var callbackFired = false
         var lastTotal = 0
-        let groups = await finder.findDuplicates(in: tree) { processed, total in
+        let groups = await localFinder.findDuplicates(in: tree) { processed, total in
             callbackFired = true
             lastTotal = total
             _ = processed // avoid unused warning

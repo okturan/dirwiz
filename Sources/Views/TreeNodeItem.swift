@@ -86,19 +86,32 @@ struct TreeNodeItem: Identifiable, Equatable {
         let nodeA = ia < nodes.count ? nodes[ia] : FileNode()
         let nodeB = ib < nodes.count ? nodes[ib] : FileNode()
 
-        let cmp: Bool
         switch sortKey {
         case .name:
-            cmp = tree.name(at: a).localizedCaseInsensitiveCompare(tree.name(at: b)) == .orderedAscending
+            let order = tree.name(at: a).localizedCaseInsensitiveCompare(tree.name(at: b))
+            if order != .orderedSame {
+                return sortAscending ? order == .orderedAscending : order == .orderedDescending
+            }
         case .percentage, .size:
-            cmp = nodeA.fileSize > nodeB.fileSize
+            if nodeA.fileSize != nodeB.fileSize {
+                return sortAscending ? nodeA.fileSize < nodeB.fileSize : nodeA.fileSize > nodeB.fileSize
+            }
         case .allocated:
-            cmp = nodeA.allocatedSize > nodeB.allocatedSize
+            if nodeA.allocatedSize != nodeB.allocatedSize {
+                return sortAscending
+                    ? nodeA.allocatedSize < nodeB.allocatedSize
+                    : nodeA.allocatedSize > nodeB.allocatedSize
+            }
         case .items:
-            cmp = nodeA.childCount > nodeB.childCount
+            if nodeA.childCount != nodeB.childCount {
+                return sortAscending ? nodeA.childCount < nodeB.childCount : nodeA.childCount > nodeB.childCount
+            }
         case .modified:
-            cmp = nodeA.modifiedDate > nodeB.modifiedDate
+            if nodeA.modifiedDate != nodeB.modifiedDate {
+                return sortAscending ? nodeA.modifiedDate < nodeB.modifiedDate : nodeA.modifiedDate > nodeB.modifiedDate
+            }
         }
-        return sortAscending ? !cmp : cmp
+        // Deterministic tie-breaker to satisfy strict weak ordering.
+        return a < b
     }
 }

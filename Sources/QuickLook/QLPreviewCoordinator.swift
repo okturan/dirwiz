@@ -10,6 +10,7 @@ public final class QLPreviewCoordinator: NSObject, QLPreviewPanelDataSource {
     // MARK: - Public API
 
     /// Open (or refresh) the Quick Look panel for the current previewPath.
+    @MainActor
     public func openQuickLook() {
         guard let panel = QLPreviewPanel.shared() else { return }
         if QLPreviewPanel.sharedPreviewPanelExists() && panel.isVisible {
@@ -22,6 +23,7 @@ public final class QLPreviewCoordinator: NSObject, QLPreviewPanelDataSource {
     }
 
     /// Toggle: if the panel is visible, close it; otherwise open it.
+    @MainActor
     public func toggleQuickLook(for path: String?) {
         guard let path, !path.isEmpty else { return }
         previewPath = path
@@ -44,13 +46,4 @@ public final class QLPreviewCoordinator: NSObject, QLPreviewPanelDataSource {
         return URL(fileURLWithPath: path) as NSURL
     }
 
-    // MARK: - QLPreviewPanelController
-
-    public override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        panel.dataSource = self
-    }
-
-    public override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        // nothing to tear down
-    }
 }

@@ -26,7 +26,7 @@ extension AppState {
 
         // Per-extension-name stats keyed by string (collision-safe).
         fileTypeStats = sizeByExt.map { ext, size in
-            let hash = extensionHash(".\(ext)")  // matches scanner: hash(part after last dot)
+            let hash = ext.isEmpty ? UInt32(0) : extensionHash(".\(ext)")
             let count = countByExt[ext] ?? 0
             return FileTypeStat(
                 extensionName: ext,
@@ -45,8 +45,8 @@ extension AppState {
     }
 
     private static func extractExtension(from name: String) -> String {
-        guard let dotIndex = name.lastIndex(of: ".") else { return "(no ext)" }
+        guard let dotIndex = name.lastIndex(of: ".") else { return "" }
         let ext = String(name[name.index(after: dotIndex)...]).lowercased()
-        return ext.isEmpty ? "(no ext)" : ext
+        return ext
     }
 }

@@ -67,12 +67,21 @@ extension AppState {
 
     /// Try to load a persisted snapshot matching the current scan root.
     public func loadSnapshotIfAvailable() {
-        guard let tree = fileTree else { return }
+        guard let tree = fileTree else {
+            temporalDiff.temporalSnapshot = nil
+            return
+        }
+        let token = scanToken
         Task.detached(priority: .background) {
             let rootPath = tree.path(at: 0)
-            guard let snapshot = try? TemporalSnapshot.load(for: rootPath) else { return }
+            let snapshot = try? TemporalSnapshot.load(for: rootPath)
             await MainActor.run {
+                // Discard stale load if another scan started while I/O was running.
+                guard self.scanToken == token else { return }
                 self.temporalDiff.temporalSnapshot = snapshot
+                if snapshot == nil {
+                    self.temporalDiff.isTemporalDiffEnabled = false
+                }
             }
         }
     }
@@ -89,6 +98,15 @@ extension AppState {
     /// Start diff computation between the current tree and the loaded snapshot.
     public func startTemporalDiff() {
         guard let snapshot = temporalDiff.temporalSnapshot, let tree = fileTree else { return }
+        let currentRootPath = tree.path(at: 0)
+        guard snapshot.meta.rootPath == currentRootPath else {
+            temporalDiff.isTemporalDiffEnabled = false
+            temporalDiff.temporalDiffKinds = []
+            temporalDiff.temporalDiffStrengths = []
+            temporalDiff.temporalDiffDeletedCounts = [:]
+            temporalDiff.temporalDiffGeneration &+= 1
+            return
+        }
         temporalDiffTask?.cancel()
         temporalDiffToken &+= 1
         let token = temporalDiffToken

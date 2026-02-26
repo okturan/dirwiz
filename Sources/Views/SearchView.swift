@@ -451,7 +451,7 @@ public struct SearchView: View {
             Self.sortIndices(&sorted, nodes: nodes, pool: pool, by: order, ascending: ascending)
             guard !Task.isCancelled else { return }
             let result = sorted
-            await MainActor.run { [searchGeneration] in
+            await MainActor.run {
                 guard thisGeneration == searchGeneration else { return }
                 appState.search.searchResults = result
                 appState.search.isSearching = false

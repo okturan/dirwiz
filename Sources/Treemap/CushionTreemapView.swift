@@ -136,6 +136,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         Coordinator()
     }
 
+    @MainActor
     public final class Coordinator: NSObject {
         var metalCoordinator: CushionTreemapCoordinator?
     }
@@ -144,6 +145,7 @@ public struct CushionTreemapView: NSViewRepresentable {
 // MARK: - Interaction Protocol
 
 /// Protocol for forwarding mouse events from the MTKView to the coordinator.
+@MainActor
 protocol TreemapInteractionDelegate: AnyObject {
     func treemapMouseDown(at point: NSPoint, clickCount: Int)
     func treemapMouseMoved(at point: NSPoint)

@@ -83,6 +83,8 @@ public final class AppState {
 
     /// Token incremented on each new scan; used to discard stale async results.
     public var scanToken: UInt64 = 0
+    var duplicateToken: UInt64 = 0
+    @ObservationIgnored var duplicateTask: Task<Void, Never>?
     var recencyToken: UInt64 = 0
     var recencyTask: Task<Void, Never>?
     var temporalDiffToken: UInt64 = 0
@@ -107,6 +109,9 @@ public final class AppState {
         isRecencyOverlayEnabled = false
         isRecencyQueryRunning = false
         scanToken &+= 1
+        duplicateToken &+= 1
+        duplicateTask?.cancel()
+        duplicateTask = nil
         recencyToken &+= 1
         recencyTask?.cancel()
         recencyTask = nil

@@ -32,10 +32,12 @@ public final class TemporalDiffState {
 
     /// Reset temporal diff state for a new scan.
     public func reset() {
+        temporalSnapshot = nil
         temporalDiffKinds = []
         temporalDiffStrengths = []
         temporalDiffDeletedCounts = [:]
         temporalDiffGeneration = 0
         isTemporalDiffEnabled = false
+        isSnapshotBuilding = false
     }
 }

@@ -74,7 +74,11 @@ struct ContentView: View {
                         }
                         .help("Temporal Diff — highlight changes since snapshot (Cmd+Opt+D)")
                         .keyboardShortcut("d", modifiers: [.command, .option])
-                        .disabled(!appState.scanProgress.scanComplete || appState.temporalDiff.temporalSnapshot == nil)
+                        .disabled(
+                            !appState.scanProgress.scanComplete
+                                || appState.temporalDiff.temporalSnapshot == nil
+                                || appState.temporalDiff.temporalSnapshot?.meta.rootPath != appState.fileTree?.path(at: 0)
+                        )
                     }
                 }
                 ToolbarItem(placement: .automatic) {
