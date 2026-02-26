@@ -33,7 +33,8 @@ struct SquarifyLayoutTests {
             bounds: CGRect(x: 0, y: 0, width: 800, height: 600)
         )
 
-        #expect(rects.count == 4, "Should produce one rect per leaf child")
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 4, "Should produce one rect per leaf child")
     }
 
     @Test("Total area of rectangles matches bounds area")
@@ -42,7 +43,8 @@ struct SquarifyLayoutTests {
         let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
         let rects = SquarifyLayout.layout(nodes: tree.nodesSnapshot(), rootIndex: 0, bounds: bounds)
 
-        let totalArea = rects.reduce(Float(0)) { $0 + $1.width * $1.height }
+        // Only leaf rects should sum to the full bounds area.
+        let totalArea = rects.filter { !$0.isBackground }.reduce(Float(0)) { $0 + $1.width * $1.height }
         let boundsArea = Float(bounds.width * bounds.height)
 
         // Allow small floating point tolerance.
@@ -56,11 +58,12 @@ struct SquarifyLayoutTests {
         let bounds = CGRect(x: 0, y: 0, width: 600, height: 400)
         let rects = SquarifyLayout.layout(nodes: tree.nodesSnapshot(), rootIndex: 0, bounds: bounds)
 
-        // Check no pair of rects significantly overlaps.
-        for i in 0..<rects.count {
-            for j in (i+1)..<rects.count {
-                let a = rects[i]
-                let b = rects[j]
+        // Check no pair of leaf rects significantly overlaps (background rects intentionally overlap).
+        let leaves = rects.filter { !$0.isBackground }
+        for i in 0..<leaves.count {
+            for j in (i+1)..<leaves.count {
+                let a = leaves[i]
+                let b = leaves[j]
 
                 let overlapX = max(0, min(a.x + a.width, b.x + b.width) - max(a.x, b.x))
                 let overlapY = max(0, min(a.y + a.height, b.y + b.height) - max(a.y, b.y))
@@ -95,8 +98,9 @@ struct SquarifyLayoutTests {
         let bounds = CGRect(x: 0, y: 0, width: 500, height: 300)
         let rects = SquarifyLayout.layout(nodes: tree.nodesSnapshot(), rootIndex: 0, bounds: bounds)
 
-        #expect(rects.count == 1)
-        let rect = rects[0]
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 1)
+        let rect = leaves[0]
         #expect(abs(rect.width - 500) < 1.0)
         #expect(abs(rect.height - 300) < 1.0)
     }
@@ -110,10 +114,11 @@ struct SquarifyLayoutTests {
             bounds: CGRect(x: 0, y: 0, width: 800, height: 600)
         )
 
-        #expect(rects.count == 3)
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 3)
 
         // Sort rects by their node index to match the original order.
-        let sorted = rects.sorted { $0.nodeIndex < $1.nodeIndex }
+        let sorted = leaves.sorted { $0.nodeIndex < $1.nodeIndex }
         let areas = sorted.map { $0.width * $0.height }
 
         #expect(areas[0] > areas[1], "1000-byte file should have larger area than 500-byte file")
@@ -136,9 +141,10 @@ struct SquarifyLayoutTests {
             minPixelSize: 2.0
         )
 
-        // Should have fewer rects than 101 because many tiny files are culled.
-        #expect(rects.count < 101, "Tiny rects should be culled: got \(String(describing: rects.count))")
-        #expect(rects.count >= 1, "Should have at least the large file")
+        // Should have fewer leaf rects than 101 because many tiny files are culled.
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count < 101, "Tiny rects should be culled: got \(String(describing: leaves.count))")
+        #expect(leaves.count >= 1, "Should have at least the large file")
     }
 
     @Test("Nested directories produce deeper rects")
@@ -167,8 +173,9 @@ struct SquarifyLayoutTests {
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
 
-        #expect(rects.count == 1) // Only the leaf file
-        #expect(rects[0].depth == 2, "Nested leaf should have depth 2")
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 1, "Only the leaf file should be a non-background rect")
+        #expect(leaves[0].depth == 2, "Nested leaf should have depth 2")
     }
 
     @Test("Empty directory produces a single rect")

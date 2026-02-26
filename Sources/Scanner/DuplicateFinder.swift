@@ -1,5 +1,5 @@
 import Foundation
-import CommonCrypto
+import CryptoKit
 import os
 
 // MARK: - DuplicateFinder
@@ -216,28 +216,16 @@ public final class DuplicateFinder {
         guard fstat(fd, &fileInfo) == 0 else { return nil }
         let byteCount = Int(fileInfo.st_size)
 
-        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-
         if byteCount == 0 {
-            _ = CC_SHA256(nil, 0, &digest)
-            return digestToUInt64(digest)
+            return SHA256.hash(data: Data()).withUnsafeBytes { $0.load(as: UInt64.self) }
         }
 
         let mapped = mmap(nil, byteCount, PROT_READ, MAP_PRIVATE, fd, 0)
         guard mapped != MAP_FAILED, let mapped else { return nil }
         defer { munmap(mapped, byteCount) }
 
-        _ = CC_SHA256(mapped, CC_LONG(byteCount), &digest)
-        return digestToUInt64(digest)
-    }
-
-    private func digestToUInt64(_ digest: [UInt8]) -> UInt64 {
-        precondition(digest.count >= 8)
-        var value: UInt64 = 0
-        for byte in digest.prefix(8) {
-            value = (value << 8) | UInt64(byte)
-        }
-        return value
+        let data = Data(bytesNoCopy: mapped, count: byteCount, deallocator: .none)
+        return SHA256.hash(data: data).withUnsafeBytes { $0.load(as: UInt64.self) }
     }
 }
 

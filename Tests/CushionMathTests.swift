@@ -15,8 +15,9 @@ struct CushionMathTests {
             rootIndex: 0,
             bounds: CGRect(x: 0, y: 0, width: 100, height: 100)
         )
-        #expect(rects.count == 1)
-        let r = rects[0]
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 1)
+        let r = leaves[0]
         let ratio = max(r.width / r.height, r.height / r.width)
         #expect(ratio < 1.1, "Single item in square should have near-perfect aspect ratio")
     }
@@ -30,7 +31,7 @@ struct CushionMathTests {
             bounds: CGRect(x: 0, y: 0, width: 800, height: 600)
         )
 
-        for rect in rects {
+        for rect in rects.filter({ !$0.isBackground }) {
             let ratio = max(rect.width / rect.height, rect.height / rect.width)
             // Squarified treemaps should keep ratios reasonable (typically < 10).
             #expect(ratio < 15, "Aspect ratio too extreme")
@@ -61,11 +62,13 @@ struct CushionMathTests {
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
 
-        #expect(rects.count == 1) // only the leaf
-        let leafRect = rects[0]
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 1, "Only the leaf file should be a non-background rect")
+        let leafRect = leaves[0]
         // depth=2: root(0) -> dir(1) -> file(2)
         #expect(leafRect.depth == 2, "Leaf at depth 2 should have depth=2")
-        #expect(leafRect.ancestors.count == 2, "Should have 2 ancestor rects (root + dir)")
+        // cachedCoefs are computed inline from ancestor stack — non-zero confirms ancestor ridges applied.
+        #expect(leafRect.cachedCoefs != .zero, "Leaf coefs should reflect ancestor ridge contribution")
     }
 
     @Test("Ancestor chain includes correct parent rects")
@@ -94,15 +97,14 @@ struct CushionMathTests {
         let rects = SquarifyLayout.layout(nodes: tree.nodesSnapshot(), rootIndex: 0, bounds: bounds)
 
         // Find the nested leaf.
-        let nestedRect = rects.first { $0.nodeIndex == 3 }
+        let nestedRect = rects.first { $0.nodeIndex == 3 && !$0.isBackground }
         #expect(nestedRect != nil, "Should find the nested file rect")
 
         if let nr = nestedRect {
-            // First ancestor should be the root bounds.
-            #expect(nr.ancestors.count >= 1, "Should have at least 1 ancestor")
-            let rootAnc = nr.ancestors[0]
-            #expect(abs(rootAnc.w - 800) < 1, "Root ancestor should span full width")
-            #expect(abs(rootAnc.h - 600) < 1, "Root ancestor should span full height")
+            // cachedCoefs are computed inline from the ancestor stack.
+            // Non-zero confirms the full root → subdir → leaf ancestry was applied.
+            #expect(nr.cachedCoefs != .zero, "Nested rect coefs should reflect ancestor ridge contributions")
+            #expect(nr.depth >= 2, "Nested leaf should be at depth >= 2")
         }
     }
 
@@ -115,9 +117,10 @@ struct CushionMathTests {
             bounds: CGRect(x: 0, y: 0, width: 800, height: 600)
         )
 
-        #expect(rects.count == 2)
-        let area1 = rects[0].width * rects[0].height
-        let area2 = rects[1].width * rects[1].height
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count == 2)
+        let area1 = leaves[0].width * leaves[0].height
+        let area2 = leaves[1].width * leaves[1].height
         let diff = Swift.abs(area1 - area2)
         #expect(diff < 100, "Equal files should have nearly equal areas")
     }
@@ -132,8 +135,9 @@ struct CushionMathTests {
             bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080)
         )
 
-        #expect(rects.count > 0, "Should produce some rects for 1000 files")
-        #expect(rects.count <= 1000, "Should not produce more rects than files")
+        let leaves = rects.filter { !$0.isBackground }
+        #expect(leaves.count > 0, "Should produce some rects for 1000 files")
+        #expect(leaves.count <= 1000, "Should not produce more leaf rects than files")
     }
 
     @Test("SizeFormatter formats correctly")

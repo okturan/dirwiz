@@ -107,16 +107,13 @@ public final class FileScanner {
         cancelLock.lock()
         cancelled = false
         cancelLock.unlock()
-        progress.reset()
-        progress.isScanning = true
-        let startTime = CFAbsoluteTimeGetCurrent()
-
-        // Estimate total items using used inode counts for determinate progress.
+        // Estimate total items using inode counts (blocking I/O, done off main thread).
         var stat = statfs()
+        var estimatedItems = 0
         if statfs(path, &stat) == 0 {
             let usedInodes = max(0, Int64(stat.f_files) - Int64(stat.f_ffree))
             if usedInodes > 0 {
-                progress.estimatedTotalItems = Int(clamping: usedInodes)
+                estimatedItems = Int(clamping: usedInodes)
             }
 
             // Scanning "/" follows firmlinks into the Data volume; include its inode usage too.
@@ -124,10 +121,21 @@ public final class FileScanner {
             if path == "/", statfs(dataVolumePath, &stat) == 0 {
                 let dataUsedInodes = max(0, Int64(stat.f_files) - Int64(stat.f_ffree))
                 if dataUsedInodes > 0 {
-                    progress.estimatedTotalItems += Int(clamping: dataUsedInodes)
+                    estimatedItems += Int(clamping: dataUsedInodes)
                 }
             }
         }
+
+        let estimatedItemsSnapshot = estimatedItems
+        await MainActor.run {
+            progress.reset()
+            progress.isScanning = true
+            if estimatedItemsSnapshot > 0 {
+                progress.estimatedTotalItems = estimatedItemsSnapshot
+            }
+        }
+
+        let startTime = CFAbsoluteTimeGetCurrent()
 
         // Add root node
         let rootName = (path as NSString).lastPathComponent
@@ -414,6 +422,9 @@ public final class FileScanner {
             seen.insert(rootKey)
         }
 
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: kBufferSize, alignment: 16)
+        defer { buffer.deallocate() }
+
         while let currentDir = stack.popLast(), !isCancelled {
             let fd = open(currentDir, O_RDONLY | O_NOFOLLOW)
             guard fd >= 0 else { continue }
@@ -424,8 +435,6 @@ public final class FileScanner {
             attrList.commonattr = kRequestedCommonAttrs
             attrList.fileattr = kRequestedFileAttrs
 
-            let buffer = UnsafeMutableRawPointer.allocate(byteCount: kBufferSize, alignment: 16)
-            defer { buffer.deallocate() }
 
             while !isCancelled {
                 let count = getattrlistbulk(fd, &attrList, buffer, kBufferSize, UInt64(FSOPT_PACK_INVAL_ATTRS))

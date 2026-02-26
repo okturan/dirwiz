@@ -8,7 +8,7 @@ public struct FileNode: Sendable {
     public var nameLength: UInt16
     public var parentIndex: UInt32
     public var firstChildIndex: UInt32
-    public var childCount: UInt16
+    public var childCount: UInt32
     public var fileSize: UInt64
     public var allocatedSize: UInt64
     public var extensionHash: UInt16
@@ -37,7 +37,7 @@ public struct FileNode: Sendable {
         nameLength: UInt16 = 0,
         parentIndex: UInt32 = FileNode.invalid,
         firstChildIndex: UInt32 = FileNode.invalid,
-        childCount: UInt16 = 0,
+        childCount: UInt32 = 0,
         fileSize: UInt64 = 0,
         allocatedSize: UInt64 = 0,
         extensionHash: UInt16 = 0,
@@ -241,7 +241,7 @@ public final class FileTree: @unchecked Sendable {
             nodes.append(node)
         }
         nodes[Int(parentIndex)].firstChildIndex = firstIndex
-        nodes[Int(parentIndex)].childCount = UInt16(min(children.count, Int(UInt16.max)))
+        nodes[Int(parentIndex)].childCount = UInt32(children.count)
         return firstIndex
     }
 

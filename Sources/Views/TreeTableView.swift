@@ -385,7 +385,7 @@ public struct TreeTableView: View {
         guard let selected = appState.selectedNodeIndex else { return }
         if expandedFolders.contains(selected) {
             withAnimation(.easeInOut(duration: 0.12)) {
-                expandedFolders.remove(selected)
+                _ = expandedFolders.remove(selected)
             }
             return
         }
@@ -407,7 +407,7 @@ public struct TreeTableView: View {
         guard !nodes[i].isBundle else { return }
         if !expandedFolders.contains(selected) {
             withAnimation(.easeInOut(duration: 0.12)) {
-                expandedFolders.insert(selected)
+                _ = expandedFolders.insert(selected)
             }
         } else {
             let items = flattenedVisibleItems(tree: tree)

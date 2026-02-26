@@ -51,7 +51,7 @@ public final class ScanProgress: @unchecked Sendable {
         return isScanning ? min(0.99, raw) : min(1.0, raw)
     }
 
-    public func reset() {
+    @MainActor public func reset() {
         lock.lock()
         _hotFiles = 0
         _hotDirs = 0
