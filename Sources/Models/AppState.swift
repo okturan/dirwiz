@@ -1,4 +1,5 @@
 import SwiftUI
+import Quartz
 
 /// Central observable state for the application.
 @Observable
@@ -11,6 +12,9 @@ public final class AppState {
 
     /// Currently selected node in tree view / treemap.
     public var selectedNodeIndex: UInt32?
+
+    /// Coordinator for Quick Look panel — holds data source / controller conformance.
+    public let quickLookCoordinator = QLPreviewCoordinator()
 
     /// Root node for treemap display (navigation into subdirectories).
     public var treemapRootIndex: UInt32 = 0
@@ -64,6 +68,14 @@ public final class AppState {
 
     /// Whether a snapshot save/build is in progress.
     public var isSnapshotBuilding: Bool = false
+
+    // MARK: - Scan Timing
+
+    /// Wall-clock time when the most recent scan started (CFAbsoluteTime).
+    public var scanStartTime: CFAbsoluteTime = 0
+
+    /// Total elapsed seconds for the last completed scan. Zero if no scan has finished yet.
+    public var scanDuration: TimeInterval = 0
 
     /// Bumped each time diff results are applied (GPU change detection).
     public var temporalDiffGeneration: UInt64 = 0
@@ -124,6 +136,8 @@ public final class AppState {
         temporalDiffTask?.cancel()
         temporalDiffTask = nil
         temporalDiffToken &+= 1
+        scanStartTime = 0
+        scanDuration = 0
     }
 }
 

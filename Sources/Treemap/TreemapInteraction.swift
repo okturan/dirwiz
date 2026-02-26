@@ -39,6 +39,13 @@ public struct InteractiveTreemapView: View {
             appState.setTreemapRoot(sel)
             return .handled
         }
+        .onKeyPress(.space) {
+            guard let sel = appState.selectedNodeIndex,
+                  let tree = appState.fileTree else { return .ignored }
+            let path = tree.path(at: sel)
+            appState.quickLookCoordinator.toggleQuickLook(for: path)
+            return .handled
+        }
         .onKeyPress(keys: [KeyEquivalent("[")]) { press in
             guard press.modifiers.contains(.command), canNavigate else { return .ignored }
             appState.navigateBack()
@@ -138,6 +145,7 @@ public struct InteractiveTreemapView: View {
     // MARK: - Treemap Content
 
     private var treemapContent: some View {
+        GeometryReader { geo in
         ZStack(alignment: .topLeading) {
             CushionTreemapView(
                 fileTree: appState.fileTree,
@@ -220,11 +228,12 @@ public struct InteractiveTreemapView: View {
             // Hover tooltip overlay.
             if let nodeIndex = hoveredNodeIndex, let point = hoverPoint {
                 tooltipView(for: nodeIndex)
-                    .position(tooltipPosition(for: point))
+                    .position(tooltipPosition(for: point, in: geo.size))
                     .allowsHitTesting(false)
                     .animation(.none, value: nodeIndex)
             }
         }
+        } // GeometryReader
     }
 
     // MARK: - Text Labels
@@ -361,12 +370,49 @@ public struct InteractiveTreemapView: View {
         }
     }
 
-    /// Position the tooltip near the cursor but keep it within the view bounds.
-    private func tooltipPosition(for point: CGPoint) -> CGPoint {
-        return CGPoint(
-            x: point.x + 16,
-            y: point.y - 24
-        )
+    /// Position the tooltip near the cursor, flipping sides when near edges.
+    /// Uses .position() which places the view's CENTER at the returned point.
+    private func tooltipPosition(for point: CGPoint, in size: CGSize) -> CGPoint {
+        // Rough tooltip dimensions for edge detection (actual size varies with content).
+        let tw: CGFloat = 230
+        let th: CGFloat = 60
+        let margin: CGFloat = 8
+
+        // Default: right of and above the cursor.
+        var x = point.x + 16
+        var y = point.y - 24
+
+        // Flip to left side if right edge would overflow.
+        if x + tw / 2 + margin > size.width {
+            x = point.x - 16 - tw / 2
+        }
+
+        // Flip to below cursor if top edge would overflow.
+        if y - th / 2 - margin < 0 {
+            y = point.y + 16 + th / 2
+        }
+
+        // Hard clamp: keep tooltip center within drawable area.
+        x = Swift.max(tw / 2 + margin, Swift.min(size.width  - tw / 2 - margin, x))
+        y = Swift.max(th / 2 + margin, Swift.min(size.height - th / 2 - margin, y))
+
+        return CGPoint(x: x, y: y)
+    }
+
+    private func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void) {
+        if size > 100_000_000 {
+            let alert = NSAlert()
+            alert.messageText = "Move \"\(name)\" to Trash?"
+            alert.informativeText = "This item is \(SizeFormatter.shared.format(size)). It will be moved to the Trash."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Move to Trash")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                action()
+            }
+        } else {
+            action()
+        }
     }
 
     // MARK: - Context Menu
@@ -386,6 +432,28 @@ public struct InteractiveTreemapView: View {
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(path, forType: .string)
+            }
+
+            Button("Move to Trash") {
+                let url = URL(fileURLWithPath: path)
+                confirmTrash(name: tree.name(at: nodeIndex), size: node.fileSize) {
+                    if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil,
+                       let volumeURL = appState.selectedVolume {
+                        let scanner = FileScanner()
+                        let scanPath = volumeURL.path
+                        let newTree = FileTree()
+                        appState.fileTree = newTree
+                        appState.resetForNewScan()
+                        appState.activeTab = .treeView
+                        Task {
+                            await scanner.scan(path: scanPath, progress: appState.scanProgress, tree: newTree)
+                            await MainActor.run {
+                                appState.setTreemapRoot(0, recordHistory: false)
+                                appState.computeExtensionStats()
+                            }
+                        }
+                    }
+                }
             }
 
             if canNavigate {

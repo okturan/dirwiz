@@ -11,78 +11,84 @@ struct ContentView: View {
     @State private var splitRatio: CGFloat = 0.4
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 320)
-        } detail: {
-            detailContent
-        }
-        .navigationTitle("")
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                HStack(spacing: 6) {
-                    // Recency heatmap spinner + toggle
-                    if appState.isRecencyQueryRunning {
-                        ProgressView()
-                            .controlSize(.small)
-                            .help("Querying Spotlight for file recency…")
-                    }
-                    Toggle(isOn: Binding(
-                        get: { appState.isRecencyOverlayEnabled },
-                        set: { enabled in
-                            appState.isRecencyOverlayEnabled = enabled
-                            if enabled { appState.startRecencyQueryIfNeeded() }
+        VStack(spacing: 0) {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                sidebar
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 320)
+            } detail: {
+                detailContent
+            }
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    HStack(spacing: 6) {
+                        // Recency heatmap spinner + toggle
+                        if appState.isRecencyQueryRunning {
+                            ProgressView()
+                                .controlSize(.small)
+                                .help("Querying Spotlight for file recency…")
                         }
-                    )) {
-                        Image(systemName: "clock.arrow.circlepath")
-                    }
-                    .help("Recency Heatmap — dim files unused for 2+ years (Cmd+Opt+R)")
-                    .keyboardShortcut("r", modifiers: [.command, .option])
-                    .disabled(!appState.scanProgress.scanComplete)
-
-                    Divider().frame(height: 16)
-
-                    // Take Snapshot
-                    if appState.isSnapshotBuilding {
-                        ProgressView()
-                            .controlSize(.small)
-                            .help("Saving snapshot…")
-                    } else {
-                        Button {
-                            appState.takeSnapshot()
-                        } label: {
-                            Image(systemName: "camera")
+                        Toggle(isOn: Binding(
+                            get: { appState.isRecencyOverlayEnabled },
+                            set: { enabled in
+                                appState.isRecencyOverlayEnabled = enabled
+                                if enabled { appState.startRecencyQueryIfNeeded() }
+                            }
+                        )) {
+                            Image(systemName: "clock.arrow.circlepath")
                         }
-                        .help("Take Snapshot for Temporal Diff (Cmd+Opt+S)")
-                        .keyboardShortcut("s", modifiers: [.command, .option])
+                        .help("Recency Heatmap — dim files unused for 2+ years (Cmd+Opt+R)")
+                        .keyboardShortcut("r", modifiers: [.command, .option])
                         .disabled(!appState.scanProgress.scanComplete)
-                    }
 
-                    // Temporal Diff toggle
-                    Toggle(isOn: Binding(
-                        get: { appState.isTemporalDiffEnabled },
-                        set: { enabled in
-                            appState.isTemporalDiffEnabled = enabled
-                            if enabled { appState.startTemporalDiff() }
+                        Divider().frame(height: 16)
+
+                        // Take Snapshot
+                        if appState.isSnapshotBuilding {
+                            ProgressView()
+                                .controlSize(.small)
+                                .help("Saving snapshot…")
+                        } else {
+                            Button {
+                                appState.takeSnapshot()
+                            } label: {
+                                Image(systemName: "camera")
+                            }
+                            .help("Take Snapshot for Temporal Diff (Cmd+Opt+S)")
+                            .keyboardShortcut("s", modifiers: [.command, .option])
+                            .disabled(!appState.scanProgress.scanComplete)
                         }
-                    )) {
-                        Image(systemName: "timelapse")
+
+                        // Temporal Diff toggle
+                        Toggle(isOn: Binding(
+                            get: { appState.isTemporalDiffEnabled },
+                            set: { enabled in
+                                appState.isTemporalDiffEnabled = enabled
+                                if enabled { appState.startTemporalDiff() }
+                            }
+                        )) {
+                            Image(systemName: "timelapse")
+                        }
+                        .help("Temporal Diff — highlight changes since snapshot (Cmd+Opt+D)")
+                        .keyboardShortcut("d", modifiers: [.command, .option])
+                        .disabled(!appState.scanProgress.scanComplete || appState.temporalSnapshot == nil)
                     }
-                    .help("Temporal Diff — highlight changes since snapshot (Cmd+Opt+D)")
-                    .keyboardShortcut("d", modifiers: [.command, .option])
-                    .disabled(!appState.scanProgress.scanComplete || appState.temporalSnapshot == nil)
+                }
+                ToolbarItem(placement: .automatic) {
+                    Toggle(isOn: $showLegend) {
+                        Image(systemName: "sidebar.trailing")
+                    }
+                    .help("Toggle Legend (Cmd+Opt+L)")
+                    .keyboardShortcut("l", modifiers: [.command, .option])
                 }
             }
-            ToolbarItem(placement: .automatic) {
-                Toggle(isOn: $showLegend) {
-                    Image(systemName: "sidebar.trailing")
-                }
-                .help("Toggle Legend (Cmd+Opt+L)")
-                .keyboardShortcut("l", modifiers: [.command, .option])
+            .onReceive(NotificationCenter.default.publisher(for: .searchRequested)) { _ in
+                appState.activeTab = .search
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .searchRequested)) { _ in
-            appState.activeTab = .search
+
+            Divider()
+
+            footerBar
         }
     }
 
@@ -134,6 +140,40 @@ struct ContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
+    }
+
+    // MARK: - Footer
+
+    private var footerBar: some View {
+        HStack(spacing: 12) {
+            // Left: full path of the selected node
+            if let idx = appState.selectedNodeIndex,
+               let tree = appState.fileTree {
+                let path = tree.path(at: idx)
+                Text(path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+
+            Spacer()
+
+            // Right: scan duration and item count
+            if appState.scanDuration > 0 {
+                Text(String(format: "Scanned in %.1fs", appState.scanDuration))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            if let tree = appState.fileTree {
+                Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 22)
+        .background(.bar)
     }
 
     // MARK: - Detail
@@ -310,10 +350,12 @@ struct ContentView: View {
         appState.fileTree = tree
         appState.resetForNewScan()
         appState.activeTab = .treeView
+        appState.scanStartTime = CFAbsoluteTimeGetCurrent()
 
         Task {
             await scanner.scan(path: path, progress: appState.scanProgress, tree: tree)
             await MainActor.run {
+                appState.scanDuration = CFAbsoluteTimeGetCurrent() - appState.scanStartTime
                 appState.setTreemapRoot(0, recordHistory: false)
                 appState.computeExtensionStats()
                 activeScanner = nil

@@ -28,6 +28,17 @@ private let kRequestedFileAttrs: attrgroup_t =
 
 private let kBufferSize = 128 * 1024 // 128 KB
 
+private let kBundleExtensions: Set<String> = [
+    ".app", ".framework", ".xcarchive", ".xcodeproj", ".xcworkspace",
+    ".kext", ".plugin", ".bundle", ".docset", ".xpc",
+    ".qlgenerator", ".mdimporter", ".prefpane", ".driver"
+]
+
+private func isBundleName(_ name: String) -> Bool {
+    let lower = name.lowercased()
+    return kBundleExtensions.contains(where: { lower.hasSuffix($0) })
+}
+
 /// Packed entry layout (64-bit macOS):
 ///   offset  0: UInt32           length
 ///   offset  4: attribute_set_t  returned        (5 × UInt32 = 20 bytes)
@@ -243,6 +254,7 @@ public final class FileScanner {
         // Collect all children in this directory
         var children: [(node: FileNode, name: String)] = []
         var subdirs: [(name: String, childIndex: Int, dev: Int32, inode: UInt64)] = []
+        var bundleDirs: [(name: String, childIndex: Int)] = []
 
         var totalFileSize: UInt64 = 0
         var totalAllocatedSize: UInt64 = 0
@@ -319,11 +331,21 @@ public final class FileScanner {
                     node.extensionHash = extensionHash(entryName)
                 }
 
+                // Detect bundles: mark as opaque leaves and skip recursive enqueue.
+                let isBundle = isDir && isBundleName(entryName)
+                if isBundle {
+                    node.isBundle = true
+                }
+
                 let childLocalIndex = children.count
                 children.append((node: node, name: entryName))
 
                 if isDir {
-                    subdirs.append((name: entryName, childIndex: childLocalIndex, dev: devID, inode: fileID))
+                    if isBundle {
+                        bundleDirs.append((name: entryName, childIndex: childLocalIndex))
+                    } else {
+                        subdirs.append((name: entryName, childIndex: childLocalIndex, dev: devID, inode: fileID))
+                    }
                     dirCount += 1
                 } else {
                     totalFileSize += dataLength
@@ -352,6 +374,20 @@ public final class FileScanner {
             tree.accumulateSize(from: firstChildIndex, fileSize: totalFileSize, allocatedSize: totalAllocatedSize)
         }
 
+        // Compute and propagate sizes for bundle directories that we intentionally do not recurse into.
+        for bundle in bundleDirs {
+            guard !isCancelled else { break }
+            let bundlePath = dirPath + "/" + bundle.name
+            let (bundleFileSize, bundleAllocatedSize) = computeBundleSize(path: bundlePath)
+            guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
+            let bundleTreeIndex = firstChildIndex + UInt32(bundle.childIndex)
+            tree.updateNode(at: bundleTreeIndex) { node in
+                node.fileSize = bundleFileSize
+                node.allocatedSize = bundleAllocatedSize
+            }
+            tree.accumulateSize(from: bundleTreeIndex, fileSize: bundleFileSize, allocatedSize: bundleAllocatedSize)
+        }
+
         // Enqueue subdirectories — skip already-visited (dev, inode) pairs (firmlinks, hardlinks)
         for subdir in subdirs {
             guard !isCancelled else { break }
@@ -362,5 +398,78 @@ public final class FileScanner {
             let subdirPath = dirPath + "/" + subdir.name
             enqueue(subdirPath, childTreeIndex)
         }
+    }
+
+    /// Compute recursive logical/allocated size for an opaque bundle directory.
+    /// This performs an internal walk but does not add nodes or recurse in the main scan tree.
+    private func computeBundleSize(path: String) -> (fileSize: UInt64, allocatedSize: UInt64) {
+        var totalFileSize: UInt64 = 0
+        var totalAllocatedSize: UInt64 = 0
+        var stack: [String] = [path]
+        var seen = Set<UInt64>()
+
+        var rootStat = Darwin.stat()
+        if lstat(path, &rootStat) == 0 {
+            let rootKey = (UInt64(bitPattern: Int64(rootStat.st_dev)) << 32) ^ rootStat.st_ino
+            seen.insert(rootKey)
+        }
+
+        while let currentDir = stack.popLast(), !isCancelled {
+            let fd = open(currentDir, O_RDONLY | O_NOFOLLOW)
+            guard fd >= 0 else { continue }
+            defer { close(fd) }
+
+            var attrList = attrlist()
+            attrList.bitmapcount = UInt16(ATTR_BIT_MAP_COUNT)
+            attrList.commonattr = kRequestedCommonAttrs
+            attrList.fileattr = kRequestedFileAttrs
+
+            let buffer = UnsafeMutableRawPointer.allocate(byteCount: kBufferSize, alignment: 16)
+            defer { buffer.deallocate() }
+
+            while !isCancelled {
+                let count = getattrlistbulk(fd, &attrList, buffer, kBufferSize, UInt64(FSOPT_PACK_INVAL_ATTRS))
+                if count <= 0 { break }
+                var entryPtr = buffer
+                for _ in 0..<count {
+                    let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
+                    guard entryLength >= kOffsetFileData else { break }
+                    let entry = entryPtr
+                    let objType = entry.advanced(by: kOffsetObjType).loadUnaligned(as: UInt32.self)
+                    let isDir = (objType == VDIR.rawValue)
+                    let isSymlink = (objType == VLNK.rawValue)
+                    guard !isSymlink else {
+                        entryPtr = entryPtr.advanced(by: entryLength)
+                        continue
+                    }
+
+                    if isDir {
+                        let nameRef = entry.advanced(by: kOffsetName)
+                        let nameOffset = Int(nameRef.loadUnaligned(as: Int32.self))
+                        let nameLength = Int(nameRef.advanced(by: 4).loadUnaligned(as: UInt32.self))
+                        let namePtr = nameRef.advanced(by: nameOffset)
+                        let nameData = Data(bytes: namePtr, count: max(0, nameLength - 1))
+                        let entryName = String(data: nameData, encoding: .utf8) ?? ""
+                        if !entryName.isEmpty, entryName != ".", entryName != ".." {
+                            let devID = entry.advanced(by: kOffsetDevID).loadUnaligned(as: Int32.self)
+                            let fileID = entry.advanced(by: kOffsetFileID).loadUnaligned(as: UInt64.self)
+                            let key = (UInt64(bitPattern: Int64(devID)) << 32) ^ fileID
+                            if seen.insert(key).inserted {
+                                stack.append(currentDir + "/" + entryName)
+                            }
+                        }
+                    } else {
+                        let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
+                        let allocSize = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
+                        totalFileSize += dataLength
+                        totalAllocatedSize += allocSize
+                    }
+
+                    entryPtr = entryPtr.advanced(by: entryLength)
+                }
+            }
+        }
+
+        return (totalFileSize, totalAllocatedSize)
     }
 }

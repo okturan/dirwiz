@@ -48,6 +48,7 @@ struct TreeNodeItem: Identifiable {
     /// Whether this directory has any children (cheap check — no sorting).
     var hasChildren: Bool {
         guard isDirectory else { return false }
+        guard !node.isBundle else { return false }
         return !tree.children(of: id).isEmpty
     }
 

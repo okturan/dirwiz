@@ -9,6 +9,7 @@ public struct TreeTableView: View {
     @State private var sortAscending: Bool = false
     @State private var expandedFolders: Set<UInt32> = []
     @State private var scrollGeneration: UInt64 = 0
+    @State private var minSizeFilter: UInt64 = 0
     @FocusState private var isFocused: Bool
 
     public init(appState: AppState) {
@@ -68,6 +69,13 @@ public struct TreeTableView: View {
                     expandOrGoFirstChild(tree: tree, proxy: proxy)
                     return .handled
                 }
+                .onKeyPress(.space) {
+                    guard let sel = appState.selectedNodeIndex,
+                          let tree = appState.fileTree else { return .ignored }
+                    let path = tree.path(at: sel)
+                    appState.quickLookCoordinator.toggleQuickLook(for: path)
+                    return .handled
+                }
             }
         }
     }
@@ -84,6 +92,14 @@ public struct TreeTableView: View {
     }
 
     private func collectVisible(_ item: TreeNodeItem, into result: inout [TreeNodeItem]) {
+        // Size threshold filter: skip this node and its entire subtree if it falls below the
+        // minimum. Because directory fileSize equals the sum of all descendants, if a directory
+        // is below the threshold none of its children can exceed it either — so skipping the
+        // subtree is both correct and efficient.
+        if minSizeFilter > 0, item.node.fileSize < minSizeFilter {
+            return
+        }
+
         result.append(item)
         guard item.isDirectory, expandedFolders.contains(item.id) else { return }
         for child in item.children {
@@ -153,6 +169,29 @@ public struct TreeTableView: View {
                 Button("Copy Path") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(path, forType: .string)
+                }
+
+                Button("Move to Trash") {
+                    let url = URL(fileURLWithPath: path)
+                    let size = tree.node(at: item.id)?.fileSize ?? 0
+                    confirmTrash(name: item.name, size: size) {
+                        if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil,
+                           let volumeURL = appState.selectedVolume {
+                            let scanner = FileScanner()
+                            let scanPath = volumeURL.path
+                            let newTree = FileTree()
+                            appState.fileTree = newTree
+                            appState.resetForNewScan()
+                            appState.activeTab = .treeView
+                            Task {
+                                await scanner.scan(path: scanPath, progress: appState.scanProgress, tree: newTree)
+                                await MainActor.run {
+                                    appState.setTreemapRoot(0, recordHistory: false)
+                                    appState.computeExtensionStats()
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Divider()
@@ -248,6 +287,16 @@ public struct TreeTableView: View {
                 .truncationMode(.middle)
 
             Spacer(minLength: 0)
+
+            Picker("Min Size", selection: $minSizeFilter) {
+                Text("All").tag(UInt64(0))
+                Text("> 1 MB").tag(UInt64(1_000_000))
+                Text("> 10 MB").tag(UInt64(10_000_000))
+                Text("> 100 MB").tag(UInt64(100_000_000))
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 210)
+            .labelsHidden()
         }
         .padding(.horizontal, 8)
         .frame(height: 28)
@@ -372,6 +421,7 @@ public struct TreeTableView: View {
         let nodes = tree.nodesSnapshot()
         let i = Int(selected)
         guard i < nodes.count, nodes[i].isDirectory else { return }
+        guard !nodes[i].isBundle else { return }
         if !expandedFolders.contains(selected) {
             _ = withAnimation(.easeInOut(duration: 0.12)) {
                 expandedFolders.insert(selected)
@@ -423,5 +473,21 @@ public struct TreeTableView: View {
         let parentIdx = item.node.parentIndex
         if parentIdx == FileNode.invalid { return item.node.fileSize }
         return tree.node(at: parentIdx)?.fileSize ?? item.node.fileSize
+    }
+
+    private func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void) {
+        if size > 100_000_000 {
+            let alert = NSAlert()
+            alert.messageText = "Move \"\(name)\" to Trash?"
+            alert.informativeText = "This item is \(SizeFormatter.shared.format(size)). It will be moved to the Trash."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Move to Trash")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                action()
+            }
+        } else {
+            action()
+        }
     }
 }

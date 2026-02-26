@@ -117,6 +117,22 @@ public struct SquarifyLayout {
             return
         }
 
+        // Bundle directory: treat as opaque leaf.
+        if node.isBundle {
+            if rect.w >= minPixelSize && rect.h >= minPixelSize {
+                result.append(TreemapRect(
+                    nodeIndex: index,
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.w,
+                    height: rect.h,
+                    depth: depth,
+                    ancestors: ancestors
+                ))
+            }
+            return
+        }
+
         // Directory at max depth or too small: emit as a single rect.
         if depth >= maxDepth || rect.w < minPixelSize || rect.h < minPixelSize {
             if rect.w >= minPixelSize && rect.h >= minPixelSize {

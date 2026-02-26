@@ -35,6 +35,7 @@ let package = Package(
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("AppKit"),
+                .linkedFramework("Quartz"),
             ]
         ),
         .testTarget(

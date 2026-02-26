@@ -24,6 +24,14 @@ public struct FileNode: Sendable {
         }
     }
 
+    // Bit 1: node is a bundle (.app, .framework, etc.) and treated as an opaque leaf.
+    public var isBundle: Bool {
+        get { flags & 2 != 0 }
+        set {
+            if newValue { flags |= 2 } else { flags &= ~2 }
+        }
+    }
+
     public init(
         nameOffset: UInt32 = 0,
         nameLength: UInt16 = 0,
