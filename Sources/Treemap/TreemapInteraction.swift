@@ -8,6 +8,12 @@ public struct InteractiveTreemapView: View {
     @State private var hoveredNodeIndex: UInt32?
     @State private var hoverPoint: CGPoint?
     @State private var labelRects: [TreemapRect] = []
+    @State private var layoutRects: [UInt32: CGRect] = [:]
+
+    private var selectedLayoutRect: CGRect? {
+        guard let idx = appState.selectedNodeIndex else { return nil }
+        return layoutRects[idx]
+    }
 
     /// Whether navigation (zoom) is allowed — disabled during scanning.
     private var canNavigate: Bool {
@@ -184,10 +190,19 @@ public struct InteractiveTreemapView: View {
                 onLayoutUpdate: { rects in
                     labelRects = Array(
                         rects
-                            .filter { $0.width * $0.height > 60 * 20 }
+                            .filter { $0.width * $0.height > 60 * 20 && !$0.isBackground }
                             .sorted { $0.width * $0.height > $1.width * $1.height }
                             .prefix(80)
                     )
+                    var dict = [UInt32: CGRect]()
+                    dict.reserveCapacity(rects.count)
+                    for r in rects {
+                        dict[r.nodeIndex] = CGRect(
+                            x: CGFloat(r.x), y: CGFloat(r.y),
+                            width: CGFloat(r.width), height: CGFloat(r.height)
+                        )
+                    }
+                    layoutRects = dict
                 }
             )
             .contextMenu {
@@ -196,6 +211,10 @@ public struct InteractiveTreemapView: View {
 
             // Text labels on large rectangles.
             textLabelOverlay
+                .allowsHitTesting(false)
+
+            // Selection border overlay — visible even when the Metal highlight is too subtle.
+            selectionBorderOverlay
                 .allowsHitTesting(false)
 
             // Hover tooltip overlay.
@@ -247,6 +266,18 @@ public struct InteractiveTreemapView: View {
         )
         .clipped()
         .offset(x: CGFloat(rect.x), y: CGFloat(rect.y))
+    }
+
+    // MARK: - Selection Border
+
+    @ViewBuilder
+    private var selectionBorderOverlay: some View {
+        if let rect = selectedLayoutRect, rect.width >= 2, rect.height >= 2 {
+            Rectangle()
+                .stroke(Color.white.opacity(0.9), lineWidth: 2)
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
+        }
     }
 
     /// Find the directory child of the current treemap root that is an ancestor of nodeIndex.

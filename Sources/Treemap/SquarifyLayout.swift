@@ -15,6 +15,10 @@ public struct TreemapRect: Sendable {
 
     /// Cached cushion coefficients (ax2, bx, ay2, by). Computed once during layout caching.
     public var cachedCoefs: SIMD4<Float> = .zero
+
+    /// True for directory background rects (drawn first so sub-pixel children expose dir color).
+    /// These should not receive text labels since children are drawn on top.
+    public var isBackground: Bool = false
 }
 
 /// Internal layout rectangle for squarify calculations.
@@ -144,6 +148,21 @@ public struct SquarifyLayout {
             ))
             return
         }
+
+        // Emit the directory as a background rect before its children.
+        // Children are drawn on top; any sub-pixel-culled children expose this
+        // rect instead of the near-black clearColor.
+        var bgRect = TreemapRect(
+            nodeIndex: index,
+            x: rect.x,
+            y: rect.y,
+            width: rect.w,
+            height: rect.h,
+            depth: depth,
+            ancestors: ancestors
+        )
+        bgRect.isBackground = true
+        result.append(bgRect)
 
         // Compute total size of children.
         let totalSize = childIndices.reduce(Float(0)) { sum, idx in

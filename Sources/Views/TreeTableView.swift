@@ -9,6 +9,7 @@ public struct TreeTableView: View {
     @State private var sortAscending: Bool = false
     @State private var expandedFolders: Set<UInt32> = []
     @State private var scrollGeneration: UInt64 = 0
+    @FocusState private var isFocused: Bool
 
     public init(appState: AppState) {
         self.appState = appState
@@ -34,17 +35,38 @@ public struct TreeTableView: View {
             headerRow
             Divider()
             ScrollViewReader { proxy in
+                treeNavigationBar(tree: tree, proxy: proxy)
+                Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         let items = flattenedVisibleItems(tree: tree)
                         ForEach(items) { item in
                             treeRowContainer(item, tree: tree)
+                                .id(item.id)
                             Divider().padding(.leading, CGFloat(item.depth) * 18 + 12)
                         }
                     }
                 }
+                .focusable()
+                .focused($isFocused)
                 .onChange(of: appState.selectedNodeIndex) { _, newValue in
                     revealAndScroll(to: newValue, tree: tree, proxy: proxy)
+                }
+                .onKeyPress(.upArrow) {
+                    moveSelection(by: -1, tree: tree, proxy: proxy)
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    moveSelection(by: 1, tree: tree, proxy: proxy)
+                    return .handled
+                }
+                .onKeyPress(.leftArrow) {
+                    collapseOrGoParent(tree: tree, proxy: proxy)
+                    return .handled
+                }
+                .onKeyPress(.rightArrow) {
+                    expandOrGoFirstChild(tree: tree, proxy: proxy)
+                    return .handled
                 }
             }
         }
@@ -92,7 +114,7 @@ public struct TreeTableView: View {
                     Image(systemName: expandedFolders.contains(item.id) ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .frame(width: 16, height: 16)
+                        .frame(width: 20, height: 22)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -115,8 +137,36 @@ public struct TreeTableView: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture {
+            isFocused = true
             appState.selectedNodeIndex = item.id
             ensureVisibleInTreemap(item.id, tree: tree)
+        }
+        .contextMenu {
+            if let tree = appState.fileTree {
+                let path = tree.path(at: item.id)
+
+                Button("Reveal in Finder") {
+                    let url = URL(fileURLWithPath: path)
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+
+                Button("Copy Path") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                }
+
+                Divider()
+
+                Button("Show in Treemap") {
+                    appState.showNodeInTreemap(item.id)
+                }
+
+                if item.isDirectory {
+                    Button("Zoom Into \"\(item.name)\"") {
+                        appState.setTreemapRoot(item.id)
+                    }
+                }
+            }
         }
         .background(
             appState.selectedNodeIndex == item.id
@@ -164,6 +214,74 @@ public struct TreeTableView: View {
         }
         .buttonStyle(.plain)
         .frame(minWidth: minWidth)
+    }
+
+    // MARK: - Navigation Bar
+
+    private func treeNavigationBar(tree: FileTree, proxy: ScrollViewProxy) -> some View {
+        let canGoUp = canGoUpInTree(tree: tree)
+
+        return HStack(spacing: 6) {
+            Button {
+                goUpInTree(tree: tree, proxy: proxy)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .medium))
+                    Text("Up")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .frame(height: 20)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canGoUp)
+            .foregroundStyle(canGoUp ? .secondary : .quaternary)
+
+            Divider()
+                .frame(height: 14)
+
+            Text(selectedNodeName(tree: tree))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(.bar)
+    }
+
+    private func canGoUpInTree(tree: FileTree) -> Bool {
+        guard let selected = appState.selectedNodeIndex else { return false }
+        let nodes = tree.nodesSnapshot()
+        let i = Int(selected)
+        guard i < nodes.count else { return false }
+        return nodes[i].parentIndex != FileNode.invalid
+    }
+
+    private func selectedNodeName(tree: FileTree) -> String {
+        guard let selected = appState.selectedNodeIndex,
+              Int(selected) < tree.count else {
+            return "No Selection"
+        }
+        let name = tree.name(at: selected)
+        return name.isEmpty ? "/" : name
+    }
+
+    private func goUpInTree(tree: FileTree, proxy: ScrollViewProxy) {
+        guard let selected = appState.selectedNodeIndex else { return }
+        let nodes = tree.nodesSnapshot()
+        let i = Int(selected)
+        guard i < nodes.count else { return }
+
+        let parentIndex = nodes[i].parentIndex
+        guard parentIndex != FileNode.invalid else { return }
+
+        appState.selectedNodeIndex = parentIndex
+        revealAndScroll(to: parentIndex, tree: tree, proxy: proxy)
     }
 
     // MARK: - Selection Sync
@@ -214,6 +332,58 @@ public struct TreeTableView: View {
         // showNodeInTreemap also sets selectedNodeIndex, but we already set it
         // in onTapGesture — the duplicate write is harmless (same value).
         appState.showNodeInTreemap(nodeIndex)
+    }
+
+    // MARK: - Keyboard Navigation
+
+    private func moveSelection(by delta: Int, tree: FileTree, proxy: ScrollViewProxy) {
+        let items = flattenedVisibleItems(tree: tree)
+        guard !items.isEmpty else { return }
+        let currentIdx = items.firstIndex { $0.id == appState.selectedNodeIndex }
+        let fromIdx = currentIdx ?? (delta > 0 ? -1 : items.count)
+        let newIdx = max(0, min(items.count - 1, fromIdx + delta))
+        let newItem = items[newIdx]
+        appState.selectedNodeIndex = newItem.id
+        ensureVisibleInTreemap(newItem.id, tree: tree)
+        proxy.scrollTo(newItem.id)
+    }
+
+    /// Left arrow: collapse expanded directory, or jump to parent.
+    private func collapseOrGoParent(tree: FileTree, proxy: ScrollViewProxy) {
+        guard let selected = appState.selectedNodeIndex else { return }
+        if expandedFolders.contains(selected) {
+            _ = withAnimation(.easeInOut(duration: 0.12)) {
+                expandedFolders.remove(selected)
+            }
+            return
+        }
+        let nodes = tree.nodesSnapshot()
+        let i = Int(selected)
+        guard i < nodes.count else { return }
+        let parentIdx = nodes[i].parentIndex
+        guard parentIdx != FileNode.invalid else { return }
+        appState.selectedNodeIndex = parentIdx
+        proxy.scrollTo(parentIdx)
+    }
+
+    /// Right arrow: expand collapsed directory, or move to its first child.
+    private func expandOrGoFirstChild(tree: FileTree, proxy: ScrollViewProxy) {
+        guard let selected = appState.selectedNodeIndex else { return }
+        let nodes = tree.nodesSnapshot()
+        let i = Int(selected)
+        guard i < nodes.count, nodes[i].isDirectory else { return }
+        if !expandedFolders.contains(selected) {
+            _ = withAnimation(.easeInOut(duration: 0.12)) {
+                expandedFolders.insert(selected)
+            }
+        } else {
+            let items = flattenedVisibleItems(tree: tree)
+            if let idx = items.firstIndex(where: { $0.id == selected }), idx + 1 < items.count {
+                let child = items[idx + 1]
+                appState.selectedNodeIndex = child.id
+                proxy.scrollTo(child.id)
+            }
+        }
     }
 
     // MARK: - Helpers
