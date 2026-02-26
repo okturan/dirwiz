@@ -23,6 +23,15 @@ public final class AppState {
     /// Navigation state (treemap root, breadcrumb path, back/forward stacks).
     public var navigation = NavigationState()
 
+    /// Search state (query, results, in-progress flag).
+    public var search = SearchState()
+
+    /// Duplicate scan state (groups, checked paths, progress).
+    public var duplicate = DuplicateState()
+
+    /// Temporal diff overlay state (snapshot, kinds, strengths, generation).
+    public var temporalDiff = TemporalDiffState()
+
     /// Selected volume URL to scan.
     public var selectedVolume: URL?
 
@@ -38,27 +47,6 @@ public final class AppState {
     /// WinDirStat-style per-extension color palette (top 17 by size).
     public var extensionPalette = ExtensionPalette()
 
-    /// Duplicate file groups (populated after duplicate scan).
-    public var duplicateGroups: [DuplicateGroup] = []
-
-    /// Duplicates tab UI state: checked file paths.
-    public var duplicateCheckedPaths: Set<String> = []
-
-    /// Duplicates tab UI state: expanded duplicate group IDs.
-    public var duplicateExpandedGroups: Set<UUID> = []
-
-    /// Duplicates tab UI state: progress of current duplicate scan.
-    public var duplicateProgress: (processed: Int, total: Int) = (0, 0)
-
-    /// Search tab UI state: current query text.
-    public var searchQuery: String = ""
-
-    /// Search tab UI state: current matched node indices.
-    public var searchResults: [UInt32] = []
-
-    /// Search tab UI state: whether search is currently running.
-    public var isSearching: Bool = false
-
     /// Per-node Spotlight recency factor [0,1] (1=recently used, 0=stale/unindexed).
     public var recencyFactors: [Float] = []
 
@@ -71,17 +59,6 @@ public final class AppState {
     /// Whether a Spotlight recency query is in progress.
     public var isRecencyQueryRunning: Bool = false
 
-    // MARK: - Temporal Diff
-
-    /// Snapshot loaded from disk for comparison (nil = none taken yet).
-    public var temporalSnapshot: TemporalSnapshot?
-
-    /// Whether the temporal diff overlay is currently active.
-    public var isTemporalDiffEnabled: Bool = false
-
-    /// Whether a snapshot save/build is in progress.
-    public var isSnapshotBuilding: Bool = false
-
     // MARK: - Scan Timing
 
     /// Wall-clock time when the most recent scan started (CFAbsoluteTime).
@@ -89,21 +66,6 @@ public final class AppState {
 
     /// Total elapsed seconds for the last completed scan. Zero if no scan has finished yet.
     public var scanDuration: TimeInterval = 0
-
-    /// Bumped each time diff results are applied (GPU change detection).
-    public var temporalDiffGeneration: UInt64 = 0
-
-    /// Per-node diff kind (TemporalDiffKind.rawValue). Files are always .none.
-    public var temporalDiffKinds: [UInt8] = []
-
-    /// Per-node blend strength [0,1] for the diff tint.
-    public var temporalDiffStrengths: [Float] = []
-
-    /// Surviving ancestors → count/bytes of deleted descendants (for tooltips).
-    public var temporalDiffDeletedCounts: [UInt32: DeletedSummary] = [:]
-
-    /// Whether duplicate scan is in progress.
-    public var isDuplicateScanRunning: Bool = false
 
     /// Whether Full Disk Access is granted.
     public var hasFullDiskAccess: Bool = false
@@ -126,16 +88,12 @@ public final class AppState {
     /// Reset navigation state for a new scan.
     public func resetForNewScan() {
         navigation.reset()
+        search.reset()
+        duplicate.reset()
+        temporalDiff.reset()
         selectedNodeIndex = nil
         fileTypeStats = []
         extensionPalette = ExtensionPalette()
-        duplicateGroups = []
-        duplicateCheckedPaths = []
-        duplicateExpandedGroups = []
-        duplicateProgress = (0, 0)
-        searchQuery = ""
-        searchResults = []
-        isSearching = false
         recencyFactors = []
         recencyGeneration = 0
         isRecencyOverlayEnabled = false
@@ -144,11 +102,6 @@ public final class AppState {
         recencyToken &+= 1
         recencyTask?.cancel()
         recencyTask = nil
-        temporalDiffKinds = []
-        temporalDiffStrengths = []
-        temporalDiffDeletedCounts = [:]
-        temporalDiffGeneration = 0
-        isTemporalDiffEnabled = false
         temporalDiffTask?.cancel()
         temporalDiffTask = nil
         temporalDiffToken &+= 1

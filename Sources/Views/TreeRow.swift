@@ -109,17 +109,10 @@ struct TreeRow: View {
         return extensionPalette.swiftUIColor(forHash: item.node.extensionHash)
     }
 
-    private static let sharedDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .none
-        return f
-    }()
-
     private var formattedDate: String {
         guard item.node.modifiedDate > 0 else { return "-" }
-        let date = Date(timeIntervalSince1970: TimeInterval(item.node.modifiedDate))
-        return Self.sharedDateFormatter.string(from: date)
+        return Date(timeIntervalSince1970: TimeInterval(item.node.modifiedDate))
+            .formatted(date: .abbreviated, time: .omitted)
     }
 
 }

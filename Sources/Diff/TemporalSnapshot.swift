@@ -235,6 +235,12 @@ public struct TemporalSnapshot: Sendable {
             byPath[path] = size
         }
 
+        // Validate that the number of entries read matches the header's declared count.
+        // A mismatch indicates a truncated or corrupted snapshot file.
+        if byPath.count != Int(dirCountRaw) {
+            throw TemporalSnapshotFormatError.truncatedBinary
+        }
+
         let meta = TemporalSnapshotMeta(
             id: uuid,
             createdAt: Date(timeIntervalSince1970: createdAtRaw),

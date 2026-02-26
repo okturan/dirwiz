@@ -106,6 +106,7 @@ public final class FileTree: @unchecked Sendable {
 
     /// Set whether the volume is case-sensitive. Must be called before concurrent access begins.
     public func setCaseSensitivity(_ caseSensitive: Bool) {
+        precondition(nodes.isEmpty, "setCaseSensitivity must be called before any nodes are added")
         isCaseSensitive = caseSensitive
     }
 

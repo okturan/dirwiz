@@ -62,8 +62,16 @@ struct TreeNodeItem: Identifiable, Equatable {
 
     /// Sorted children — only call when actually expanding.
     var children: [TreeNodeItem] {
-        let childIndices = tree.children(of: id).map { UInt32($0) }
-        let sorted = childIndices.sorted(by: compare)
+        let range = tree.children(of: id)
+        let sorted: [UInt32]
+        switch sortKey {
+        case .size, .percentage:
+            // FileTree.sortAllChildren() pre-sorted children by size descending — reuse it.
+            let forward = range.map { UInt32($0) }
+            sorted = sortAscending ? Array(forward.reversed()) : forward
+        default:
+            sorted = range.map { UInt32($0) }.sorted(by: compare)
+        }
         return sorted.map {
             TreeNodeItem(id: $0, tree: tree, nodes: nodes, depth: depth + 1,
                          sortKey: sortKey, sortAscending: sortAscending)

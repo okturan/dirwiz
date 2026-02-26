@@ -43,7 +43,7 @@ struct ContentView: View {
                         Divider().frame(height: 16)
 
                         // Take Snapshot
-                        if appState.isSnapshotBuilding {
+                        if appState.temporalDiff.isSnapshotBuilding {
                             ProgressView()
                                 .controlSize(.small)
                                 .help("Saving snapshot…")
@@ -60,9 +60,9 @@ struct ContentView: View {
 
                         // Temporal Diff toggle
                         Toggle(isOn: Binding(
-                            get: { appState.isTemporalDiffEnabled },
+                            get: { appState.temporalDiff.isTemporalDiffEnabled },
                             set: { enabled in
-                                appState.isTemporalDiffEnabled = enabled
+                                appState.temporalDiff.isTemporalDiffEnabled = enabled
                                 if enabled { appState.startTemporalDiff() }
                             }
                         )) {
@@ -70,7 +70,7 @@ struct ContentView: View {
                         }
                         .help("Temporal Diff — highlight changes since snapshot (Cmd+Opt+D)")
                         .keyboardShortcut("d", modifiers: [.command, .option])
-                        .disabled(!appState.scanProgress.scanComplete || appState.temporalSnapshot == nil)
+                        .disabled(!appState.scanProgress.scanComplete || appState.temporalDiff.temporalSnapshot == nil)
                     }
                 }
                 ToolbarItem(placement: .automatic) {
@@ -230,8 +230,8 @@ struct ContentView: View {
                         splitDivider(totalHeight: geo.size.height)
 
                         // Temporal diff status banner.
-                        if appState.isTemporalDiffEnabled,
-                           let snap = appState.temporalSnapshot {
+                        if appState.temporalDiff.isTemporalDiffEnabled,
+                           let snap = appState.temporalDiff.temporalSnapshot {
                             diffStatusBanner(snapshot: snap)
                         }
 
@@ -303,7 +303,7 @@ struct ContentView: View {
                 .lineLimit(1)
             Spacer()
             Button("Clear") {
-                appState.isTemporalDiffEnabled = false
+                appState.temporalDiff.isTemporalDiffEnabled = false
             }
             .font(.system(size: 11))
             .buttonStyle(.plain)

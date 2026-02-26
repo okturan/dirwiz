@@ -6,6 +6,7 @@ public struct DuplicateFilesView: View {
 
     @State private var minimumSizeFilter: UInt64 = 1_048_576 // 1 MB default
     @State private var showTrashConfirmation: Bool = false
+    @State private var trashErrorPaths: [String] = []
 
     public init(appState: AppState) {
         self.appState = appState
@@ -16,7 +17,7 @@ public struct DuplicateFilesView: View {
             toolbar
             Divider()
 
-            if appState.isDuplicateScanRunning {
+            if appState.duplicate.isDuplicateScanRunning {
                 duplicateScanProgress
             } else if filteredGroups.isEmpty {
                 emptyState
@@ -37,7 +38,7 @@ public struct DuplicateFilesView: View {
                     Text("Scan for Duplicates")
                 }
             }
-            .disabled(appState.fileTree == nil || appState.isDuplicateScanRunning)
+            .disabled(appState.fileTree == nil || appState.duplicate.isDuplicateScanRunning)
 
             Divider()
                 .frame(height: 20)
@@ -59,11 +60,11 @@ public struct DuplicateFilesView: View {
 
             Spacer()
 
-            if !appState.duplicateCheckedPaths.isEmpty {
+            if !appState.duplicate.duplicateCheckedPaths.isEmpty {
                 Button(action: { showTrashConfirmation = true }) {
                     HStack(spacing: 4) {
                         Image(systemName: "trash")
-                        Text("Move to Trash (\(appState.duplicateCheckedPaths.count))")
+                        Text("Move to Trash (\(appState.duplicate.duplicateCheckedPaths.count))")
                     }
                 }
                 .foregroundStyle(.red)
@@ -73,11 +74,19 @@ public struct DuplicateFilesView: View {
                         moveCheckedToTrash()
                     }
                 } message: {
-                    Text("Move \(appState.duplicateCheckedPaths.count) selected files to the Trash? This cannot be undone easily.")
+                    Text("Move \(appState.duplicate.duplicateCheckedPaths.count) selected files to the Trash? This cannot be undone easily.")
+                }
+                .alert("Couldn't Move Some Files", isPresented: .init(
+                    get: { !trashErrorPaths.isEmpty },
+                    set: { if !$0 { trashErrorPaths = [] } }
+                )) {
+                    Button("OK", role: .cancel) { trashErrorPaths = [] }
+                } message: {
+                    Text("\(trashErrorPaths.count) file(s) couldn't be moved to Trash — they may have been deleted already or require additional permissions.\n\n\(trashErrorPaths.prefix(3).joined(separator: "\n"))\(trashErrorPaths.count > 3 ? "\n…" : "")")
                 }
             }
 
-            if !appState.duplicateGroups.isEmpty {
+            if !appState.duplicate.duplicateGroups.isEmpty {
                 Text("\(filteredGroups.count) groups")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -101,13 +110,13 @@ public struct DuplicateFilesView: View {
                 .controlSize(.large)
             Text("Scanning for duplicates...")
                 .font(.headline)
-            if appState.duplicateProgress.total > 0 {
-                Text("\(SizeFormatter.shared.formatCount(appState.duplicateProgress.processed)) / \(SizeFormatter.shared.formatCount(appState.duplicateProgress.total)) candidates")
+            if appState.duplicate.duplicateProgress.total > 0 {
+                Text("\(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.processed)) / \(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.total)) candidates")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 ProgressView(
-                    value: Double(appState.duplicateProgress.processed),
-                    total: Double(max(appState.duplicateProgress.total, 1))
+                    value: Double(appState.duplicate.duplicateProgress.processed),
+                    total: Double(max(appState.duplicate.duplicateProgress.total, 1))
                 )
                 .progressViewStyle(.linear)
                 .frame(maxWidth: 300)
@@ -123,7 +132,7 @@ public struct DuplicateFilesView: View {
         ContentUnavailableView {
             Label("No Duplicates Found", systemImage: "doc.on.doc")
         } description: {
-            if appState.duplicateGroups.isEmpty {
+            if appState.duplicate.duplicateGroups.isEmpty {
                 Text("Click \"Scan for Duplicates\" to search for duplicate files.")
             } else {
                 Text("No duplicate groups match the current minimum size filter.")
@@ -139,13 +148,13 @@ public struct DuplicateFilesView: View {
                 ForEach(filteredGroups) { group in
                     DuplicateGroupRow(
                         group: group,
-                        isExpanded: appState.duplicateExpandedGroups.contains(group.id),
-                        checkedPaths: $appState.duplicateCheckedPaths,
+                        isExpanded: appState.duplicate.duplicateExpandedGroups.contains(group.id),
+                        checkedPaths: $appState.duplicate.duplicateCheckedPaths,
                         onToggleExpand: {
-                            if appState.duplicateExpandedGroups.contains(group.id) {
-                                appState.duplicateExpandedGroups.remove(group.id)
+                            if appState.duplicate.duplicateExpandedGroups.contains(group.id) {
+                                appState.duplicate.duplicateExpandedGroups.remove(group.id)
                             } else {
-                                appState.duplicateExpandedGroups.insert(group.id)
+                                appState.duplicate.duplicateExpandedGroups.insert(group.id)
                             }
                         }
                     )
@@ -159,7 +168,7 @@ public struct DuplicateFilesView: View {
     // MARK: - Computed
 
     private var filteredGroups: [DuplicateGroup] {
-        appState.duplicateGroups.filter { $0.fileSize >= minimumSizeFilter }
+        appState.duplicate.duplicateGroups.filter { $0.fileSize >= minimumSizeFilter }
     }
 
     private var totalWastedSpace: UInt64 {
@@ -170,38 +179,44 @@ public struct DuplicateFilesView: View {
 
     private func startDuplicateScan() {
         guard let tree = appState.fileTree else { return }
-        appState.isDuplicateScanRunning = true
-        appState.duplicateCheckedPaths.removeAll()
-        appState.duplicateExpandedGroups.removeAll()
-        appState.duplicateProgress = (0, 0)
+        appState.duplicate.isDuplicateScanRunning = true
+        appState.duplicate.duplicateCheckedPaths.removeAll()
+        appState.duplicate.duplicateExpandedGroups.removeAll()
+        appState.duplicate.duplicateProgress = (0, 0)
 
         Task {
             let finder = DuplicateFinder()
             let groups = await finder.findDuplicates(in: tree) { processed, total in
                 Task { @MainActor in
                     // Ensure progress only goes up (tasks complete out of order).
-                    let clamped = max(appState.duplicateProgress.processed, processed)
-                    appState.duplicateProgress = (clamped, total)
+                    let clamped = max(appState.duplicate.duplicateProgress.processed, processed)
+                    appState.duplicate.duplicateProgress = (clamped, total)
                 }
             }
             await MainActor.run {
-                appState.duplicateGroups = groups
-                appState.isDuplicateScanRunning = false
+                appState.duplicate.duplicateGroups = groups
+                appState.duplicate.isDuplicateScanRunning = false
             }
         }
     }
 
     private func moveCheckedToTrash() {
         var trashed: Set<String> = []
-        for path in appState.duplicateCheckedPaths {
+        var failed: [String] = []
+        for path in appState.duplicate.duplicateCheckedPaths {
             let url = URL(fileURLWithPath: path)
             if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
                 trashed.insert(path)
+            } else {
+                failed.append(path)
             }
+        }
+        if !failed.isEmpty {
+            trashErrorPaths = failed.sorted()
         }
         guard !trashed.isEmpty else { return }
         // Remove only successfully trashed paths from the duplicate groups.
-        appState.duplicateGroups = appState.duplicateGroups.compactMap { group in
+        appState.duplicate.duplicateGroups = appState.duplicate.duplicateGroups.compactMap { group in
             let remaining = group.paths.filter { !trashed.contains($0) }
             guard remaining.count >= 2 else { return nil }
             return DuplicateGroup(
@@ -210,7 +225,7 @@ public struct DuplicateFilesView: View {
                 paths: remaining
             )
         }
-        appState.duplicateCheckedPaths.subtract(trashed)
+        appState.duplicate.duplicateCheckedPaths.subtract(trashed)
         // Rescan to keep tree/treemap data consistent with filesystem.
         appState.rescanVolume()
     }
@@ -227,38 +242,55 @@ private struct DuplicateGroupRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Group header.
-            Button(action: onToggleExpand) {
-                HStack(spacing: 8) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10))
-                        .frame(width: 12)
+            HStack(spacing: 0) {
+                Button(action: onToggleExpand) {
+                    HStack(spacing: 8) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10))
+                            .frame(width: 12)
 
-                    Image(systemName: "doc.on.doc.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.orange)
+                        Image(systemName: "doc.on.doc.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
 
-                    Text("\(group.paths.count) copies")
-                        .font(.system(size: 12, weight: .medium))
+                        Text("\(group.paths.count) copies")
+                            .font(.system(size: 12, weight: .medium))
 
-                    Spacer()
+                        Spacer()
 
-                    Text(SizeFormatter.shared.format(group.fileSize) + " each")
-                        .font(.system(size: 11, design: .monospaced))
+                        Text(SizeFormatter.shared.format(group.fileSize) + " each")
+                            .font(.system(size: 11, design: .monospaced))
 
-                    Text("Wasted: " + SizeFormatter.shared.format(group.wastedSpace))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.orange)
+                        Text("Wasted: " + SizeFormatter.shared.format(group.wastedSpace))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.orange)
+                    }
                 }
+                .buttonStyle(.plain)
+
+                Menu {
+                    Button("Keep Newest, Select Others") { selectAllExcept(keepNewest: true) }
+                    Button("Keep Oldest, Select Others") { selectAllExcept(keepNewest: false) }
+                    Divider()
+                    Button("Deselect All in Group") { deselectGroup() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 28)
+                .help("Quick-select duplicates to remove")
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 2)
             .background(
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.secondary.opacity(0.06))
             )
 
-            // Expanded paths.
+            // Expanded paths — with per-path modification date label.
             if isExpanded {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(group.paths.enumerated()), id: \.offset) { index, path in
@@ -314,6 +346,33 @@ private struct DuplicateGroupRow: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Quick-select helpers
+
+    /// Check all paths in this group except the one with the newest/oldest modification date.
+    private func selectAllExcept(keepNewest: Bool) {
+        let dated: [(path: String, date: Date)] = group.paths.map { path in
+            let url = URL(fileURLWithPath: path)
+            let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? Date.distantPast
+            return (path, date)
+        }
+        let toKeep: String
+        if keepNewest {
+            toKeep = dated.max(by: { $0.date < $1.date })?.path ?? group.paths[0]
+        } else {
+            toKeep = dated.min(by: { $0.date < $1.date })?.path ?? group.paths[0]
+        }
+        for path in group.paths where path != toKeep {
+            checkedPaths.insert(path)
+        }
+    }
+
+    private func deselectGroup() {
+        for path in group.paths {
+            checkedPaths.remove(path)
         }
     }
 }

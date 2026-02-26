@@ -181,10 +181,10 @@ public struct InteractiveTreemapView: View {
                 recencyFactors: appState.recencyFactors,
                 recencyGeneration: appState.recencyGeneration,
                 isRecencyOverlayEnabled: appState.isRecencyOverlayEnabled,
-                temporalDiffKinds: appState.temporalDiffKinds,
-                temporalDiffStrengths: appState.temporalDiffStrengths,
-                isTemporalDiffEnabled: appState.isTemporalDiffEnabled,
-                temporalDiffGeneration: appState.temporalDiffGeneration,
+                temporalDiffKinds: appState.temporalDiff.temporalDiffKinds,
+                temporalDiffStrengths: appState.temporalDiff.temporalDiffStrengths,
+                isTemporalDiffEnabled: appState.temporalDiff.isTemporalDiffEnabled,
+                temporalDiffGeneration: appState.temporalDiff.temporalDiffGeneration,
                 onClick: { nodeIndex in
                     appState.selectedNodeIndex = nodeIndex
                 },

@@ -62,23 +62,23 @@ public struct SearchView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search files...", text: $appState.searchQuery)
+            TextField("Search files...", text: $appState.search.searchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($focusedField, equals: .searchBar)
-                .onChange(of: appState.searchQuery) { _, _ in
+                .onChange(of: appState.search.searchQuery) { _, _ in
                     triggerSearch()
                 }
 
-            if appState.isSearching {
+            if appState.search.isSearching {
                 ProgressView()
                     .controlSize(.small)
             }
 
-            if !appState.searchQuery.isEmpty {
+            if !appState.search.searchQuery.isEmpty {
                 Button(action: {
-                    appState.searchQuery = ""
-                    appState.searchResults = []
+                    appState.search.searchQuery = ""
+                    appState.search.searchResults = []
                     totalMatches = 0
                     searchTimeMs = 0
                     previousQuery = ""
@@ -197,15 +197,15 @@ public struct SearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    let visibleSlice = appState.searchResults.prefix(showMoreCount)
+                    let visibleSlice = appState.search.searchResults.prefix(showMoreCount)
                     ForEach(Array(visibleSlice), id: \.self) { idx in
                         resultRowView(idx)
                             .id(idx)
                         Divider().padding(.leading, 8)
                     }
 
-                    if appState.searchResults.count > showMoreCount {
-                        Button("Show \(min(pageSize, appState.searchResults.count - showMoreCount)) more...") {
+                    if appState.search.searchResults.count > showMoreCount {
+                        Button("Show \(min(pageSize, appState.search.searchResults.count - showMoreCount)) more...") {
                             showMoreCount += pageSize
                         }
                         .buttonStyle(.plain)
@@ -311,12 +311,12 @@ public struct SearchView: View {
 
     private var statusBar: some View {
         HStack {
-            if totalMatches == 0 && !appState.searchQuery.isEmpty && !appState.isSearching {
+            if totalMatches == 0 && !appState.search.searchQuery.isEmpty && !appState.search.isSearching {
                 Text("No results")
                     .foregroundStyle(.secondary)
             } else if totalMatches > 0 {
                 if isCapped {
-                    Text("\(SizeFormatter.shared.formatCount(min(appState.searchResults.count, showMoreCount))) of \(SizeFormatter.shared.formatCount(totalMatches)) results (capped)")
+                    Text("\(SizeFormatter.shared.formatCount(min(appState.search.searchResults.count, showMoreCount))) of \(SizeFormatter.shared.formatCount(totalMatches)) results (capped)")
                 } else {
                     Text("\(SizeFormatter.shared.formatCount(totalMatches)) results")
                 }
@@ -339,7 +339,7 @@ public struct SearchView: View {
     // MARK: - Keyboard Navigation
 
     private func moveResultSelection(by delta: Int, proxy: ScrollViewProxy) {
-        let results = Array(appState.searchResults.prefix(showMoreCount))
+        let results = Array(appState.search.searchResults.prefix(showMoreCount))
         guard !results.isEmpty else { return }
         let currentIdx = results.firstIndex(where: { $0 == appState.selectedNodeIndex })
         let fromIdx = currentIdx ?? (delta > 0 ? -1 : results.count)
@@ -364,20 +364,20 @@ public struct SearchView: View {
         searchGeneration &+= 1
         let thisGeneration = searchGeneration
 
-        guard !appState.searchQuery.isEmpty, let tree = appState.fileTree else {
-            appState.searchResults = []
+        guard !appState.search.searchQuery.isEmpty, let tree = appState.fileTree else {
+            appState.search.searchResults = []
             totalMatches = 0
             searchTimeMs = 0
             isCapped = false
-            appState.isSearching = false
+            appState.search.isSearching = false
             previousQuery = ""
             previousMatchIndices = nil
             previousWasCapped = false
             return
         }
 
-        appState.isSearching = true
-        let currentQuery = appState.searchQuery
+        appState.search.isSearching = true
+        let currentQuery = appState.search.searchQuery
         let currentFilters = filters
         let currentSort = sortOrder
         let currentAscending = sortAscending
@@ -422,11 +422,11 @@ public struct SearchView: View {
                 guard thisGeneration == searchGeneration else { return }
                 cachedNodes = nodes
                 cachedPool = displayPool
-                appState.searchResults = finalIndices
+                appState.search.searchResults = finalIndices
                 totalMatches = searchResult.totalMatches
                 searchTimeMs = searchResult.elapsedTime * 1000
                 isCapped = resultWasCapped
-                appState.isSearching = false
+                appState.search.isSearching = false
                 previousQuery = currentQuery
                 previousMatchIndices = searchResult.matchingIndices
                 previousWasCapped = resultWasCapped
@@ -439,13 +439,13 @@ public struct SearchView: View {
         searchTask?.cancel()
         searchGeneration &+= 1
         let thisGeneration = searchGeneration
-        let indices = appState.searchResults
+        let indices = appState.search.searchResults
         let nodes = cachedNodes
         let pool = cachedPool
         let order = sortOrder
         let ascending = sortAscending
 
-        appState.isSearching = true
+        appState.search.isSearching = true
         searchTask = Task.detached(priority: .userInitiated) {
             var sorted = indices
             Self.sortIndices(&sorted, nodes: nodes, pool: pool, by: order, ascending: ascending)
@@ -453,8 +453,8 @@ public struct SearchView: View {
             let result = sorted
             await MainActor.run { [searchGeneration] in
                 guard thisGeneration == searchGeneration else { return }
-                appState.searchResults = result
-                appState.isSearching = false
+                appState.search.searchResults = result
+                appState.search.isSearching = false
             }
         }
     }

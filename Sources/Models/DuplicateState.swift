@@ -1,0 +1,34 @@
+import Foundation
+import Observation
+
+/// Focused sub-model for duplicate scan state.
+/// Extracted from AppState to reduce god-object complexity.
+@MainActor
+@Observable
+public final class DuplicateState {
+    /// Duplicate file groups (populated after duplicate scan).
+    public var duplicateGroups: [DuplicateGroup] = []
+
+    /// Duplicates tab UI state: checked file paths.
+    public var duplicateCheckedPaths: Set<String> = []
+
+    /// Duplicates tab UI state: expanded duplicate group IDs.
+    public var duplicateExpandedGroups: Set<UUID> = []
+
+    /// Duplicates tab UI state: progress of current duplicate scan.
+    public var duplicateProgress: (processed: Int, total: Int) = (0, 0)
+
+    /// Whether a duplicate scan is in progress.
+    public var isDuplicateScanRunning: Bool = false
+
+    public init() {}
+
+    /// Reset duplicate state for a new scan.
+    public func reset() {
+        duplicateGroups = []
+        duplicateCheckedPaths = []
+        duplicateExpandedGroups = []
+        duplicateProgress = (0, 0)
+        isDuplicateScanRunning = false
+    }
+}

@@ -35,8 +35,8 @@ extension AppState {
     /// Captures the current scanToken to discard results from a stale tree
     /// if a rescan occurs while the snapshot is being built.
     public func takeSnapshot() {
-        guard !isSnapshotBuilding, let tree = fileTree else { return }
-        isSnapshotBuilding = true
+        guard !temporalDiff.isSnapshotBuilding, let tree = fileTree else { return }
+        temporalDiff.isSnapshotBuilding = true
         let token = scanToken
         Task.detached(priority: .utility) {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
@@ -53,11 +53,11 @@ extension AppState {
             await MainActor.run {
                 // Discard if a new scan started while building.
                 guard self.scanToken == token else {
-                    self.isSnapshotBuilding = false
+                    self.temporalDiff.isSnapshotBuilding = false
                     return
                 }
-                self.temporalSnapshot = snapshot
-                self.isSnapshotBuilding = false
+                self.temporalDiff.temporalSnapshot = snapshot
+                self.temporalDiff.isSnapshotBuilding = false
                 if let msg = saveError {
                     self.scanProgress.error = msg
                 }
@@ -72,7 +72,7 @@ extension AppState {
             let rootPath = tree.path(at: 0)
             guard let snapshot = try? TemporalSnapshot.load(for: rootPath) else { return }
             await MainActor.run {
-                self.temporalSnapshot = snapshot
+                self.temporalDiff.temporalSnapshot = snapshot
             }
         }
     }
@@ -80,15 +80,15 @@ extension AppState {
     /// Apply a diff result — discards stale results from a superseded scan.
     public func applyTemporalDiff(_ result: TemporalDiffResult, token: UInt64) {
         guard token == temporalDiffToken else { return }
-        temporalDiffKinds = result.kinds
-        temporalDiffStrengths = result.strengths
-        temporalDiffDeletedCounts = result.deletedByNode
-        temporalDiffGeneration &+= 1
+        temporalDiff.temporalDiffKinds = result.kinds
+        temporalDiff.temporalDiffStrengths = result.strengths
+        temporalDiff.temporalDiffDeletedCounts = result.deletedByNode
+        temporalDiff.temporalDiffGeneration &+= 1
     }
 
     /// Start diff computation between the current tree and the loaded snapshot.
     public func startTemporalDiff() {
-        guard let snapshot = temporalSnapshot, let tree = fileTree else { return }
+        guard let snapshot = temporalDiff.temporalSnapshot, let tree = fileTree else { return }
         temporalDiffTask?.cancel()
         temporalDiffToken &+= 1
         let token = temporalDiffToken
