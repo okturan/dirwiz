@@ -106,6 +106,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
             let bufferEnd = buffer.advanced(by: bufferSize)
             var entryPtr = buffer
             for _ in 0..<count {
+                guard entryPtr.advanced(by: MemoryLayout<UInt32>.size) <= bufferEnd else { break }
                 let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
                 guard entryLength > 0, entryLength >= kOffsetFileData else { break }
 
@@ -128,6 +129,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
                 var dataLength: UInt64 = 0
                 var allocSize: UInt64 = 0
                 if !isDir && !isSymlink {
+                    guard entryLength >= kOffsetFileData + 2 * MemoryLayout<off_t>.size else { break }
                     (dataLength, allocSize) = parseFileSizes(from: entry)
                 }
 
@@ -158,9 +160,10 @@ public struct RealFilesystemProvider: FilesystemProvider {
         var seen = Set<InodeKeyPublic>()
 
         var rootStat = Darwin.stat()
-        if lstat(path, &rootStat) == 0 {
-            seen.insert(InodeKeyPublic(dev: rootStat.st_dev, inode: rootStat.st_ino))
+        guard lstat(path, &rootStat) == 0 else {
+            return (fileSize: 0, allocatedSize: 0)
         }
+        seen.insert(InodeKeyPublic(dev: rootStat.st_dev, inode: rootStat.st_ino))
 
         let bufferSize = 128 * 1024
         let buffer = UnsafeMutableRawPointer.allocate(byteCount: bufferSize, alignment: 16)
@@ -183,7 +186,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
                 var entryPtr = buffer
                 for _ in 0..<count {
                     guard !isCancelled() else { break }
-
+                    guard entryPtr.advanced(by: MemoryLayout<UInt32>.size) <= bufferEnd else { break }
                     let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
                     guard entryLength > 0, entryLength >= kOffsetFileData else { break }
                     let entry = entryPtr
@@ -209,6 +212,10 @@ public struct RealFilesystemProvider: FilesystemProvider {
                             }
                         }
                     } else {
+                        guard entryLength >= kOffsetFileData + 2 * MemoryLayout<off_t>.size else {
+                            entryPtr = next
+                            continue
+                        }
                         let (dataLength, allocSize) = parseFileSizes(from: entry)
                         totalFileSize += dataLength
                         totalAllocatedSize += allocSize

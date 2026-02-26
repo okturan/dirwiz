@@ -173,9 +173,12 @@ public final class DuplicateFinder {
             // Collect results
             var collected: [PartialHashKey: [UInt32]] = [:]
             var processedTotal = 0
+            var lastProgressTime = CFAbsoluteTimeGetCurrent()
             for await batch in group {
                 processedTotal += batch.processed
-                if processedTotal % 500 == 0 || processedTotal == totalCandidates {
+                let now = CFAbsoluteTimeGetCurrent()
+                if now - lastProgressTime >= 0.2 || processedTotal == totalCandidates {
+                    lastProgressTime = now
                     await progress?(processedTotal, totalCandidates)
                 }
                 for (key, nodeIndex) in batch.matches {
