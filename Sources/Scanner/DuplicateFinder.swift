@@ -177,6 +177,9 @@ public final class DuplicateFinder {
     /// Read first 4KB + last 4KB and compute a combined hash.
     /// For files <= 8KB, reads the entire file.
     private func partialHash(cPath: UnsafePointer<CChar>, fileSize: UInt64) -> UInt64? {
+        // Zero-byte files all share the same partial hash.
+        if fileSize == 0 { return 0 }
+
         let fd = open(cPath, O_RDONLY)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
@@ -220,7 +223,8 @@ public final class DuplicateFinder {
         guard fstat(fd, &fileInfo) == 0 else { return nil }
         let byteCount = Int(fileInfo.st_size)
 
-        if byteCount == 0 { return nil }  // Cannot hash zero-byte or sparse files
+        // Zero-byte files are valid duplicates of each other.
+        if byteCount == 0 { return 0 }
 
         let mapped = mmap(nil, byteCount, PROT_READ, MAP_PRIVATE, fd, 0)
         guard mapped != MAP_FAILED, let mapped else { return nil }

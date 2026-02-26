@@ -251,6 +251,8 @@ public final class FileTree: @unchecked Sendable {
     @discardableResult
     public func addChildren(_ children: [(node: FileNode, name: String)], parentIndex: UInt32) -> UInt32 {
         lock.withLock { _ in
+            let p = Int(parentIndex)
+            guard p >= 0, p < nodes.count else { return UInt32(nodes.count) }
             let firstIndex = UInt32(nodes.count)
             for case (var node, let childName) in children {
                 node.parentIndex = parentIndex
@@ -265,8 +267,8 @@ public final class FileTree: @unchecked Sendable {
                 lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(utf8.count, Int(UInt16.max)))))
                 nodes.append(node)
             }
-            nodes[Int(parentIndex)].firstChildIndex = firstIndex
-            nodes[Int(parentIndex)].childCount = UInt32(children.count)
+            nodes[p].firstChildIndex = firstIndex
+            nodes[p].childCount = UInt32(children.count)
             return firstIndex
         }
     }

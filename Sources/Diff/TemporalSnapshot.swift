@@ -57,19 +57,26 @@ public struct TemporalSnapshot: Sendable {
     // MARK: Persistence
 
     /// URL where the snapshot for a given root path is persisted.
+    /// Uses a hash suffix to avoid collisions between paths that differ only in
+    /// whitespace or separators (e.g., "/Volumes/A B" vs "/Volumes/A_B").
     public static func snapshotURL(for rootPath: String) -> URL {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
         let dir = support.appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Derive a safe filename from the root path.
+        // Readable prefix + FNV-1a hash suffix to guarantee uniqueness.
         let safe = rootPath
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: " ", with: "-")
             .trimmingCharacters(in: .init(charactersIn: "_"))
-        let name = safe.isEmpty ? "root" : safe
-        return dir.appendingPathComponent("\(name).tdiff")
+        let prefix = safe.isEmpty ? "root" : String(safe.prefix(40))
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in rootPath.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return dir.appendingPathComponent("\(prefix)-\(String(hash, radix: 16)).tdiff")
     }
 
     public func save() throws {

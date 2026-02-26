@@ -3,11 +3,17 @@ import Synchronization
 
 // MARK: - Full Disk Access Detection
 
-/// Check if Full Disk Access has been granted by probing a protected file.
+/// Check if Full Disk Access has been granted by probing known protected paths.
+/// Tests multiple locations to avoid false negatives (e.g., Safari not installed).
 public func checkFullDiskAccess() -> Bool {
     let home = NSHomeDirectory()
-    let testPath = home + "/Library/Safari/Bookmarks.plist"
-    return access(testPath, R_OK) == 0
+    let protectedPaths = [
+        home + "/Library/Safari/Bookmarks.plist",
+        home + "/Library/Mail",
+        home + "/Library/Messages",
+        home + "/Library/Cookies",
+    ]
+    return protectedPaths.contains { access($0, R_OK) == 0 }
 }
 
 // MARK: - getattrlistbulk Attribute Layout

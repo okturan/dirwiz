@@ -175,6 +175,98 @@ struct FileNodeTests {
         #expect(volumeTree.path(at: 0) == "/")
     }
 
+    @Test("sortAllChildren preserves subtree integrity across directories")
+    func sortAllChildrenSubtreeStability() {
+        let tree = FileTree()
+        tree.rootPath = "/test"
+
+        // Root (index 0)
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "test")
+
+        // Two directories under root: A (small) and B (large)
+        var dirA = FileNode()
+        dirA.isDirectory = true
+        var dirB = FileNode()
+        dirB.isDirectory = true
+        // A has size 100, B has size 1000 — after sort B should come first.
+        dirA.fileSize = 100
+        dirB.fileSize = 1000
+        tree.addChildren([
+            (node: dirA, name: "A"),
+            (node: dirB, name: "B"),
+        ], parentIndex: 0)
+        // A is at index 1, B is at index 2
+
+        // Add children to A: a1 (50), a2 (30), a3 (20)
+        var a1 = FileNode(); a1.fileSize = 50
+        var a2 = FileNode(); a2.fileSize = 30
+        var a3 = FileNode(); a3.fileSize = 20
+        tree.addChildren([
+            (node: a1, name: "a1.txt"),
+            (node: a2, name: "a2.txt"),
+            (node: a3, name: "a3.txt"),
+        ], parentIndex: 1)
+        // a1=3, a2=4, a3=5
+
+        // Add children to B: b1 (200), b2 (800)
+        var b1 = FileNode(); b1.fileSize = 200
+        var b2 = FileNode(); b2.fileSize = 800
+        tree.addChildren([
+            (node: b1, name: "b1.txt"),
+            (node: b2, name: "b2.txt"),
+        ], parentIndex: 2)
+        // b1=6, b2=7
+
+        // Sort all children
+        tree.sortAllChildren()
+
+        let nodes = tree.nodesSnapshot()
+
+        // Root's children: B (1000) should come before A (100) after sort.
+        let rootFirst = Int(nodes[0].firstChildIndex)
+        #expect(nodes[rootFirst].fileSize == 1000, "B (size 1000) should be first child of root")
+        #expect(nodes[rootFirst + 1].fileSize == 100, "A (size 100) should be second child of root")
+
+        // Both directories should still have valid children.
+        let dirBIdx = rootFirst      // B is now first
+        let dirAIdx = rootFirst + 1  // A is now second
+
+        let bNode = nodes[dirBIdx]
+        #expect(bNode.isDirectory)
+        #expect(bNode.childCount == 2)
+        let bFirst = Int(bNode.firstChildIndex)
+        // B's children should be sorted: b2 (800) before b1 (200).
+        #expect(nodes[bFirst].fileSize == 800, "b2 should come first in B")
+        #expect(nodes[bFirst + 1].fileSize == 200, "b1 should come second in B")
+        // B's children should reference B as parent.
+        #expect(nodes[bFirst].parentIndex == UInt32(dirBIdx))
+        #expect(nodes[bFirst + 1].parentIndex == UInt32(dirBIdx))
+
+        let aNode = nodes[dirAIdx]
+        #expect(aNode.isDirectory)
+        #expect(aNode.childCount == 3)
+        let aFirst = Int(aNode.firstChildIndex)
+        // A's children should be sorted: a1 (50), a2 (30), a3 (20).
+        #expect(nodes[aFirst].fileSize == 50)
+        #expect(nodes[aFirst + 1].fileSize == 30)
+        #expect(nodes[aFirst + 2].fileSize == 20)
+        // A's children should reference A as parent.
+        for j in aFirst..<(aFirst + 3) {
+            #expect(nodes[j].parentIndex == UInt32(dirAIdx),
+                "A's child at \(j) should point to A at \(dirAIdx)")
+        }
+
+        // Paths should still resolve correctly after sort.
+        // B's children are at indices 6,7; A's children at 3,4,5 (unchanged positions).
+        // But B and A themselves moved within root's child slice.
+        let bChildPath = tree.path(at: UInt32(bFirst))
+        #expect(bChildPath.contains("b"), "B's child path should contain 'b': got \(bChildPath)")
+        let aChildPath = tree.path(at: UInt32(aFirst))
+        #expect(aChildPath.contains("a"), "A's child path should contain 'a': got \(aChildPath)")
+    }
+
     @Test("FileTree size accumulation works")
     func sizeAccumulation() {
         let tree = FileTree()

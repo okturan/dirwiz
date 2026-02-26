@@ -35,6 +35,9 @@ public enum SearchEngine {
     ) -> SearchResult {
         let start = CFAbsoluteTimeGetCurrent()
 
+        assert(searchEntries.count >= nodes.count,
+               "searchEntries (\(searchEntries.count)) must be >= nodes (\(nodes.count)); snapshot may be stale")
+
         guard !query.isEmpty, !nodes.isEmpty, !searchEntries.isEmpty else {
             return SearchResult(matchingIndices: [], totalMatches: 0,
                                 elapsedTime: CFAbsoluteTimeGetCurrent() - start)

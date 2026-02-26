@@ -67,8 +67,6 @@ public struct TemporalDiffService {
 
         var kinds     = Array(repeating: UInt8(TemporalDiffKind.none.rawValue), count: nodes.count)
         var strengths = Array(repeating: Float(0), count: nodes.count)
-        var matchedPaths = Set<String>()
-        matchedPaths.reserveCapacity(snapshot.byPath.count)
 
         // Build a relPath → nodeIndex map for the ancestor-aggregation pass.
         var relPathToIndex: [String: UInt32] = [:]
@@ -84,7 +82,6 @@ public struct TemporalDiffService {
             relPathToIndex[relPath] = UInt32(i)
 
             if let oldSize = snapshot.byPath[relPath] {
-                matchedPaths.insert(relPath)
                 let currentSize = node.fileSize
                 // Threshold: max(4 MB, 5 % of old size) — ignore noise
                 let threshold = max(UInt64(4 * 1024 * 1024), oldSize / 20)
@@ -109,8 +106,10 @@ public struct TemporalDiffService {
         }
 
         // --- Second pass: aggregate deleted snapshot entries to nearest ancestor ---
+        // A snapshot path is "deleted" if it doesn't appear in relPathToIndex (no
+        // separate matchedPaths set needed — saves a Set<String> allocation).
         var deletedByNode: [UInt32: DeletedSummary] = [:]
-        for (deletedPath, deletedBytes) in snapshot.byPath where !matchedPaths.contains(deletedPath) {
+        for (deletedPath, deletedBytes) in snapshot.byPath where relPathToIndex[deletedPath] == nil {
             guard let ancestorIdx = nearestAncestor(
                 of: deletedPath, in: relPathToIndex
             ) else { continue }
