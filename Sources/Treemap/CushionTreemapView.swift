@@ -69,9 +69,8 @@ public struct CushionTreemapView: NSViewRepresentable {
         mtkView.device = MTLCreateSystemDefaultDevice()
         mtkView.colorPixelFormat = .bgra8Unorm
         mtkView.clearColor = MTLClearColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
-        mtkView.isPaused = false
+        mtkView.isPaused = true
         mtkView.enableSetNeedsDisplay = true
-        mtkView.preferredFramesPerSecond = 30
 
         if let coordinator = CushionTreemapCoordinator(mtkView: mtkView) {
             coordinator.mtkView = mtkView

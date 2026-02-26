@@ -47,10 +47,12 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
 
     /// Instance buffer dirty tracking — skip rebuild when nothing changed.
     var instanceBufferDirty: Bool = true
-    private var lastSelectedNodeIndex: UInt32? = nil
 
     /// Maps nodeIndex -> visible instance index for O(1) hover lookup.
     private var nodeToInstanceIndex: [UInt32: Int32] = [:]
+
+    /// Scratch dictionary reused by dominantDirectFileExtensionHash to avoid per-call allocation.
+    private var scratchSizeByExt: [UInt32: UInt64] = [:]
 
     /// Callbacks for interaction.
     var onClick: ((UInt32) -> Void)?
@@ -148,15 +150,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         if !cachedLayout.isEmpty && !freshStart && sizeChanged {
             let sx = Float(viewportSize.width / currentViewportSize.width)
             let sy = Float(viewportSize.height / currentViewportSize.height)
-            cachedLayout = cachedLayout.map { r in
-                TreemapRect(
-                    nodeIndex: r.nodeIndex,
-                    x: r.x * sx, y: r.y * sy,
-                    width: r.width * sx, height: r.height * sy,
-                    depth: r.depth,
-                    cachedCoefs: r.cachedCoefs,
-                    isBackground: r.isBackground
-                )
+            for i in cachedLayout.indices {
+                cachedLayout[i].x *= sx
+                cachedLayout[i].y *= sy
+                cachedLayout[i].width *= sx
+                cachedLayout[i].height *= sy
             }
             spatialGrid = nil // Stale; rebuilt when background layout completes.
             instanceBufferDirty = true
@@ -215,13 +213,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         }
 
         // Skip rebuild if nothing changed.
-        // Hover is handled via the hoveredIndex uniform — no per-instance buffer rebuild needed.
-        let selectionChanged = selectedNodeIndex != lastSelectedNodeIndex
-        if !instanceBufferDirty && !selectionChanged {
+        // Hover and selection are handled via shader uniforms — no per-instance rebuild needed.
+        if !instanceBufferDirty {
             return
         }
         instanceBufferDirty = false
-        lastSelectedNodeIndex = selectedNodeIndex
 
         let palette = extensionPalette
         let nodes = cachedSnapshot
@@ -271,16 +267,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
                 }
             } else {
                 baseColor = palette.color(forHash: node.extensionHash)
-            }
-
-            // Highlight selected node.
-            if tmRect.nodeIndex == selectedNodeIndex {
-                baseColor = SIMD4<Float>(
-                    min(baseColor.x + 0.25, 1.0),
-                    min(baseColor.y + 0.25, 1.0),
-                    min(baseColor.z + 0.25, 1.0),
-                    1.0
-                )
             }
 
             // Encode recency factor in alpha for shader desaturation.
@@ -374,6 +360,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// Dominant extension among direct file children (by bytes). Uses snapshot array directly.
+    /// Reuses scratchSizeByExt to avoid per-call dictionary allocation.
     private func dominantDirectFileExtensionHash(in directoryIndex: UInt32, nodes: [FileNode]) -> UInt32? {
         let i = Int(directoryIndex)
         guard i < nodes.count else { return nil }
@@ -383,14 +370,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         let end = min(start + Int(node.childCount), nodes.count)
         guard start < end else { return nil }
 
-        var sizeByExt: [UInt32: UInt64] = [:]
+        scratchSizeByExt.removeAll(keepingCapacity: true)
         for childIndex in start..<end {
             let child = nodes[childIndex]
             guard !child.isDirectory else { continue }
-            sizeByExt[child.extensionHash, default: 0] += child.fileSize
+            scratchSizeByExt[child.extensionHash, default: 0] += child.fileSize
         }
 
-        return sizeByExt.max(by: { $0.value < $1.value })?.key
+        return scratchSizeByExt.max(by: { $0.value < $1.value })?.key
     }
 
     private func blend(_ a: SIMD4<Float>, _ b: SIMD4<Float>, factor t: Float) -> SIMD4<Float> {
@@ -436,10 +423,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         }
 
         // Set up uniforms.
-        // Map hoveredNodeIndex to a visible instance index for the shader via O(1) lookup.
+        // Map hover/selection node indices to visible instance indices for shader via O(1) lookup.
         var hoveredInstance: Int32 = -1
         if let hovered = hoveredNodeIndex {
             hoveredInstance = nodeToInstanceIndex[hovered] ?? -1
+        }
+        var selectedInstance: Int32 = -1
+        if let selected = selectedNodeIndex {
+            selectedInstance = nodeToInstanceIndex[selected] ?? -1
         }
 
         let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
@@ -448,7 +439,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             ambient: 0.25,
             padding1: 0,
             lightDir: SIMD4<Float>(ld.x, ld.y, ld.z, 0),
-            hoveredIndex: hoveredInstance
+            hoveredIndex: hoveredInstance,
+            selectedIndex: selectedInstance
         )
 
         if uniformBuffer == nil {

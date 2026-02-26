@@ -121,7 +121,7 @@ public struct VolumePickerView: View {
             // Filter to local volumes only.
             guard let values = try? url.resourceValues(forKeys: keys),
                   values.volumeIsLocal == true else { return nil }
-            return VolumeInfo(url: url)
+            return VolumeInfo(url: url, values: values)
         }
 
         // Auto-select root volume if nothing is selected.

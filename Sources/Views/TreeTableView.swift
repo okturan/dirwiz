@@ -42,8 +42,7 @@ public struct TreeTableView: View {
                 Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        let items = flattenedVisibleItems(tree: tree)
-                        ForEach(items) { item in
+                        ForEach(cachedItems) { item in
                             treeRowContainer(item, tree: tree)
                                 .id(item.id)
                             Divider().padding(.leading, CGFloat(item.depth) * 18 + 12)
@@ -151,7 +150,6 @@ public struct TreeTableView: View {
             TreeRow(
                 item: item,
                 parentSize: parentSize(for: item, tree: tree),
-                isSelected: appState.selectedNodeIndex == item.id,
                 extensionPalette: appState.extensionPalette
             )
         }
@@ -335,10 +333,10 @@ public struct TreeTableView: View {
         let i = Int(nodeIndex)
         guard i < nodes.count else { return }
 
-        // Walk parent chain, expand each ancestor (with max-hop guard)
+        // Walk parent chain, expand each ancestor (with depth guard).
         var current = nodes[i].parentIndex
         var hops = 0
-        while current != FileNode.invalid && Int(current) < nodes.count && hops < nodes.count {
+        while current != FileNode.invalid && Int(current) < nodes.count && hops < 512 {
             expandedFolders.insert(current)
             current = nodes[Int(current)].parentIndex
             hops += 1
@@ -364,7 +362,7 @@ public struct TreeTableView: View {
         // Walk parent chain — if we hit the current root, node is already visible
         var current = nodeIndex
         var hops = 0
-        while current != FileNode.invalid && Int(current) < nodes.count && hops < nodes.count {
+        while current != FileNode.invalid && Int(current) < nodes.count && hops < 512 {
             if current == root { return }
             current = nodes[Int(current)].parentIndex
             hops += 1

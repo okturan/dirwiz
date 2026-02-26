@@ -16,6 +16,7 @@ public final class ScanProgress: @unchecked Sendable {
     public var currentPath: String = ""
     public var elapsedTime: TimeInterval = 0
     public var scanComplete: Bool = false
+    public var isCancelled: Bool = false
     public var error: String?
     public var estimatedTotalItems: Int = 0
     public var scannedAllocatedBytes: UInt64 = 0
@@ -73,6 +74,7 @@ public final class ScanProgress: @unchecked Sendable {
         currentPath = ""
         elapsedTime = 0
         scanComplete = false
+        isCancelled = false
         error = nil
         estimatedTotalItems = 0
         scannedAllocatedBytes = 0

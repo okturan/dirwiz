@@ -16,8 +16,8 @@ func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void)
                 if response == .alertFirstButtonReturn { action() }
             }
         } else {
-            // No key window available — skip confirmation for safety.
-            action()
+            // No key window — do not proceed without confirmation.
+            return
         }
     } else {
         action()
@@ -30,11 +30,11 @@ public struct InteractiveTreemapView: View {
     @State private var hoveredNodeIndex: UInt32?
     @State private var hoverPoint: CGPoint?
     @State private var labelRects: [TreemapRect] = []
-    @State private var layoutCache: [TreemapRect] = []
+    @State private var layoutRectByNode: [UInt32: TreemapRect] = [:]
 
     private var selectedLayoutRect: CGRect? {
         guard let idx = appState.selectedNodeIndex else { return nil }
-        guard let r = layoutCache.first(where: { $0.nodeIndex == idx }) else { return nil }
+        guard let r = layoutRectByNode[idx] else { return nil }
         return CGRect(x: CGFloat(r.x), y: CGFloat(r.y),
                       width: CGFloat(r.width), height: CGFloat(r.height))
     }
@@ -222,7 +222,9 @@ public struct InteractiveTreemapView: View {
                             .sorted { $0.width * $0.height > $1.width * $1.height }
                             .prefix(80)
                     )
-                    layoutCache = rects
+                    var byNode = [UInt32: TreemapRect](minimumCapacity: rects.count)
+                    for r in rects { byNode[r.nodeIndex] = r }
+                    layoutRectByNode = byNode
                 }
             )
             .contextMenu {

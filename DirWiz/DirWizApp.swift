@@ -10,7 +10,6 @@ struct DirWizApp: App {
         // When launched via `swift run`, the process starts as a background agent.
         // This promotes it to a regular app with Dock icon and Cmd+Tab presence.
         NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     var body: some Scene {

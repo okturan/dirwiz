@@ -4,7 +4,6 @@ import SwiftUI
 struct TreeRow: View {
     let item: TreeNodeItem
     let parentSize: UInt64
-    let isSelected: Bool
     let extensionPalette: ExtensionPalette
 
     var body: some View {

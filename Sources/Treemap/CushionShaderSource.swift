@@ -17,7 +17,8 @@ enum CushionShaderSource {
         float  padding1;
         float4 lightDir;      // w unused; matches Swift SIMD4<Float> layout exactly
         int    hoveredIndex;
-        // padding to 16-byte alignment handled by Metal automatically
+        int    selectedIndex;
+        float2 padding2;
     };
 
     struct VertexOut {
@@ -101,6 +102,11 @@ enum CushionShaderSource {
         float edgeDist = min(edgeX, edgeY);
         float borderFactor = smoothstep(0.0, 1.5, edgeDist);
         litColor *= mix(0.25, 1.0, borderFactor);
+
+        // Selection highlight: brighten selected instance (GPU-side, avoids CPU buffer rebuild).
+        if (in.instanceID == uniforms.selectedIndex) {
+            litColor += float3(0.15);
+        }
 
         // Hover glow: brighten hovered instance and add outline.
         if (in.instanceID == uniforms.hoveredIndex) {

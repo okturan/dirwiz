@@ -82,6 +82,26 @@ private final class VisitedDirectories: @unchecked Sendable {
     }
 }
 
+// MARK: - Entry Parsing Helpers
+
+/// Parse the entry name from a getattrlistbulk packed entry.
+private func parseEntryName(from entry: UnsafeRawPointer) -> String {
+    let nameRef = entry.advanced(by: kOffsetName)
+    let nameOffset = Int(nameRef.loadUnaligned(as: Int32.self))
+    let nameLength = Int(nameRef.advanced(by: 4).loadUnaligned(as: UInt32.self))
+    guard nameLength > 1 else { return "" }
+    let namePtr = nameRef.advanced(by: nameOffset)
+    let data = Data(bytes: namePtr, count: nameLength - 1)
+    return String(data: data, encoding: .utf8) ?? ""
+}
+
+/// Parse logical data length and allocated size from a file entry.
+private func parseFileSizes(from entry: UnsafeRawPointer) -> (dataLength: UInt64, allocSize: UInt64) {
+    let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
+    let allocSize = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
+    return (dataLength, allocSize)
+}
+
 // MARK: - FileScanner
 
 public final class FileScanner {
@@ -111,9 +131,6 @@ public final class FileScanner {
     /// this method if you want live updates.
     /// Pass the returned FileTree to the UI immediately; it's populated in-place during scan.
     public func scan(path: String, progress: ScanProgress, tree: FileTree) async {
-        cancelLock.lock()
-        cancelled = false
-        cancelLock.unlock()
         // Estimate total items using inode counts (blocking I/O, done off main thread).
         var stat = statfs()
         var estimatedItems = 0
@@ -143,6 +160,9 @@ public final class FileScanner {
         }
 
         let startTime = CFAbsoluteTimeGetCurrent()
+
+        // Store scan root path for correct absolute path reconstruction.
+        tree.rootPath = path
 
         // Add root node
         let rootName = (path as NSString).lastPathComponent
@@ -232,7 +252,7 @@ public final class FileScanner {
             progress.isScanning = false
             progress.scanComplete = true
             if self.isCancelled {
-                progress.error = "Scan cancelled"
+                progress.isCancelled = true
             }
         }
     }
@@ -290,18 +310,7 @@ public final class FileScanner {
                 let entry = entryPtr
 
                 // Parse name
-                let nameRef = entry.advanced(by: kOffsetName)
-                let nameAttrOffset = Int(nameRef.loadUnaligned(as: Int32.self))
-                let nameAttrLength = Int(nameRef.advanced(by: 4).loadUnaligned(as: UInt32.self))
-
-                let namePtr = nameRef.advanced(by: nameAttrOffset)
-                let entryName: String
-                if nameAttrLength > 1 {
-                    let data = Data(bytes: namePtr, count: nameAttrLength - 1) // minus null terminator
-                    entryName = String(data: data, encoding: .utf8) ?? ""
-                } else {
-                    entryName = ""
-                }
+                let entryName = parseEntryName(from: entry)
 
                 guard !entryName.isEmpty, entryName != ".", entryName != ".." else {
                     entryPtr = entryPtr.advanced(by: entryLength)
@@ -333,8 +342,7 @@ public final class FileScanner {
                 var dataLength: UInt64 = 0
                 var allocSize: UInt64 = 0
                 if !isDir {
-                    dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
-                    allocSize = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
+                    (dataLength, allocSize) = parseFileSizes(from: entry)
                 }
 
                 // Build FileNode
@@ -467,12 +475,7 @@ public final class FileScanner {
                     }
 
                     if isDir {
-                        let nameRef = entry.advanced(by: kOffsetName)
-                        let nameOffset = Int(nameRef.loadUnaligned(as: Int32.self))
-                        let nameLength = Int(nameRef.advanced(by: 4).loadUnaligned(as: UInt32.self))
-                        let namePtr = nameRef.advanced(by: nameOffset)
-                        let nameData = Data(bytes: namePtr, count: max(0, nameLength - 1))
-                        let entryName = String(data: nameData, encoding: .utf8) ?? ""
+                        let entryName = parseEntryName(from: entry)
                         if !entryName.isEmpty, entryName != ".", entryName != ".." {
                             let devID = entry.advanced(by: kOffsetDevID).loadUnaligned(as: Int32.self)
                             let fileID = entry.advanced(by: kOffsetFileID).loadUnaligned(as: UInt64.self)
@@ -481,8 +484,7 @@ public final class FileScanner {
                             }
                         }
                     } else {
-                        let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
-                        let allocSize = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
+                        let (dataLength, allocSize) = parseFileSizes(from: entry)
                         totalFileSize += dataLength
                         totalAllocatedSize += allocSize
                     }

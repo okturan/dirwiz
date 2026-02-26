@@ -20,6 +20,7 @@ public struct DuplicateFilesView: View {
                 duplicateScanProgress
             } else if filteredGroups.isEmpty {
                 emptyState
+                    .frame(maxHeight: .infinity)
             } else {
                 duplicateList
             }
@@ -189,12 +190,15 @@ public struct DuplicateFilesView: View {
     }
 
     private func moveCheckedToTrash() {
+        var trashed: Set<String> = []
         for path in appState.duplicateCheckedPaths {
             let url = URL(fileURLWithPath: path)
-            try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
+                trashed.insert(path)
+            }
         }
-        // Remove trashed paths from the duplicate groups.
-        let trashed = appState.duplicateCheckedPaths
+        guard !trashed.isEmpty else { return }
+        // Remove only successfully trashed paths from the duplicate groups.
         appState.duplicateGroups = appState.duplicateGroups.compactMap { group in
             let remaining = group.paths.filter { !trashed.contains($0) }
             guard remaining.count >= 2 else { return nil }
@@ -204,7 +208,7 @@ public struct DuplicateFilesView: View {
                 paths: remaining
             )
         }
-        appState.duplicateCheckedPaths.removeAll()
+        appState.duplicateCheckedPaths.subtract(trashed)
     }
 }
 

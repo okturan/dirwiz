@@ -102,10 +102,11 @@ extension AppState {
         fileTree = newTree
         resetForNewScan()
         activeTab = .treeView
+        let token = scanToken
         Task {
             await scanner.scan(path: volumeURL.path, progress: scanProgress, tree: newTree)
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                guard let self, scanToken == token else { return }
                 activeScanner = nil
                 setTreemapRoot(0, recordHistory: false)
                 computeExtensionStats()

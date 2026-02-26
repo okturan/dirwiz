@@ -3,10 +3,10 @@ import Foundation
 /// A positioned rectangle in the treemap.
 public struct TreemapRect: Sendable {
     public let nodeIndex: UInt32
-    public let x: Float
-    public let y: Float
-    public let width: Float
-    public let height: Float
+    public var x: Float
+    public var y: Float
+    public var width: Float
+    public var height: Float
     public let depth: Int // nesting depth for cushion calculation
 
     /// Cached cushion coefficients (ax2, bx, ay2, by). Computed inline during layout.
@@ -50,11 +50,12 @@ public struct SquarifyLayout {
             h: Float(bounds.size.height)
         )
 
+        var ancestors: [(x: Float, y: Float, w: Float, h: Float)] = []
         layoutNode(
             index: rootIndex,
             rect: rect,
             depth: 0,
-            ancestors: [],
+            ancestors: &ancestors,
             nodes: nodes,
             maxDepth: maxDepth,
             minPixelSize: minPixelSize,
@@ -84,12 +85,31 @@ public struct SquarifyLayout {
             .sorted { nodes[Int($0)].fileSize > nodes[Int($1)].fileSize }
     }
 
+    /// Emit a TreemapRect if large enough to be visible.
+    private static func emitRect(
+        nodeIndex: UInt32, rect: LayoutRect, depth: Int,
+        ancestors: [(x: Float, y: Float, w: Float, h: Float)],
+        minPixelSize: Float, isBackground: Bool = false,
+        result: inout [TreemapRect]
+    ) {
+        guard rect.w >= minPixelSize, rect.h >= minPixelSize else { return }
+        result.append(TreemapRect(
+            nodeIndex: nodeIndex,
+            x: rect.x, y: rect.y,
+            width: rect.w, height: rect.h,
+            depth: depth,
+            cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors),
+            isBackground: isBackground
+        ))
+    }
+
     /// Recursively layout a single node's children within the given rect.
+    /// Uses inout ancestors with push/pop to avoid per-level array copies.
     private static func layoutNode(
         index: UInt32,
         rect: LayoutRect,
         depth: Int,
-        ancestors: [(x: Float, y: Float, w: Float, h: Float)],
+        ancestors: inout [(x: Float, y: Float, w: Float, h: Float)],
         nodes: [FileNode],
         maxDepth: Int,
         minPixelSize: Float,
@@ -97,83 +117,34 @@ public struct SquarifyLayout {
     ) {
         guard let node = nodeAt(index, nodes) else { return }
 
-        // Leaf file: emit rect directly.
-        if !node.isDirectory {
-            if rect.w >= minPixelSize && rect.h >= minPixelSize {
-                result.append(TreemapRect(
-                    nodeIndex: index,
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.w,
-                    height: rect.h,
-                    depth: depth,
-                    cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
-                ))
-            }
-            return
-        }
-
-        // Bundle directory: treat as opaque leaf.
-        if node.isBundle {
-            if rect.w >= minPixelSize && rect.h >= minPixelSize {
-                result.append(TreemapRect(
-                    nodeIndex: index,
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.w,
-                    height: rect.h,
-                    depth: depth,
-                    cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
-                ))
-            }
+        // Leaf file or bundle: emit as opaque rect.
+        if !node.isDirectory || node.isBundle {
+            emitRect(nodeIndex: index, rect: rect, depth: depth,
+                     ancestors: ancestors, minPixelSize: minPixelSize, result: &result)
             return
         }
 
         // Directory at max depth or too small: emit as a single rect.
         if depth >= maxDepth || rect.w < minPixelSize || rect.h < minPixelSize {
-            if rect.w >= minPixelSize && rect.h >= minPixelSize {
-                result.append(TreemapRect(
-                    nodeIndex: index,
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.w,
-                    height: rect.h,
-                    depth: depth,
-                    cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
-                ))
-            }
+            emitRect(nodeIndex: index, rect: rect, depth: depth,
+                     ancestors: ancestors, minPixelSize: minPixelSize, result: &result)
             return
         }
 
         // Get children sorted by size descending.
         let childIndices = childrenSortedBySize(of: index, nodes)
         guard !childIndices.isEmpty else {
-            // Empty directory, emit it.
-            result.append(TreemapRect(
-                nodeIndex: index,
-                x: rect.x,
-                y: rect.y,
-                width: rect.w,
-                height: rect.h,
-                depth: depth,
-                cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors)
-            ))
+            emitRect(nodeIndex: index, rect: rect, depth: depth,
+                     ancestors: ancestors, minPixelSize: minPixelSize, result: &result)
             return
         }
 
         // Emit the directory as a background rect before its children.
         // Children are drawn on top; any sub-pixel-culled children expose this
         // rect instead of the near-black clearColor.
-        result.append(TreemapRect(
-            nodeIndex: index,
-            x: rect.x,
-            y: rect.y,
-            width: rect.w,
-            height: rect.h,
-            depth: depth,
-            cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors),
-            isBackground: true
-        ))
+        emitRect(nodeIndex: index, rect: rect, depth: depth,
+                 ancestors: ancestors, minPixelSize: minPixelSize,
+                 isBackground: true, result: &result)
 
         // Compute total size of children.
         let totalSize = childIndices.reduce(Float(0)) { sum, idx in
@@ -189,145 +160,129 @@ public struct SquarifyLayout {
             return (index: idx, area: area)
         }
 
-        // Build ancestry for children at this depth.
-        var childAncestors = ancestors
-        childAncestors.append((x: rect.x, y: rect.y, w: rect.w, h: rect.h))
+        // Push this directory as an ancestor for its children.
+        ancestors.append((x: rect.x, y: rect.y, w: rect.w, h: rect.h))
 
         squarify(
             children: children,
-            startIndex: 0,
             rect: rect,
             depth: depth,
-            ancestors: childAncestors,
+            ancestors: &ancestors,
             nodes: nodes,
             maxDepth: maxDepth,
             minPixelSize: minPixelSize,
             result: &result
         )
+
+        ancestors.removeLast()
     }
 
-    /// Core squarified treemap algorithm.
+    /// Core squarified treemap algorithm (iterative).
     /// Greedily fills rows: adds items while worst aspect ratio improves,
-    /// then finalizes the row and recurses on remaining space.
+    /// then finalizes the row and continues with remaining space.
     private static func squarify(
         children: [(index: UInt32, area: Float)],
-        startIndex: Int,
         rect: LayoutRect,
         depth: Int,
-        ancestors: [(x: Float, y: Float, w: Float, h: Float)],
+        ancestors: inout [(x: Float, y: Float, w: Float, h: Float)],
         nodes: [FileNode],
         maxDepth: Int,
         minPixelSize: Float,
         result: inout [TreemapRect]
     ) {
         let count = children.count
-        guard startIndex < count else { return }
+        var startIndex = 0
+        var rect = rect
 
-        // Only one item left: give it the whole remaining rect.
-        if startIndex == count - 1 {
-            let child = children[startIndex]
-            layoutNode(
-                index: child.index,
-                rect: rect,
-                depth: depth + 1,
-                ancestors: ancestors,
-                nodes: nodes,
-                maxDepth: maxDepth,
-                minPixelSize: minPixelSize,
-                result: &result
-            )
-            return
-        }
-
-        let side = rect.shortSide
-        guard side > 0 else { return }
-
-        // Build the current row greedily.
-        var rowArea: Float = 0
-        var rowEnd = startIndex
-
-        rowArea += children[rowEnd].area
-        var currentWorst = worstRatio(rowArea: rowArea, side: side, minItem: children[rowEnd].area, maxItem: children[rowEnd].area)
-        rowEnd += 1
-
-        var rowMinItem = children[startIndex].area
-        var rowMaxItem = children[startIndex].area
-
-        while rowEnd < count {
-            let nextArea = children[rowEnd].area
-            let newRowArea = rowArea + nextArea
-            let newMin = min(rowMinItem, nextArea)
-            let newMax = max(rowMaxItem, nextArea)
-            let newWorst = worstRatio(rowArea: newRowArea, side: side, minItem: newMin, maxItem: newMax)
-
-            if newWorst > currentWorst {
-                break // Adding this item makes the row worse; stop here.
+        while startIndex < count {
+            // Only one item left: give it the whole remaining rect.
+            if startIndex == count - 1 {
+                layoutNode(
+                    index: children[startIndex].index,
+                    rect: rect,
+                    depth: depth + 1,
+                    ancestors: &ancestors,
+                    nodes: nodes,
+                    maxDepth: maxDepth,
+                    minPixelSize: minPixelSize,
+                    result: &result
+                )
+                return
             }
 
-            rowArea = newRowArea
-            rowMinItem = newMin
-            rowMaxItem = newMax
-            currentWorst = newWorst
-            rowEnd += 1
-        }
+            let side = rect.shortSide
+            guard side > 0 else { return }
 
-        // Layout the finalized row within the rect.
-        let (rowRect, remainingRect) = layoutRow(
-            rowArea: rowArea,
-            rect: rect
-        )
+            // Build the current row greedily.
+            var rowArea: Float = children[startIndex].area
+            var rowEnd = startIndex + 1
+            var currentWorst = worstRatio(rowArea: rowArea, side: side, minItem: rowArea, maxItem: rowArea)
+            var rowMinItem = rowArea
+            var rowMaxItem = rowArea
 
-        // Recursively place each item in the row.
-        let rowLength = rowArea / rect.shortSide
-        let horizontal = rect.w >= rect.h
-        var offset: Float = horizontal ? rowRect.y : rowRect.x
+            while rowEnd < count {
+                let nextArea = children[rowEnd].area
+                let newRowArea = rowArea + nextArea
+                let newMin = min(rowMinItem, nextArea)
+                let newMax = max(rowMaxItem, nextArea)
+                let newWorst = worstRatio(rowArea: newRowArea, side: side, minItem: newMin, maxItem: newMax)
 
-        let rowEndEdge: Float = horizontal ? rowRect.y + rowRect.h : rowRect.x + rowRect.w
+                if newWorst > currentWorst {
+                    break // Adding this item makes the row worse; stop here.
+                }
 
-        for i in startIndex..<rowEnd {
-            let isLastInRow = (i == rowEnd - 1)
-            let itemArea = children[i].area
-            var itemLength = rowLength > 0 ? itemArea / rowLength : 0
-
-            // Snap the last item to the remaining space to prevent FP drift.
-            if isLastInRow {
-                itemLength = rowEndEdge - offset
+                rowArea = newRowArea
+                rowMinItem = newMin
+                rowMaxItem = newMax
+                currentWorst = newWorst
+                rowEnd += 1
             }
 
-            var itemRect: LayoutRect
-            if horizontal {
-                itemRect = LayoutRect(x: rowRect.x, y: offset, w: rowLength, h: itemLength)
-            } else {
-                itemRect = LayoutRect(x: offset, y: rowRect.y, w: itemLength, h: rowLength)
+            // Layout the finalized row within the rect.
+            let (rowRect, remainingRect) = layoutRow(
+                rowArea: rowArea,
+                rect: rect
+            )
+
+            // Place each item in the row.
+            let rowLength = rowArea / rect.shortSide
+            let horizontal = rect.w >= rect.h
+            var offset: Float = horizontal ? rowRect.y : rowRect.x
+            let rowEndEdge: Float = horizontal ? rowRect.y + rowRect.h : rowRect.x + rowRect.w
+
+            for i in startIndex..<rowEnd {
+                let isLastInRow = (i == rowEnd - 1)
+                var itemLength = rowLength > 0 ? children[i].area / rowLength : 0
+
+                // Snap the last item to the remaining space to prevent FP drift.
+                if isLastInRow {
+                    itemLength = rowEndEdge - offset
+                }
+
+                let itemRect: LayoutRect
+                if horizontal {
+                    itemRect = LayoutRect(x: rowRect.x, y: offset, w: rowLength, h: itemLength)
+                } else {
+                    itemRect = LayoutRect(x: offset, y: rowRect.y, w: itemLength, h: rowLength)
+                }
+
+                layoutNode(
+                    index: children[i].index,
+                    rect: itemRect,
+                    depth: depth + 1,
+                    ancestors: &ancestors,
+                    nodes: nodes,
+                    maxDepth: maxDepth,
+                    minPixelSize: minPixelSize,
+                    result: &result
+                )
+
+                offset += itemLength
             }
 
-            layoutNode(
-                index: children[i].index,
-                rect: itemRect,
-                depth: depth + 1,
-                ancestors: ancestors,
-                nodes: nodes,
-                maxDepth: maxDepth,
-                minPixelSize: minPixelSize,
-                result: &result
-            )
-
-            offset += itemLength
-        }
-
-        // Recurse on the remaining children in the leftover space.
-        if rowEnd < count {
-            squarify(
-                children: children,
-                startIndex: rowEnd,
-                rect: remainingRect,
-                depth: depth,
-                ancestors: ancestors,
-                nodes: nodes,
-                maxDepth: maxDepth,
-                minPixelSize: minPixelSize,
-                result: &result
-            )
+            // Continue with the remaining children in the leftover space.
+            startIndex = rowEnd
+            rect = remainingRect
         }
     }
 

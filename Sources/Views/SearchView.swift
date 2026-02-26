@@ -23,7 +23,9 @@ public struct SearchView: View {
     @State private var previousQuery: String = ""
     @State private var previousMatchIndices: [UInt32]? = nil
     @State private var previousWasCapped: Bool = false
+    @FocusState private var focusedField: FocusField?
 
+    private enum FocusField { case searchBar, resultsList }
     private let pageSize = 200
 
     public init(appState: AppState) {
@@ -62,6 +64,7 @@ public struct SearchView: View {
             TextField("Search files...", text: $appState.searchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .focused($focusedField, equals: .searchBar)
                 .onChange(of: appState.searchQuery) { _, _ in
                     triggerSearch()
                 }
@@ -190,22 +193,40 @@ public struct SearchView: View {
     // MARK: - Results List
 
     private var resultsList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                let visibleSlice = appState.searchResults.prefix(showMoreCount)
-                ForEach(Array(visibleSlice), id: \.self) { idx in
-                    resultRowView(idx)
-                    Divider().padding(.leading, 8)
-                }
-
-                if appState.searchResults.count > showMoreCount {
-                    Button("Show \(min(pageSize, appState.searchResults.count - showMoreCount)) more...") {
-                        showMoreCount += pageSize
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    let visibleSlice = appState.searchResults.prefix(showMoreCount)
+                    ForEach(Array(visibleSlice), id: \.self) { idx in
+                        resultRowView(idx)
+                            .id(idx)
+                        Divider().padding(.leading, 8)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
-                    .padding(.vertical, 8)
+
+                    if appState.searchResults.count > showMoreCount {
+                        Button("Show \(min(pageSize, appState.searchResults.count - showMoreCount)) more...") {
+                            showMoreCount += pageSize
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                        .padding(.vertical, 8)
+                    }
                 }
+            }
+            .focusable()
+            .focused($focusedField, equals: .resultsList)
+            .onKeyPress(.upArrow) {
+                moveResultSelection(by: -1, proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.downArrow) {
+                moveResultSelection(by: 1, proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.space) {
+                guard focusedField == .resultsList else { return .ignored }
+                toggleQuickLook()
+                return .handled
             }
         }
     }
@@ -256,12 +277,13 @@ public struct SearchView: View {
                 : Color.clear
         )
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
             appState.showNodeInTreemap(idx)
             appState.activeTab = .treeView
-        }
+        })
         .onTapGesture {
             appState.selectedNodeIndex = idx
+            focusedField = .resultsList
         }
         .contextMenu {
             Button("Reveal in Finder") {
@@ -311,6 +333,26 @@ public struct SearchView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .background(.bar)
+    }
+
+    // MARK: - Keyboard Navigation
+
+    private func moveResultSelection(by delta: Int, proxy: ScrollViewProxy) {
+        let results = Array(appState.searchResults.prefix(showMoreCount))
+        guard !results.isEmpty else { return }
+        let currentIdx = results.firstIndex(where: { $0 == appState.selectedNodeIndex })
+        let fromIdx = currentIdx ?? (delta > 0 ? -1 : results.count)
+        let newIdx = max(0, min(results.count - 1, fromIdx + delta))
+        let selected = results[newIdx]
+        appState.selectedNodeIndex = selected
+        proxy.scrollTo(selected)
+    }
+
+    private func toggleQuickLook() {
+        guard let sel = appState.selectedNodeIndex,
+              let tree = appState.fileTree else { return }
+        let path = tree.path(at: sel)
+        appState.quickLookCoordinator.toggleQuickLook(for: path)
     }
 
     // MARK: - Search Execution

@@ -113,10 +113,15 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             Divider()
             HStack {
-                if appState.scanProgress.error != nil {
-                    Image(systemName: "exclamationmark.circle.fill")
+                if appState.scanProgress.isCancelled {
+                    Image(systemName: "stop.circle.fill")
                         .foregroundStyle(.orange)
                     Text("Scan Cancelled")
+                        .font(.callout.bold())
+                } else if appState.scanProgress.error != nil {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.red)
+                    Text("Scan Error")
                         .font(.callout.bold())
                 } else {
                     Image(systemName: "checkmark.circle.fill")
@@ -358,9 +363,12 @@ struct ContentView: View {
         appState.activeTab = .treeView
         appState.scanStartTime = CFAbsoluteTimeGetCurrent()
 
+        let token = appState.scanToken
         Task {
             await scanner.scan(path: path, progress: appState.scanProgress, tree: tree)
             await MainActor.run {
+                // Discard completion if a newer scan was started while we ran.
+                guard appState.scanToken == token else { return }
                 appState.scanDuration = CFAbsoluteTimeGetCurrent() - appState.scanStartTime
                 appState.activeScanner = nil
                 appState.setTreemapRoot(0, recordHistory: false)

@@ -18,7 +18,8 @@ struct CushionUniforms {
     var padding1: Float
     var lightDir: SIMD4<Float>   // w unused; matches Metal float4 layout exactly
     var hoveredIndex: Int32
-    var padding2: (Float, Float, Float) = (0, 0, 0)  // 12-byte tail padding; keep stride 48
+    var selectedIndex: Int32 = -1
+    var padding2: (Float, Float) = (0, 0)  // 8-byte tail padding; keep stride 48
 }
 
 // MARK: - Cushion Coefficient Calculation

@@ -117,6 +117,7 @@ public final class AppState {
     var forwardStack: [UInt32] = []
 
     /// Token incremented on each new scan; used to discard stale async results.
+    public var scanToken: UInt64 = 0
     var recencyToken: UInt64 = 0
     var temporalDiffToken: UInt64 = 0
     var temporalDiffTask: Task<Void, Never>?
@@ -147,6 +148,7 @@ public final class AppState {
         recencyGeneration = 0
         isRecencyOverlayEnabled = false
         isRecencyQueryRunning = false
+        scanToken &+= 1
         recencyToken &+= 1
         temporalDiffKinds = []
         temporalDiffStrengths = []
@@ -180,27 +182,27 @@ public struct VolumeInfo: Identifiable, Sendable {
     public let availableCapacity: UInt64
     public let usedCapacity: UInt64
 
-    public init(url: URL) {
+    public init(url: URL, values: URLResourceValues? = nil) {
         self.url = url
         self.id = url.path
 
-        let values = try? url.resourceValues(forKeys: [
+        let v = values ?? (try? url.resourceValues(forKeys: [
             .volumeNameKey,
             .volumeTotalCapacityKey,
             .volumeAvailableCapacityForImportantUsageKey,
             .volumeAvailableCapacityKey,
-        ])
+        ]))
 
-        self.name = values?.volumeName ?? url.lastPathComponent
-        let total = UInt64(values?.volumeTotalCapacity ?? 0)
+        self.name = v?.volumeName ?? url.lastPathComponent
+        let total = UInt64(v?.volumeTotalCapacity ?? 0)
         // Prefer APFS-aware "important usage" capacity, but fall back to
         // the basic available capacity for non-APFS volumes (exFAT, HFS+, etc.)
         // where the APFS key returns nil.
         let available: UInt64
-        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 {
+        if let important = v?.volumeAvailableCapacityForImportantUsage, important > 0 {
             available = UInt64(important)
         } else {
-            available = UInt64(values?.volumeAvailableCapacity ?? 0)
+            available = UInt64(v?.volumeAvailableCapacity ?? 0)
         }
         self.totalCapacity = total
         self.availableCapacity = available

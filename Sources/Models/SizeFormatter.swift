@@ -46,13 +46,13 @@ public struct SizeFormatter: Sendable {
         if count == 0 { return "0" }
         let isNegative = count < 0
         var n = isNegative ? -count : count
-        var parts: [String] = []
+        var parts: [Int] = []
         while n > 0 {
-            parts.append(String(n % 1000))
+            parts.append(n % 1000)
             n /= 1000
         }
-        let first = parts.removeLast()
-        let result = ([first] + parts.reversed().map { String(format: "%03d", Int($0)!) }).joined(separator: ",")
+        let first = String(parts.removeLast())
+        let result = ([first] + parts.reversed().map { String(format: "%03d", $0) }).joined(separator: ",")
         return isNegative ? "-" + result : result
     }
 }

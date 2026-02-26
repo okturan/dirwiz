@@ -143,6 +143,7 @@ struct FileNodeTests {
     @Test("FileTree path building works")
     func pathBuilding() {
         let tree = FileTree()
+        tree.rootPath = "/Users"
         var root = FileNode()
         root.isDirectory = true
         tree.addNode(root, name: "Users")
@@ -157,6 +158,21 @@ struct FileNodeTests {
 
         let path = tree.path(at: 2)
         #expect(path == "/Users/Documents/readme.txt")
+
+        // Root node itself returns the rootPath
+        #expect(tree.path(at: 0) == "/Users")
+
+        // Volume root scan: rootPath = "/"
+        let volumeTree = FileTree()
+        volumeTree.rootPath = "/"
+        var vRoot = FileNode()
+        vRoot.isDirectory = true
+        volumeTree.addNode(vRoot, name: "/")
+        var vChild = FileNode()
+        vChild.fileSize = 50
+        volumeTree.addChildren([(node: vChild, name: "file.txt")], parentIndex: 0)
+        #expect(volumeTree.path(at: 1) == "/file.txt")
+        #expect(volumeTree.path(at: 0) == "/")
     }
 
     @Test("FileTree size accumulation works")

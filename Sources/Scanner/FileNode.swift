@@ -63,6 +63,9 @@ public final class FileTree: @unchecked Sendable {
     public private(set) var nodes: [FileNode] = []
     public private(set) var stringPool: Data = Data()
     // Pre-lowercased contiguous name buffer for cache-friendly scanning
+    /// Full filesystem path of the scan root (set before scanning begins).
+    /// Used by path(at:) to reconstruct correct absolute paths.
+    public var rootPath: String = "/"
     private var lowercaseNamePool: Data = Data()
     private var lowercaseNameEntries: [(offset: UInt32, length: UInt16)] = []
 
@@ -136,6 +139,8 @@ public final class FileTree: @unchecked Sendable {
     }
 
     /// Build full path for a node by walking up the parent chain.
+    /// Uses the stored `rootPath` to produce correct absolute paths
+    /// regardless of whether the scan root is a volume root.
     public func path(at index: UInt32) -> String {
         lock.lock()
         defer { lock.unlock() }
@@ -145,6 +150,8 @@ public final class FileTree: @unchecked Sendable {
             let i = Int(current)
             guard i < nodes.count else { break }
             let node = nodes[i]
+            // Root node: use stored rootPath as prefix instead of node name.
+            if node.parentIndex == FileNode.invalid { break }
             let start = Int(node.nameOffset)
             let end = start + Int(node.nameLength)
             if end <= stringPool.count {
@@ -152,7 +159,10 @@ public final class FileTree: @unchecked Sendable {
             }
             current = node.parentIndex
         }
-        return "/" + components.reversed().joined(separator: "/")
+        let suffix = components.reversed().joined(separator: "/")
+        if suffix.isEmpty { return rootPath }
+        if rootPath.hasSuffix("/") { return rootPath + suffix }
+        return rootPath + "/" + suffix
     }
 
     // MARK: - Children
