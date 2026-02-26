@@ -5,13 +5,11 @@ import SwiftUI
 public struct SearchView: View {
     @Bindable var appState: AppState
 
-    @State private var queryText: String = ""
     @State private var filters = SearchFilters()
     @State private var sortOrder: SortOrder = .size
     @State private var sortAscending: Bool = false
 
     // Raw sorted indices — no pre-built display objects.
-    @State private var matchedIndices: [UInt32] = []
     // Cached snapshots for lock-free rendering of visible rows.
     @State private var cachedNodes: [FileNode] = []
     @State private var cachedPool: Data = Data()
@@ -19,7 +17,6 @@ public struct SearchView: View {
     @State private var totalMatches: Int = 0
     @State private var searchTimeMs: Double = 0
     @State private var isCapped: Bool = false
-    @State private var isSearching: Bool = false
     @State private var searchTask: Task<Void, Never>?
     @State private var searchGeneration: UInt64 = 0
     @State private var showMoreCount: Int = 200
@@ -62,22 +59,22 @@ public struct SearchView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
 
-            TextField("Search files...", text: $queryText)
+            TextField("Search files...", text: $appState.searchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .onChange(of: queryText) { _, _ in
+                .onChange(of: appState.searchQuery) { _, _ in
                     triggerSearch()
                 }
 
-            if isSearching {
+            if appState.isSearching {
                 ProgressView()
                     .controlSize(.small)
             }
 
-            if !queryText.isEmpty {
+            if !appState.searchQuery.isEmpty {
                 Button(action: {
-                    queryText = ""
-                    matchedIndices = []
+                    appState.searchQuery = ""
+                    appState.searchResults = []
                     totalMatches = 0
                     searchTimeMs = 0
                     previousQuery = ""
@@ -195,14 +192,14 @@ public struct SearchView: View {
     private var resultsList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                let visibleSlice = matchedIndices.prefix(showMoreCount)
+                let visibleSlice = appState.searchResults.prefix(showMoreCount)
                 ForEach(Array(visibleSlice), id: \.self) { idx in
                     resultRowView(idx)
                     Divider().padding(.leading, 8)
                 }
 
-                if matchedIndices.count > showMoreCount {
-                    Button("Show \(min(pageSize, matchedIndices.count - showMoreCount)) more...") {
+                if appState.searchResults.count > showMoreCount {
+                    Button("Show \(min(pageSize, appState.searchResults.count - showMoreCount)) more...") {
                         showMoreCount += pageSize
                     }
                     .buttonStyle(.plain)
@@ -291,12 +288,12 @@ public struct SearchView: View {
 
     private var statusBar: some View {
         HStack {
-            if totalMatches == 0 && !queryText.isEmpty && !isSearching {
+            if totalMatches == 0 && !appState.searchQuery.isEmpty && !appState.isSearching {
                 Text("No results")
                     .foregroundStyle(.secondary)
             } else if totalMatches > 0 {
                 if isCapped {
-                    Text("\(SizeFormatter.shared.formatCount(min(matchedIndices.count, showMoreCount))) of \(SizeFormatter.shared.formatCount(totalMatches)) results (capped)")
+                    Text("\(SizeFormatter.shared.formatCount(min(appState.searchResults.count, showMoreCount))) of \(SizeFormatter.shared.formatCount(totalMatches)) results (capped)")
                 } else {
                     Text("\(SizeFormatter.shared.formatCount(totalMatches)) results")
                 }
@@ -324,20 +321,20 @@ public struct SearchView: View {
         searchGeneration &+= 1
         let thisGeneration = searchGeneration
 
-        guard !queryText.isEmpty, let tree = appState.fileTree else {
-            matchedIndices = []
+        guard !appState.searchQuery.isEmpty, let tree = appState.fileTree else {
+            appState.searchResults = []
             totalMatches = 0
             searchTimeMs = 0
             isCapped = false
-            isSearching = false
+            appState.isSearching = false
             previousQuery = ""
             previousMatchIndices = nil
             previousWasCapped = false
             return
         }
 
-        isSearching = true
-        let currentQuery = queryText
+        appState.isSearching = true
+        let currentQuery = appState.searchQuery
         let currentFilters = filters
         let currentSort = sortOrder
         let currentAscending = sortAscending
@@ -382,11 +379,11 @@ public struct SearchView: View {
                 guard thisGeneration == searchGeneration else { return }
                 cachedNodes = nodes
                 cachedPool = displayPool
-                matchedIndices = finalIndices
+                appState.searchResults = finalIndices
                 totalMatches = searchResult.totalMatches
                 searchTimeMs = searchResult.elapsedTime * 1000
                 isCapped = resultWasCapped
-                isSearching = false
+                appState.isSearching = false
                 previousQuery = currentQuery
                 previousMatchIndices = searchResult.matchingIndices
                 previousWasCapped = resultWasCapped
@@ -396,9 +393,9 @@ public struct SearchView: View {
 
     /// Re-sort existing results without re-searching.
     private func resortIndices() {
-        var indices = matchedIndices
+        var indices = appState.searchResults
         Self.sortIndices(&indices, nodes: cachedNodes, pool: cachedPool, by: sortOrder, ascending: sortAscending)
-        matchedIndices = indices
+        appState.searchResults = indices
     }
 
     /// Sort indices using direct node field comparison — no String allocation for size/date.

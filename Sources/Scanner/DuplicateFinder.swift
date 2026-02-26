@@ -1,4 +1,5 @@
 import Foundation
+import CommonCrypto
 import os
 
 // MARK: - DuplicateFinder
@@ -205,36 +206,38 @@ public final class DuplicateFinder {
         return fnv1a(rawBuffer)
     }
 
-    /// Compute full-file FNV-1a hash.
+    /// Compute full-file SHA-256 hash and fold it down to 64 bits.
     private func fullFileHash(path: String) -> UInt64? {
         let fd = open(path, O_RDONLY)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
 
-        let chunkSize = 256 * 1024 // 256 KB chunks
-        let buffer = UnsafeMutableRawPointer.allocate(byteCount: chunkSize, alignment: 8)
-        defer { buffer.deallocate() }
+        var fileInfo = stat()
+        guard fstat(fd, &fileInfo) == 0 else { return nil }
+        let byteCount = Int(fileInfo.st_size)
 
-        var hash: UInt64 = 0xcbf29ce484222325
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
 
-        while true {
-            let bytesRead = read(fd, buffer, chunkSize)
-            if bytesRead <= 0 { break }
-            let rawBuffer = UnsafeRawBufferPointer(start: buffer, count: bytesRead)
-            hash = fnv1aContinue(rawBuffer, hash: hash)
+        if byteCount == 0 {
+            _ = CC_SHA256(nil, 0, &digest)
+            return digestToUInt64(digest)
         }
 
-        return hash
+        let mapped = mmap(nil, byteCount, PROT_READ, MAP_PRIVATE, fd, 0)
+        guard mapped != MAP_FAILED, let mapped else { return nil }
+        defer { munmap(mapped, byteCount) }
+
+        _ = CC_SHA256(mapped, CC_LONG(byteCount), &digest)
+        return digestToUInt64(digest)
     }
 
-    /// Continue FNV-1a hashing from a previous state (for chunked reads).
-    private func fnv1aContinue(_ data: UnsafeRawBufferPointer, hash: UInt64) -> UInt64 {
-        var h = hash
-        for byte in data {
-            h ^= UInt64(byte)
-            h &*= 0x100000001b3
+    private func digestToUInt64(_ digest: [UInt8]) -> UInt64 {
+        precondition(digest.count >= 8)
+        var value: UInt64 = 0
+        for byte in digest.prefix(8) {
+            value = (value << 8) | UInt64(byte)
         }
-        return h
+        return value
     }
 }
 

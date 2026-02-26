@@ -43,6 +43,24 @@ public final class AppState {
     /// Duplicate file groups (populated after duplicate scan).
     public var duplicateGroups: [DuplicateGroup] = []
 
+    /// Duplicates tab UI state: checked file paths.
+    public var duplicateCheckedPaths: Set<String> = []
+
+    /// Duplicates tab UI state: expanded duplicate group IDs.
+    public var duplicateExpandedGroups: Set<UUID> = []
+
+    /// Duplicates tab UI state: progress of current duplicate scan.
+    public var duplicateProgress: (processed: Int, total: Int) = (0, 0)
+
+    /// Search tab UI state: current query text.
+    public var searchQuery: String = ""
+
+    /// Search tab UI state: current matched node indices.
+    public var searchResults: [UInt32] = []
+
+    /// Search tab UI state: whether search is currently running.
+    public var isSearching: Bool = false
+
     /// Per-node Spotlight recency factor [0,1] (1=recently used, 0=stale/unindexed).
     public var recencyFactors: [Float] = []
 
@@ -119,6 +137,12 @@ public final class AppState {
         fileTypeStats = []
         extensionPalette = ExtensionPalette()
         duplicateGroups = []
+        duplicateCheckedPaths = []
+        duplicateExpandedGroups = []
+        duplicateProgress = (0, 0)
+        searchQuery = ""
+        searchResults = []
+        isSearching = false
         recencyFactors = []
         recencyGeneration = 0
         isRecencyOverlayEnabled = false

@@ -4,10 +4,7 @@ import SwiftUI
 public struct DuplicateFilesView: View {
     @Bindable var appState: AppState
 
-    @State private var checkedPaths: Set<String> = []
     @State private var minimumSizeFilter: UInt64 = 1_048_576 // 1 MB default
-    @State private var duplicateProgress: (processed: Int, total: Int) = (0, 0)
-    @State private var expandedGroups: Set<UUID> = []
     @State private var showTrashConfirmation: Bool = false
 
     public init(appState: AppState) {
@@ -61,11 +58,11 @@ public struct DuplicateFilesView: View {
 
             Spacer()
 
-            if !checkedPaths.isEmpty {
+            if !appState.duplicateCheckedPaths.isEmpty {
                 Button(action: { showTrashConfirmation = true }) {
                     HStack(spacing: 4) {
                         Image(systemName: "trash")
-                        Text("Move to Trash (\(checkedPaths.count))")
+                        Text("Move to Trash (\(appState.duplicateCheckedPaths.count))")
                     }
                 }
                 .foregroundStyle(.red)
@@ -75,7 +72,7 @@ public struct DuplicateFilesView: View {
                         moveCheckedToTrash()
                     }
                 } message: {
-                    Text("Move \(checkedPaths.count) selected files to the Trash? This cannot be undone easily.")
+                    Text("Move \(appState.duplicateCheckedPaths.count) selected files to the Trash? This cannot be undone easily.")
                 }
             }
 
@@ -103,13 +100,13 @@ public struct DuplicateFilesView: View {
                 .controlSize(.large)
             Text("Scanning for duplicates...")
                 .font(.headline)
-            if duplicateProgress.total > 0 {
-                Text("\(SizeFormatter.shared.formatCount(duplicateProgress.processed)) / \(SizeFormatter.shared.formatCount(duplicateProgress.total)) candidates")
+            if appState.duplicateProgress.total > 0 {
+                Text("\(SizeFormatter.shared.formatCount(appState.duplicateProgress.processed)) / \(SizeFormatter.shared.formatCount(appState.duplicateProgress.total)) candidates")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 ProgressView(
-                    value: Double(duplicateProgress.processed),
-                    total: Double(max(duplicateProgress.total, 1))
+                    value: Double(appState.duplicateProgress.processed),
+                    total: Double(max(appState.duplicateProgress.total, 1))
                 )
                 .progressViewStyle(.linear)
                 .frame(maxWidth: 300)
@@ -141,13 +138,13 @@ public struct DuplicateFilesView: View {
                 ForEach(filteredGroups) { group in
                     DuplicateGroupRow(
                         group: group,
-                        isExpanded: expandedGroups.contains(group.id),
-                        checkedPaths: $checkedPaths,
+                        isExpanded: appState.duplicateExpandedGroups.contains(group.id),
+                        checkedPaths: $appState.duplicateCheckedPaths,
                         onToggleExpand: {
-                            if expandedGroups.contains(group.id) {
-                                expandedGroups.remove(group.id)
+                            if appState.duplicateExpandedGroups.contains(group.id) {
+                                appState.duplicateExpandedGroups.remove(group.id)
                             } else {
-                                expandedGroups.insert(group.id)
+                                appState.duplicateExpandedGroups.insert(group.id)
                             }
                         }
                     )
@@ -173,14 +170,15 @@ public struct DuplicateFilesView: View {
     private func startDuplicateScan() {
         guard let tree = appState.fileTree else { return }
         appState.isDuplicateScanRunning = true
-        checkedPaths.removeAll()
-        expandedGroups.removeAll()
+        appState.duplicateCheckedPaths.removeAll()
+        appState.duplicateExpandedGroups.removeAll()
+        appState.duplicateProgress = (0, 0)
 
         Task {
             let finder = DuplicateFinder()
             let groups = await finder.findDuplicates(in: tree) { processed, total in
                 Task { @MainActor in
-                    duplicateProgress = (processed, total)
+                    appState.duplicateProgress = (processed, total)
                 }
             }
             await MainActor.run {
@@ -191,12 +189,12 @@ public struct DuplicateFilesView: View {
     }
 
     private func moveCheckedToTrash() {
-        for path in checkedPaths {
+        for path in appState.duplicateCheckedPaths {
             let url = URL(fileURLWithPath: path)
             try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
         }
         // Remove trashed paths from the duplicate groups.
-        let trashed = checkedPaths
+        let trashed = appState.duplicateCheckedPaths
         appState.duplicateGroups = appState.duplicateGroups.compactMap { group in
             let remaining = group.paths.filter { !trashed.contains($0) }
             guard remaining.count >= 2 else { return nil }
@@ -206,7 +204,7 @@ public struct DuplicateFilesView: View {
                 paths: remaining
             )
         }
-        checkedPaths.removeAll()
+        appState.duplicateCheckedPaths.removeAll()
     }
 }
 
