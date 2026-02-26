@@ -45,7 +45,7 @@ public struct TreeTableView: View {
                         ForEach(cachedItems) { item in
                             treeRowContainer(item, tree: tree)
                                 .id(item.id)
-                            Divider().padding(.leading, CGFloat(item.depth) * 18 + 12)
+                            Divider()
                         }
                     }
                 }
@@ -114,45 +114,25 @@ public struct TreeTableView: View {
         }
     }
 
-    // MARK: - Row Container (indentation + arrow + content)
+    // MARK: - Row Container
 
     private func treeRowContainer(_ item: TreeNodeItem, tree: FileTree) -> some View {
-        HStack(spacing: 0) {
-            // Depth-based indentation: 12pt base + 18pt per level.
-            Color.clear
-                .frame(width: CGFloat(item.depth) * 18 + 12, height: 1)
-
-            // Disclosure arrow
-            if item.hasChildren {
-                let isExpanded = expandedFolders.contains(item.id)
-                Button {
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        if isExpanded {
-                            expandedFolders.remove(item.id)
-                        } else {
-                            expandedFolders.insert(item.id)
-                        }
+        TreeRow(
+            item: item,
+            parentSize: parentSize(for: item, tree: tree),
+            extensionPalette: appState.extensionPalette,
+            depth: item.depth,
+            isExpanded: expandedFolders.contains(item.id),
+            onToggleExpand: {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    if expandedFolders.contains(item.id) {
+                        expandedFolders.remove(item.id)
+                    } else {
+                        expandedFolders.insert(item.id)
                     }
-                } label: {
-                    Image(systemName: expandedFolders.contains(item.id) ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 22)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-            } else {
-                // Leaf node — spacer to align with siblings.
-                Color.clear.frame(width: 16, height: 1)
             }
-
-            // Row content
-            TreeRow(
-                item: item,
-                parentSize: parentSize(for: item, tree: tree),
-                extensionPalette: appState.extensionPalette
-            )
-        }
+        )
         .padding(.trailing, 8)
         .padding(.vertical, 3)
         .contentShape(Rectangle())

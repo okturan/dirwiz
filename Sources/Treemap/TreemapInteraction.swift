@@ -16,8 +16,8 @@ func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void)
                 if response == .alertFirstButtonReturn { action() }
             }
         } else {
-            // No key window — do not proceed without confirmation.
-            return
+            // No key window — fall back to app-modal alert.
+            if alert.runModal() == .alertFirstButtonReturn { action() }
         }
     } else {
         action()
@@ -255,7 +255,7 @@ public struct InteractiveTreemapView: View {
     private var textLabelOverlay: some View {
         let tree = appState.fileTree
         return ZStack(alignment: .topLeading) {
-            ForEach(Array(labelRects.enumerated()), id: \.offset) { _, rect in
+            ForEach(labelRects, id: \.nodeIndex) { rect in
                 treemapLabel(for: rect, tree: tree)
             }
         }

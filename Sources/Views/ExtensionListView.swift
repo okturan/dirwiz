@@ -75,20 +75,24 @@ public struct ExtensionListView: View {
             }
         }
 
-        // Sort.
+        // Sort with stable tie-breaking to satisfy strict weak ordering.
         result.sort { a, b in
-            let cmp: Bool
             switch sortOrder {
             case .name:
-                cmp = a.extensionName.localizedCaseInsensitiveCompare(b.extensionName) == .orderedAscending
+                let order = a.extensionName.localizedCaseInsensitiveCompare(b.extensionName)
+                if order != .orderedSame { return sortAscending ? order == .orderedAscending : order == .orderedDescending }
+                return false
             case .size:
-                cmp = a.totalSize > b.totalSize
+                if a.totalSize != b.totalSize { return sortAscending ? a.totalSize < b.totalSize : a.totalSize > b.totalSize }
+                return false
             case .count:
-                cmp = a.fileCount > b.fileCount
+                if a.fileCount != b.fileCount { return sortAscending ? a.fileCount < b.fileCount : a.fileCount > b.fileCount }
+                return false
             case .category:
-                cmp = a.category.rawValue < b.category.rawValue
+                let order = a.category.rawValue.localizedCaseInsensitiveCompare(b.category.rawValue)
+                if order != .orderedSame { return sortAscending ? order == .orderedAscending : order == .orderedDescending }
+                return false
             }
-            return sortAscending ? !cmp : cmp
         }
 
         return result
@@ -146,7 +150,7 @@ public struct ExtensionListView: View {
                 Circle()
                     .fill(paletteColor)
                     .frame(width: 8, height: 8)
-                Text(".\(stat.extensionName)")
+                Text(stat.extensionName.isEmpty ? "(no ext)" : ".\(stat.extensionName)")
                     .font(.system(size: 12, design: .monospaced))
                     .lineLimit(1)
             }

@@ -51,6 +51,7 @@ public struct SearchView: View {
                 Divider()
                 statusBar
             }
+            .onAppear { focusedField = .searchBar }
         }
     }
 

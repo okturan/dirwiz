@@ -209,6 +209,8 @@ public struct DuplicateFilesView: View {
             )
         }
         appState.duplicateCheckedPaths.subtract(trashed)
+        // Rescan to keep tree/treemap data consistent with filesystem.
+        appState.rescanVolume()
     }
 }
 
