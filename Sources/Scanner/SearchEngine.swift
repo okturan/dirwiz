@@ -36,8 +36,13 @@ public enum SearchEngine {
     ) -> SearchResult {
         let start = CFAbsoluteTimeGetCurrent()
 
-        assert(searchEntries.count >= nodes.count,
-               "searchEntries (\(searchEntries.count)) must be >= nodes (\(nodes.count)); snapshot may be stale")
+        // Mismatch is benign — the scan loop below uses min(nodeCount, entryCount),
+        // so it never reads out of bounds. Log in debug to catch stale snapshots early.
+        if searchEntries.count < nodes.count {
+            #if DEBUG
+            print("SearchEngine: searchEntries (\(searchEntries.count)) < nodes (\(nodes.count)); snapshot may be stale")
+            #endif
+        }
 
         guard !query.isEmpty, !nodes.isEmpty, !searchEntries.isEmpty else {
             return SearchResult(matchingIndices: [], totalMatches: 0,

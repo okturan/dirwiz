@@ -84,12 +84,15 @@ public struct HardlinkFinder {
             returning: [BatchResult].self
         ) { group in
             for batchStart in stride(from: 0, to: fileIndices.count, by: batchSize) {
+                guard !Task.isCancelled else { break }
                 let batchEnd = min(batchStart + batchSize, fileIndices.count)
                 let batch = fileIndices[batchStart..<batchEnd]
                 group.addTask {
+                    guard !Task.isCancelled else { return [] }
                     var results: BatchResult = []
                     results.reserveCapacity(batch.count)
                     for nodeIndex in batch {
+                        guard !Task.isCancelled else { break }
                         let path = FileTree.pathFromSnapshot(
                             at: nodeIndex,
                             nodes: nodes,

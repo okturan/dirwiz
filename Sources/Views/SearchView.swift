@@ -144,6 +144,13 @@ public struct SearchView: View {
             previousMatchIndices = nil
             triggerSearch()
         }
+        // Clear stale node/pool snapshots when a new scan starts so the old
+        // tree's memory is released and stale rows are never displayed.
+        .onChange(of: appState.scanToken) { _, _ in
+            cachedNodes = []
+            cachedPool = Data()
+            previousMatchIndices = nil
+        }
     }
 
     // MARK: - Sortable Header

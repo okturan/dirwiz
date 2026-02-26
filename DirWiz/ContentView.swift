@@ -500,9 +500,17 @@ struct ContentView: View {
     }
 
     private func csvQuote(_ value: String) -> String {
-        guard value.contains(",") || value.contains("\"") || value.contains("\n") else {
-            return value
+        // Prefix with a tab to neutralize spreadsheet formula injection
+        // (filenames starting with =, +, -, @ are treated as formulas in Excel/Sheets).
+        let safe: String
+        if let first = value.first, "=+-@\t".contains(first) {
+            safe = "\t" + value
+        } else {
+            safe = value
         }
-        return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        guard safe.contains(",") || safe.contains("\"") || safe.contains("\n") else {
+            return safe
+        }
+        return "\"\(safe.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 }

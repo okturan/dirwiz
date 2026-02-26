@@ -134,17 +134,6 @@ final class MockFilesystemProvider: @unchecked Sendable, FilesystemProvider {
     }
 }
 
-// MARK: - Helper: make a MockFilesystemProvider fail a directory
-
-extension MockFilesystemProvider {
-    /// Mark `path` as unreadable (simulates permission denied).
-    func markUnreadable(_ path: String) {
-        directories[path] = nil  // explicit nil isn't possible with a Dictionary value
-        // Instead we use a separate set to track failures.
-        // Workaround: see `FailingMockFilesystemProvider` below.
-    }
-}
-
 // MARK: - FailingMockFilesystemProvider
 
 /// Extension of MockFilesystemProvider that can simulate open() failures on specific paths.
