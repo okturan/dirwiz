@@ -82,9 +82,10 @@ public struct TreeTableView: View {
 
     /// Flatten the tree into a list of visible items based on which folders are expanded.
     private func flattenedVisibleItems(tree: FileTree) -> [TreeNodeItem] {
+        let nodes = tree.nodesSnapshot()
         var result: [TreeNodeItem] = []
         result.reserveCapacity(256)
-        let roots = rootChildren(tree: tree)
+        let roots = rootChildren(tree: tree, nodes: nodes)
         for item in roots {
             collectVisible(item, into: &result)
         }
@@ -338,7 +339,7 @@ public struct TreeTableView: View {
         // Generation token prevents stale closures from scrolling to outdated selections.
         scrollGeneration &+= 1
         let gen = scrollGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             guard gen == scrollGeneration else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
                 proxy.scrollTo(nodeIndex, anchor: .center)
@@ -421,14 +422,14 @@ public struct TreeTableView: View {
 
     // MARK: - Helpers
 
-    private func rootChildren(tree: FileTree) -> [TreeNodeItem] {
+    private func rootChildren(tree: FileTree, nodes: [FileNode]) -> [TreeNodeItem] {
         // depth: -1 so children are created at depth 0.
         let children = TreeNodeItem(
-            id: 0, tree: tree, depth: -1,
+            id: 0, tree: tree, nodes: nodes, depth: -1,
             sortKey: sortKey, sortAscending: sortAscending
         ).children
         if children.isEmpty {
-            return [TreeNodeItem(id: 0, tree: tree, depth: 0,
+            return [TreeNodeItem(id: 0, tree: tree, nodes: nodes, depth: 0,
                                  sortKey: sortKey, sortAscending: sortAscending)]
         }
         return children
@@ -441,4 +442,3 @@ public struct TreeTableView: View {
     }
 
 }
-

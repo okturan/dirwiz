@@ -19,6 +19,7 @@ enum TreeSortKey: String {
 struct TreeNodeItem: Identifiable {
     let id: UInt32 // node index in the FileTree
     let tree: FileTree
+    let nodes: [FileNode]
     let depth: Int
     let sortKey: TreeSortKey
     let sortAscending: Bool
@@ -26,18 +27,24 @@ struct TreeNodeItem: Identifiable {
     init(
         id: UInt32,
         tree: FileTree,
+        nodes: [FileNode],
         depth: Int,
         sortKey: TreeSortKey = .size,
         sortAscending: Bool = false
     ) {
         self.id = id
         self.tree = tree
+        self.nodes = nodes
         self.depth = depth
         self.sortKey = sortKey
         self.sortAscending = sortAscending
     }
 
-    var node: FileNode { tree.node(at: id) ?? FileNode() }
+    var node: FileNode {
+        let i = Int(id)
+        guard i < nodes.count else { return FileNode() }
+        return nodes[i]
+    }
     var name: String { tree.name(at: id) }
     var isDirectory: Bool { node.isDirectory }
 
@@ -53,7 +60,7 @@ struct TreeNodeItem: Identifiable {
         let childIndices = tree.children(of: id).map { UInt32($0) }
         let sorted = childIndices.sorted(by: compare)
         return sorted.map {
-            TreeNodeItem(id: $0, tree: tree, depth: depth + 1,
+            TreeNodeItem(id: $0, tree: tree, nodes: nodes, depth: depth + 1,
                          sortKey: sortKey, sortAscending: sortAscending)
         }
     }
@@ -61,8 +68,10 @@ struct TreeNodeItem: Identifiable {
     // MARK: - Sort Comparator
 
     private func compare(_ a: UInt32, _ b: UInt32) -> Bool {
-        let nodeA = tree.node(at: a) ?? FileNode()
-        let nodeB = tree.node(at: b) ?? FileNode()
+        let ia = Int(a)
+        let ib = Int(b)
+        let nodeA = ia < nodes.count ? nodes[ia] : FileNode()
+        let nodeB = ib < nodes.count ? nodes[ib] : FileNode()
 
         let cmp: Bool
         switch sortKey {
