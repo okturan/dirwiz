@@ -81,7 +81,10 @@ public struct TemporalSnapshot: Sendable {
 
     public func save() throws {
         let url = TemporalSnapshot.snapshotURL(for: meta.rootPath)
-        let entries = byPath.map { SnapshotEntry(path: $0.key, size: $0.value) }
+        // Sort by path for deterministic output (Dictionary iteration order is unstable).
+        let entries = byPath
+            .map { SnapshotEntry(path: $0.key, size: $0.value) }
+            .sorted { $0.path < $1.path }
         let file = SnapshotFile(meta: meta, entries: entries)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

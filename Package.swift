@@ -22,9 +22,7 @@ let package = Package(
         .target(
             name: "DirWizLib",
             path: "Sources",
-            exclude: [
-                "Treemap/CushionShaders.metal",
-            ],
+            exclude: [],
             swiftSettings: [
                 .swiftLanguageMode(.v5),
                 // Library must be optimized even in debug builds for instant search

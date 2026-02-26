@@ -22,6 +22,16 @@ struct CushionUniforms {
     var padding2: (Float, Float) = (0, 0)  // 8-byte tail padding; keep stride 48
 }
 
+/// Verify Metal struct layout matches Swift struct layout. Called once from coordinator init.
+/// CushionInstance: 3 × SIMD4<Float> = 48 bytes.
+/// CushionUniforms: SIMD2 + float + pad + SIMD4 + 2×int32 + 2×float pad = 48 bytes.
+func verifyCushionLayouts() {
+    assert(MemoryLayout<CushionInstance>.stride == 48,
+           "CushionInstance stride is \(MemoryLayout<CushionInstance>.stride), expected 48 — update Metal shader struct")
+    assert(MemoryLayout<CushionUniforms>.stride == 48,
+           "CushionUniforms stride is \(MemoryLayout<CushionUniforms>.stride), expected 48 — update Metal shader struct")
+}
+
 // MARK: - Cushion Coefficient Calculation
 
 /// Cushion shading constants.

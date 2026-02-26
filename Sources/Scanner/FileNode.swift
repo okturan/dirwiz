@@ -60,12 +60,21 @@ public struct FileNode: Sendable {
 
 /// Container for the flat-array tree + string pool.
 /// Holds all filesystem scan results in a compact, cache-friendly format.
+///
+/// `@unchecked Sendable` safety: all mutable state is behind a `Mutex`.
+/// `rootPath` is set once before any concurrent access (in `FileScanner.scan()`
+/// before `enqueueDirectory`) and never mutated again — reads via `path(at:)`
+/// and `withCPath` occur under the lock where rootPath is captured.
+/// Snapshot methods (`nodesSnapshot()`, `stringPoolSnapshot()`) return CoW copies
+/// that are safe to use without the lock.
 public final class FileTree: @unchecked Sendable {
     public private(set) var nodes: [FileNode] = []
     public private(set) var stringPool: Data = Data()
-    /// Full filesystem path of the scan root (set before scanning begins).
-    /// Used by path(at:) to reconstruct correct absolute paths.
-    public var rootPath: String = "/"
+    /// Full filesystem path of the scan root.
+    /// **Thread safety contract**: set once via `setRootPath(_:)` before any concurrent
+    /// access begins (in `FileScanner.scan()`) and never mutated after. All reads occur
+    /// under the lock where the value is captured, so no data race is possible.
+    public private(set) var rootPath: String = "/"
     private var lowercaseNamePool: Data = Data()
     private var lowercaseNameEntries: [(offset: UInt32, length: UInt16)] = []
 
@@ -84,6 +93,11 @@ public final class FileTree: @unchecked Sendable {
         stringPool.reserveCapacity(500_000 * 32)
         lowercaseNamePool.reserveCapacity(500_000 * 32)
         lowercaseNameEntries.reserveCapacity(500_000)
+    }
+
+    /// Set the root path. Must be called exactly once, before concurrent access begins.
+    public func setRootPath(_ path: String) {
+        rootPath = path
     }
 
     // MARK: - Thread-safe Reads
@@ -107,6 +121,40 @@ public final class FileTree: @unchecked Sendable {
     /// Data is CoW — O(1) unless mutated later.
     public func stringPoolSnapshot() -> Data {
         lock.withLock { _ in stringPool }
+    }
+
+    /// Snapshot all data needed for lock-free path building in a single lock acquisition.
+    /// Used by RecencyQueryService and other batch operations to avoid per-call locking.
+    public func pathBuildingSnapshot() -> (nodes: [FileNode], stringPool: Data, rootPath: String) {
+        lock.withLock { _ in (nodes, stringPool, rootPath) }
+    }
+
+    /// Build a path lock-free from pre-snapshotted data.
+    /// Avoids per-call lock acquisition when building many paths (e.g., RecencyQueryService).
+    public static func pathFromSnapshot(
+        at index: UInt32,
+        nodes: [FileNode],
+        stringPool: Data,
+        rootPath: String
+    ) -> String {
+        var components: [String] = []
+        var current = index
+        while current != FileNode.invalid {
+            let i = Int(current)
+            guard i < nodes.count else { break }
+            let node = nodes[i]
+            if node.parentIndex == FileNode.invalid { break }
+            let start = Int(node.nameOffset)
+            let end = start + Int(node.nameLength)
+            if end <= stringPool.count {
+                components.append(String(data: stringPool[start..<end], encoding: .utf8) ?? "")
+            }
+            current = node.parentIndex
+        }
+        let suffix = components.reversed().joined(separator: "/")
+        if suffix.isEmpty { return rootPath }
+        if rootPath.hasSuffix("/") { return rootPath + suffix }
+        return rootPath + "/" + suffix
     }
 
     /// Snapshot the lowercase name pool + entries for lock-free search.
@@ -174,10 +222,16 @@ public final class FileTree: @unchecked Sendable {
                 current = node.parentIndex
             }
 
+            // Use withCString on rootPath to safely convert to C bytes,
+            // avoiding manual UTF-8 iteration on potentially non-ASCII paths.
             var buf = ContiguousArray<CChar>()
             buf.reserveCapacity(256)
-            for byte in rootPath.utf8 {
-                buf.append(CChar(bitPattern: byte))
+            rootPath.withCString { cstr in
+                var p = cstr
+                while p.pointee != 0 {
+                    buf.append(p.pointee)
+                    p += 1
+                }
             }
             for seg in segments.reversed() {
                 if !buf.isEmpty, buf.last != CChar(bitPattern: UInt8(ascii: "/")) {
@@ -291,6 +345,14 @@ public final class FileTree: @unchecked Sendable {
     /// Sort children of all directories by size descending, compacting the array.
     /// Also reorders lowercaseNameEntries to stay in sync with nodes,
     /// and fixes parentIndex pointers that become stale after reordering.
+    ///
+    /// **Correctness invariant**: each directory's child slice `[firstChildIndex..<firstChildIndex+childCount]`
+    /// is contiguous and non-overlapping with every other directory's slice (guaranteed by `addChildren`
+    /// which appends children in a single batch). Sorting within a slice only permutes elements within
+    /// that slice — no other directory's indices are affected. `firstChildIndex` and `childCount` travel
+    /// with the node during permutation, so they remain valid. The second pass stamps all children's
+    /// `parentIndex` to fix the only field that becomes stale (a child's parent may have moved within
+    /// *its* parent's slice).
     public func sortAllChildren() {
         lock.withLock { _ in
             for i in 0..<nodes.count {

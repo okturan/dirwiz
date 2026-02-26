@@ -6,6 +6,11 @@ import Synchronization
 /// Hot counters are updated from scanner background threads without triggering
 /// @Observable notifications. Call `publishCounters()` on the main thread
 /// at throttled intervals to sync to observable properties.
+///
+/// `@unchecked Sendable` safety: all cross-thread state (hot counters) is behind
+/// a `Mutex`. Observable properties are only written on `@MainActor` via
+/// `publishCounters()` / `reset()`. The scanner holds a reference but only
+/// touches the Mutex-protected hot counters from background threads.
 @Observable
 public final class ScanProgress: @unchecked Sendable {
     // MARK: - Observable properties (read by SwiftUI, written only on main thread)
@@ -22,6 +27,9 @@ public final class ScanProgress: @unchecked Sendable {
     public var estimatedTotalItems: Int = 0
     public var scannedAllocatedBytes: UInt64 = 0
 
+    /// Directories that could not be read (permission denied).
+    public var skippedDirectories: Int = 0
+
     // MARK: - Hot counters (written from scanner threads, NOT observable)
 
     private struct HotCounters: Sendable {
@@ -29,6 +37,7 @@ public final class ScanProgress: @unchecked Sendable {
         var dirs: Int = 0
         var totalSize: UInt64 = 0
         var allocatedBytes: UInt64 = 0
+        var skipped: Int = 0
         var path: String = ""
         var publishCount: Int = 0
     }
@@ -66,6 +75,7 @@ public final class ScanProgress: @unchecked Sendable {
             counters.dirs = 0
             counters.totalSize = 0
             counters.allocatedBytes = 0
+            counters.skipped = 0
             counters.path = ""
             counters.publishCount = 0
         }
@@ -81,6 +91,7 @@ public final class ScanProgress: @unchecked Sendable {
         error = nil
         estimatedTotalItems = 0
         scannedAllocatedBytes = 0
+        skippedDirectories = 0
         treeLayoutRevision = 0
     }
 
@@ -97,6 +108,13 @@ public final class ScanProgress: @unchecked Sendable {
     public func incrementDirectories(count: Int = 1) {
         hot.withLock { counters in
             counters.dirs += count
+        }
+    }
+
+    /// Called from scanner background threads. Does NOT trigger @Observable.
+    public func incrementSkippedDirectories(count: Int = 1) {
+        hot.withLock { counters in
+            counters.skipped += count
         }
     }
 
@@ -120,6 +138,7 @@ public final class ScanProgress: @unchecked Sendable {
         directoriesScanned = snapshot.dirs
         totalSize = snapshot.totalSize
         scannedAllocatedBytes = snapshot.allocatedBytes
+        skippedDirectories = snapshot.skipped
         currentPath = snapshot.path
 
         // Bump layout revision every 10 publishes (≈2.5s) or when forced at scan end.

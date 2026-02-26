@@ -43,16 +43,15 @@ public struct SizeFormatter: Sendable {
 
     /// Format file count with thousands separator (thread-safe, no NumberFormatter).
     public func formatCount(_ count: Int) -> String {
-        if count == 0 { return "0" }
-        let isNegative = count < 0
-        var n = isNegative ? -count : count
+        assert(count >= 0, "formatCount called with negative value \(count)")
+        if count <= 0 { return "0" }
+        var n = count
         var parts: [Int] = []
         while n > 0 {
             parts.append(n % 1000)
             n /= 1000
         }
         let first = String(parts.removeLast())
-        let result = ([first] + parts.reversed().map { String(format: "%03d", $0) }).joined(separator: ",")
-        return isNegative ? "-" + result : result
+        return ([first] + parts.reversed().map { String(format: "%03d", $0) }).joined(separator: ",")
     }
 }

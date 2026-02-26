@@ -105,6 +105,8 @@ public struct ExtensionColorMap: Sendable {
         for (category, extensions) in Self.extensionMap {
             for ext in extensions {
                 let hash = extensionHash(".\(ext)")
+                assert(hashToCategory[hash] == nil || hashToCategory[hash] == category,
+                       "extensionHash collision: .\(ext) (hash \(hash)) collides with existing category")
                 hashToCategory[hash] = category
                 extensionToCategory[ext.lowercased()] = category
             }

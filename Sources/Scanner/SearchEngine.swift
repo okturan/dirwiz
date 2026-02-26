@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Filters for search results.
 public struct SearchFilters: Sendable {
@@ -146,7 +147,8 @@ public enum SearchEngine {
         )
     }
 
-    /// Fast byte-level substring search. Both haystack and needle are pre-lowercased.
+    /// Fast byte-level substring search using libc's memmem (SIMD-optimized on Apple platforms).
+    /// Both haystack and needle are pre-lowercased.
     @inline(__always)
     private static func byteContains(
         haystack: UnsafePointer<UInt8>,
@@ -155,21 +157,7 @@ public enum SearchEngine {
         needleLen: Int
     ) -> Bool {
         guard needleLen > 0 else { return true }
-        let limit = haystackLen - needleLen
-        guard limit >= 0 else { return false }
-        let firstByte = needle[0]
-        for i in 0...limit {
-            if haystack[i] == firstByte {
-                var found = true
-                for j in 1..<needleLen {
-                    if haystack[i + j] != needle[j] {
-                        found = false
-                        break
-                    }
-                }
-                if found { return true }
-            }
-        }
-        return false
+        guard haystackLen >= needleLen else { return false }
+        return memmem(haystack, haystackLen, needle, needleLen) != nil
     }
 }

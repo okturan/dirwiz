@@ -3,6 +3,7 @@ import SwiftUI
 /// SwiftUI view that wraps the Metal treemap with interaction overlays.
 /// Provides breadcrumb navigation, hover tooltips, and context menus.
 /// Show a confirmation alert before trashing large items; call action() immediately for small ones.
+/// Used by both InteractiveTreemapView and TreeTableView context menus.
 func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void) {
     if size > 100_000_000 {
         let alert = NSAlert()

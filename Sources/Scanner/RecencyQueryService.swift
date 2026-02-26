@@ -25,17 +25,19 @@ public struct RecencyQueryService {
     // MARK: - Private
 
     private static func runFullQuery(tree: FileTree) -> [Float] {
-        let nodes = tree.nodesSnapshot()
+        // Single lock acquisition for all data needed to build paths.
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
         guard !nodes.isEmpty else { return [] }
-
-        let rootPath = tree.path(at: 0)
         guard !rootPath.isEmpty else { return Array(repeating: 1, count: nodes.count) }
 
-        // Build file-path → node-index map (files only).
+        // Build file-path → node-index map (files only) using snapshot data.
+        // One lock acquisition above instead of millions of per-file tree.path() calls.
+        // Normalize to NFC (precomposed) to match Spotlight's kMDItemPath normalization.
         var pathToIndex: [String: Int] = [:]
         pathToIndex.reserveCapacity(nodes.count)
         for i in 0..<nodes.count where !nodes[i].isDirectory {
-            pathToIndex[tree.path(at: UInt32(i))] = i
+            let p = FileTree.pathFromSnapshot(at: UInt32(i), nodes: nodes, stringPool: stringPool, rootPath: rootPath)
+            pathToIndex[p.precomposedStringWithCanonicalMapping] = i
         }
 
         let nowSeconds = Date().timeIntervalSince1970
@@ -60,10 +62,10 @@ public struct RecencyQueryService {
         recentCutoff: Double,
         staleCutoff: Double
     ) -> [Float] {
-        // Start with 1.0 (fully recent) so unindexed files don't appear stale.
+        // Directories start at 1.0 (inherited from children via bottom-up max pass).
+        // Files start at 0.0 (unknown) — Spotlight results will overwrite with real values.
+        // Files not in Spotlight (excluded dirs, non-indexed volumes) remain at 0 (appear stale).
         var factors = Array(repeating: Float(1), count: nodeCount)
-
-        // Mark all files as 0 (unknown) — MDQuery will set real values.
         for i in 0..<nodeCount where !nodes[i].isDirectory {
             factors[i] = 0
         }
@@ -87,7 +89,8 @@ public struct RecencyQueryService {
         let resultCount = MDQueryGetResultCount(query)
         for idx in 0..<resultCount {
             guard let rawPath = MDQueryGetAttributeValueOfResultAtIndex(query, kMDItemPath, idx) else { continue }
-            let path = Unmanaged<CFString>.fromOpaque(rawPath).takeUnretainedValue() as String
+            let path = (Unmanaged<CFString>.fromOpaque(rawPath).takeUnretainedValue() as String)
+                .precomposedStringWithCanonicalMapping
             guard let nodeIdx = pathToIndex[path] else { continue }
 
             guard let rawDate = MDQueryGetAttributeValueOfResultAtIndex(query, kMDItemLastUsedDate, idx) else { continue }

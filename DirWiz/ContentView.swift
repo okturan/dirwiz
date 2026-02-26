@@ -141,6 +141,17 @@ struct ContentView: View {
             Text(String(format: "%.1fs elapsed", appState.scanProgress.elapsedTime))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if appState.scanProgress.skippedDirectories > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    Text("\(appState.scanProgress.skippedDirectories) directories unreadable")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                .help("Some directories could not be read due to permission restrictions. Enable Full Disk Access in System Settings for complete results.")
+            }
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)

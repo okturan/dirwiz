@@ -139,6 +139,12 @@ public struct TemporalDiffService {
 
     /// Relative path from scan root for a directory node, lowercased.
     /// Root itself returns "".
+    ///
+    /// **Assumption**: paths are lowercased for case-insensitive matching.
+    /// This is correct for macOS default case-insensitive APFS volumes.
+    /// On case-sensitive APFS volumes, two directories differing only in case
+    /// would collide in the snapshot — acceptable since case-sensitive volumes
+    /// are rare on macOS desktops.
     private static func relativePath(
         tree: FileTree, index: UInt32, isRoot: Bool, rootPrefix: String
     ) -> String {

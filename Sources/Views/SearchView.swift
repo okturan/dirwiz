@@ -464,31 +464,21 @@ public struct SearchView: View {
                 indices.sort { nodes[Int($0)].modifiedDate > nodes[Int($1)].modifiedDate }
             }
         case .name:
-            pool.withUnsafeBytes { ptr in
-                guard let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                let poolCount = ptr.count
-                indices.sort { a, b in
-                    let na = nodes[Int(a)]
-                    let nb = nodes[Int(b)]
-                    let aOff = Int(na.nameOffset)
-                    let bOff = Int(nb.nameOffset)
-                    let aLen = Int(na.nameLength)
-                    let bLen = Int(nb.nameLength)
-                    guard aOff + aLen <= poolCount, bOff + bLen <= poolCount else { return false }
-                    let minLen = min(aLen, bLen)
-                    for i in 0..<minLen {
-                        let ca = base[aOff + i]
-                        let cb = base[bOff + i]
-                        // Case-insensitive byte comparison (ASCII).
-                        let la = (ca >= 0x41 && ca <= 0x5A) ? (ca | 0x20) : ca
-                        let lb = (cb >= 0x41 && cb <= 0x5A) ? (cb | 0x20) : cb
-                        if la != lb {
-                            return ascending ? la < lb : la > lb
-                        }
-                    }
-                    return ascending ? aLen < bLen : aLen > bLen
-                }
+            // Pre-extract names once, then sort with Finder-style natural ordering
+            // (e.g., "file2" before "file10") via localizedStandardCompare.
+            let names: [String] = indices.map { idx in
+                let node = nodes[Int(idx)]
+                let start = Int(node.nameOffset)
+                let end = start + Int(node.nameLength)
+                guard end <= pool.count else { return "" }
+                return String(data: pool[start..<end], encoding: .utf8) ?? ""
             }
+            var paired = Array(zip(indices, names))
+            paired.sort { a, b in
+                let cmp = a.1.localizedStandardCompare(b.1)
+                return ascending ? cmp == .orderedAscending : cmp == .orderedDescending
+            }
+            indices = paired.map { $0.0 }
         }
     }
 

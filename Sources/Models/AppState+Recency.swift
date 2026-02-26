@@ -30,15 +30,35 @@ extension AppState {
     // MARK: - Temporal Diff
 
     /// Build a snapshot from the current scan and persist it to disk.
+    /// Captures the current scanToken to discard results from a stale tree
+    /// if a rescan occurs while the snapshot is being built.
     public func takeSnapshot() {
         guard !isSnapshotBuilding, let tree = fileTree else { return }
         isSnapshotBuilding = true
+        let token = scanToken
         Task.detached(priority: .utility) {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
-            try? snapshot.save()
+            let saveError: String? = {
+                do {
+                    try snapshot.save()
+                    return nil
+                } catch {
+                    let msg = "Failed to save snapshot: \(error.localizedDescription)"
+                    print("TemporalSnapshot: \(msg)")
+                    return msg
+                }
+            }()
             await MainActor.run {
+                // Discard if a new scan started while building.
+                guard self.scanToken == token else {
+                    self.isSnapshotBuilding = false
+                    return
+                }
                 self.temporalSnapshot = snapshot
                 self.isSnapshotBuilding = false
+                if let msg = saveError {
+                    self.scanProgress.error = msg
+                }
             }
         }
     }

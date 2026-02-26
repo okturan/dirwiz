@@ -16,7 +16,11 @@ enum TreeSortKey: String {
 
 /// Identifiable wrapper around a FileTree node index for use in the tree view.
 /// Lazily provides children so only expanded nodes are resolved.
-struct TreeNodeItem: Identifiable {
+struct TreeNodeItem: Identifiable, Equatable {
+    static func == (lhs: TreeNodeItem, rhs: TreeNodeItem) -> Bool {
+        lhs.id == rhs.id && lhs.depth == rhs.depth
+    }
+
     let id: UInt32 // node index in the FileTree
     let tree: FileTree
     let nodes: [FileNode]
@@ -48,11 +52,12 @@ struct TreeNodeItem: Identifiable {
     var name: String { tree.name(at: id) }
     var isDirectory: Bool { node.isDirectory }
 
-    /// Whether this directory has any children (cheap check — no sorting).
+    /// Whether this directory has any children.
+    /// Uses pre-snapshotted node fields to avoid a lock acquisition per row.
     var hasChildren: Bool {
-        guard isDirectory else { return false }
-        guard !node.isBundle else { return false }
-        return !tree.children(of: id).isEmpty
+        let n = node
+        guard n.isDirectory, !n.isBundle else { return false }
+        return n.childCount > 0 && n.firstChildIndex != FileNode.invalid
     }
 
     /// Sorted children — only call when actually expanding.

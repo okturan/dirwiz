@@ -161,7 +161,7 @@ public final class FileScanner {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         // Store scan root path for correct absolute path reconstruction.
-        tree.rootPath = path
+        tree.setRootPath(path)
 
         // Add root node
         let rootName = (path as NSString).lastPathComponent
@@ -178,9 +178,16 @@ public final class FileScanner {
             _ = visited.insert(dev: rootStat.st_dev, inode: rootStat.st_ino)
         }
 
-        // Set up the operation queue for parallel directory scanning
+        // Set up the operation queue for parallel directory scanning.
+        // Reduce concurrency for network/rotational media to avoid seek thrashing.
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 32
+        let isNetworkFS: Bool = withUnsafePointer(to: stat.f_fstypename) { ptr in
+            ptr.withMemoryRebound(to: CChar.self, capacity: 16) { cstr in
+                let name = String(cString: cstr)
+                return name == "smbfs" || name == "nfs" || name == "afpfs" || name == "webdavfs"
+            }
+        }
+        queue.maxConcurrentOperationCount = isNetworkFS ? 4 : 32
         queue.qualityOfService = .userInitiated
 
         // Throttle progress updates
@@ -274,7 +281,12 @@ public final class FileScanner {
 
         // Open directory — O_NOFOLLOW prevents following symlinks
         let fd = open(dirPath, O_RDONLY | O_NOFOLLOW)
-        guard fd >= 0 else { return }
+        guard fd >= 0 else {
+            if errno == EACCES || errno == EPERM {
+                progress.incrementSkippedDirectories()
+            }
+            return
+        }
         defer { close(fd) }
 
         // Set up attrlist
@@ -306,7 +318,7 @@ public final class FileScanner {
             var entryPtr = buffer
             for _ in 0..<count {
                 let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
-                guard entryLength >= kOffsetFileData else { break } // minimum valid entry size
+                guard entryLength > 0, entryLength >= kOffsetFileData else { break } // prevent infinite loop on corrupt data
 
                 let entry = entryPtr
 
@@ -402,10 +414,12 @@ public final class FileScanner {
         }
 
         // Compute and propagate sizes for bundle directories that we intentionally do not recurse into.
+        // Reuse the scanner's buffer (no longer needed for getattrlistbulk above) to avoid
+        // a fresh 128KB allocation per bundle.
         for bundle in bundleDirs {
             guard !isCancelled else { break }
             let bundlePath = dirPath + "/" + bundle.name
-            let (bundleFileSize, bundleAllocatedSize) = computeBundleSize(path: bundlePath)
+            let (bundleFileSize, bundleAllocatedSize) = computeBundleSize(path: bundlePath, buffer: buffer)
             guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
             let bundleTreeIndex = firstChildIndex + UInt32(bundle.childIndex)
             tree.updateNode(at: bundleTreeIndex) { node in
@@ -429,7 +443,8 @@ public final class FileScanner {
 
     /// Compute recursive logical/allocated size for an opaque bundle directory.
     /// This performs an internal walk but does not add nodes or recurse in the main scan tree.
-    private func computeBundleSize(path: String) -> (fileSize: UInt64, allocatedSize: UInt64) {
+    /// Accepts a pre-allocated buffer to avoid a 128KB allocation per bundle.
+    private func computeBundleSize(path: String, buffer: UnsafeMutableRawPointer) -> (fileSize: UInt64, allocatedSize: UInt64) {
         var totalFileSize: UInt64 = 0
         var totalAllocatedSize: UInt64 = 0
         var stack: [String] = [path]
@@ -439,9 +454,6 @@ public final class FileScanner {
         if lstat(path, &rootStat) == 0 {
             seen.insert(InodeKey(dev: rootStat.st_dev, inode: rootStat.st_ino))
         }
-
-        let buffer = UnsafeMutableRawPointer.allocate(byteCount: kBufferSize, alignment: 16)
-        defer { buffer.deallocate() }
 
         while let currentDir = stack.popLast(), !isCancelled {
             let fd = open(currentDir, O_RDONLY | O_NOFOLLOW)
@@ -460,8 +472,12 @@ public final class FileScanner {
                 let bufferEnd = buffer.advanced(by: kBufferSize)
                 var entryPtr = buffer
                 for _ in 0..<count {
+                    // Check cancellation inside inner loop — large bundles (Xcode ~30GB)
+                    // can have thousands of entries and would otherwise block cancel.
+                    guard !isCancelled else { break }
+
                     let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
-                    guard entryLength >= kOffsetFileData else { break }
+                    guard entryLength > 0, entryLength >= kOffsetFileData else { break }
                     let entry = entryPtr
                     let objType = entry.advanced(by: kOffsetObjType).loadUnaligned(as: UInt32.self)
                     let isDir = (objType == VDIR.rawValue)

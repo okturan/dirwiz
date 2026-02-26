@@ -143,7 +143,7 @@ struct FileNodeTests {
     @Test("FileTree path building works")
     func pathBuilding() {
         let tree = FileTree()
-        tree.rootPath = "/Users"
+        tree.setRootPath("/Users")
         var root = FileNode()
         root.isDirectory = true
         tree.addNode(root, name: "Users")
@@ -164,7 +164,7 @@ struct FileNodeTests {
 
         // Volume root scan: rootPath = "/"
         let volumeTree = FileTree()
-        volumeTree.rootPath = "/"
+        volumeTree.setRootPath("/")
         var vRoot = FileNode()
         vRoot.isDirectory = true
         volumeTree.addNode(vRoot, name: "/")
@@ -178,7 +178,7 @@ struct FileNodeTests {
     @Test("sortAllChildren preserves subtree integrity across directories")
     func sortAllChildrenSubtreeStability() {
         let tree = FileTree()
-        tree.rootPath = "/test"
+        tree.setRootPath("/test")
 
         // Root (index 0)
         var root = FileNode()

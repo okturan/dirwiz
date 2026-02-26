@@ -45,6 +45,33 @@ struct DirWizApp: App {
                 .keyboardShortcut("f", modifiers: .command)
             }
 
+            // Go menu: global navigation shortcuts (work even when treemap isn't focused)
+            CommandMenu("Go") {
+                Button("Back") {
+                    appState.navigateBack()
+                }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(!appState.canNavigateBack || appState.scanProgress.isScanning)
+
+                Button("Forward") {
+                    appState.navigateForward()
+                }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!appState.canNavigateForward || appState.scanProgress.isScanning)
+
+                Button("Enclosing Folder") {
+                    appState.navigateUp()
+                }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!appState.canNavigateUp || appState.scanProgress.isScanning)
+
+                Divider()
+
+                Button("Go to Root") {
+                    appState.navigateHome()
+                }
+                .disabled(appState.treemapRootIndex == 0 || appState.scanProgress.isScanning)
+            }
         }
     }
 

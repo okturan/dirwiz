@@ -2,6 +2,10 @@ import SwiftUI
 import Quartz
 
 /// Central observable state for the application.
+/// All properties are MainActor-isolated — the compiler enforces that mutations
+/// only happen on the main thread. Background work uses `Task.detached` +
+/// `MainActor.run` to funnel results back.
+@MainActor
 @Observable
 public final class AppState {
     /// The scanned file tree.

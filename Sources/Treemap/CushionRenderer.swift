@@ -54,6 +54,12 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
     /// Scratch dictionary reused by dominantDirectFileExtensionHash to avoid per-call allocation.
     private var scratchSizeByExt: [UInt32: UInt64] = [:]
 
+    /// Tracks the last submitted command buffer so we can ensure GPU completion
+    /// before overwriting shared buffers. For this on-demand renderer (isPaused=true),
+    /// waitUntilCompleted() returns near-instantly since GPU finishes in <1ms
+    /// and draws are spaced by at least one display refresh (~16ms).
+    private var lastCommandBuffer: MTLCommandBuffer?
+
     /// Callbacks for interaction.
     var onClick: ((UInt32) -> Void)?
     var onDoubleClick: ((UInt32) -> Void)?
@@ -70,21 +76,33 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         mtkView.device = device
         super.init()
 
+        verifyCushionLayouts()
         self.commandQueue = device.makeCommandQueue()
         setupPipeline(mtkView: mtkView)
     }
 
     // MARK: - Pipeline Setup
 
+    /// Cached compiled Metal library — avoids re-parsing the shader source
+    /// if the coordinator is recreated (e.g., SwiftUI view identity change).
+    /// Keyed by device registryID to handle multi-GPU setups correctly.
+    /// Thread-safe: only accessed from main thread (init is called from makeNSView).
+    private static var cachedLibraries: [UInt64: MTLLibrary] = [:]
+
     private func setupPipeline(mtkView: MTKView) {
         // Compile shaders from embedded source at runtime.
         // SPM doesn't compile .metal files into .metallib, so we embed the source.
         let library: MTLLibrary
-        do {
-            library = try device.makeLibrary(source: CushionShaderSource.source, options: nil)
-        } catch {
-            print("CushionRenderer: Failed to compile Metal shaders: \(error)")
-            return
+        if let cached = Self.cachedLibraries[device.registryID] {
+            library = cached
+        } else {
+            do {
+                library = try device.makeLibrary(source: CushionShaderSource.source, options: nil)
+                Self.cachedLibraries[device.registryID] = library
+            } catch {
+                print("CushionRenderer: Failed to compile Metal shaders: \(error)")
+                return
+            }
         }
 
         guard let vertexFunc = library.makeFunction(name: "cushionVertexShader"),
@@ -399,6 +417,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
             return
         }
 
+        // Ensure previous frame's GPU work is complete before overwriting shared buffers.
+        // For this on-demand renderer, this returns near-instantly (GPU finishes in <1ms,
+        // draws are spaced by at least one display refresh).
+        lastCommandBuffer?.waitUntilCompleted()
+
         let viewportSize = view.drawableSize
         let backingScaleFactor = view.window?.backingScaleFactor ?? 2.0
         let logicalSize = CGSize(
@@ -473,6 +496,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate {
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        lastCommandBuffer = commandBuffer
     }
 
     // MARK: - Hit Testing
