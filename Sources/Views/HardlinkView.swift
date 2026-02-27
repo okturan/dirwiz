@@ -172,7 +172,7 @@ private struct HardlinkGroupRow: View {
                     Text(SizeFormatter.shared.format(group.fileSize) + " each")
                         .font(.system(size: 11, design: .monospaced))
 
-                    Text("Shared data size: " + SizeFormatter.shared.format(group.extraLinkBytes))
+                    Text("Extra link bytes: " + SizeFormatter.shared.format(group.extraLinkBytes))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.blue)
                 }

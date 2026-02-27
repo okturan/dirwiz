@@ -708,4 +708,26 @@ struct FileScannerMockTests {
             #expect(progress2.scanComplete, "Second scan should complete")
         }
     }
+
+    // MARK: - Test 12: UInt64.max inode counts do not trap
+
+    @Test("volumeStats with UInt64.max inode counts does not crash")
+    func largeInodeCountsDoNotTrap() async {
+        let mock = MockFilesystemProvider()
+        mock.directories["/root"] = [
+            MockFilesystemProvider.file(name: "a.txt", size: 1, inode: 1),
+        ]
+        // Simulate a pathological statfs result with maximum UInt64 values.
+        mock.mockVolumeStats = StatfsResult(
+            totalFiles: UInt64.max,
+            freeFiles: UInt64.max - 1,
+            filesystemType: "apfs"
+        )
+
+        let scanner = FileScanner(filesystem: mock)
+        let tree = FileTree()
+        // Must not trap with Fatal error: Not enough bits to represent the passed value.
+        await scanner.scan(path: "/root", progress: ScanProgress(), tree: tree)
+        #expect(tree.count >= 1)
+    }
 }

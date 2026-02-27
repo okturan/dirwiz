@@ -86,7 +86,9 @@ public final class FileScanner: @unchecked Sendable {
         // Estimate total items using inode counts (blocking I/O, done off main thread).
         var estimatedItems = 0
         if let sf = filesystem.volumeStats(forPath: path) {
-            let usedInodes = max(0, Int64(sf.totalFiles) - Int64(sf.freeFiles))
+            // Int64(clamping:) saturates at Int64.max instead of trapping on UInt64 values
+            // that exceed Int64.max (e.g. a mock or corrupted statfs result with UInt64.max).
+            let usedInodes = max(0, Int64(clamping: sf.totalFiles) - Int64(clamping: sf.freeFiles))
             if usedInodes > 0 {
                 estimatedItems = Int(clamping: usedInodes)
             }
@@ -94,7 +96,7 @@ public final class FileScanner: @unchecked Sendable {
             // Scanning "/" follows firmlinks into the Data volume; include its inode usage too.
             if path == "/" {
                 if let dataSF = filesystem.volumeStats(forPath: "/System/Volumes/Data") {
-                    let dataUsedInodes = max(0, Int64(dataSF.totalFiles) - Int64(dataSF.freeFiles))
+                    let dataUsedInodes = max(0, Int64(clamping: dataSF.totalFiles) - Int64(clamping: dataSF.freeFiles))
                     if dataUsedInodes > 0 {
                         estimatedItems += Int(clamping: dataUsedInodes)
                     }

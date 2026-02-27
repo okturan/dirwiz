@@ -71,13 +71,12 @@ public struct RecencyQueryService {
         recentCutoff: Double,
         staleCutoff: Double
     ) -> [Float] {
-        // Directories start at 1.0 (inherited from children via bottom-up max pass).
-        // Files start at 0.0 (unknown) — Spotlight results will overwrite with real values.
-        // Files not in Spotlight (excluded dirs, non-indexed volumes) remain at 0 (appear stale).
-        var factors = Array(repeating: Float(1), count: nodeCount)
-        for i in 0..<nodeCount where !nodes[i].isDirectory {
-            factors[i] = 0
-        }
+        // All entries start at 0.0 (stale/unknown). Spotlight results overwrite file values;
+        // the bottom-up max pass then propagates the highest child recency up to each directory.
+        // Directories with no Spotlight-indexed descendants remain at 0.0 (stale) rather than
+        // staying at 1.0 regardless of their contents — the previous 1.0 default made every
+        // directory appear "fully recent" even when all descendants were stale.
+        var factors = Array(repeating: Float(0), count: nodeCount)
 
         let queryString = "kMDItemLastUsedDate >= $time.epoch(0)" as CFString
         let valueAttrs = [kMDItemPath, kMDItemLastUsedDate] as CFArray
