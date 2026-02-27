@@ -291,6 +291,35 @@ struct FileNodeTests {
         #expect(aChildPath.contains("a"), "A's child path should contain 'a': got \(aChildPath)")
     }
 
+    @Test("sortAllChildren correctly handles 3-element cycle (was buggy with old algorithm)")
+    func sortAllChildrenThreeElementCycle() {
+        // A(10), B(30), C(20) inserted in that order.
+        // Sorted descending → B(30), C(20), A(10).
+        // perm = [1, 2, 0] which forms a 3-cycle — the old broken algorithm
+        // produced [C, A, B] (20, 10, 30) instead of the correct [B, C, A] (30, 20, 10).
+        let tree = FileTree()
+        tree.setRootPath("/test")
+        var root = FileNode(); root.isDirectory = true
+        tree.addNode(root, name: "test")
+
+        var a = FileNode(); a.fileSize = 10
+        var b = FileNode(); b.fileSize = 30
+        var c = FileNode(); c.fileSize = 20
+        tree.addChildren([
+            (node: a, name: "a.txt"),
+            (node: b, name: "b.txt"),
+            (node: c, name: "c.txt"),
+        ], parentIndex: 0)
+
+        tree.sortAllChildren()
+
+        let nodes = tree.nodesSnapshot()
+        let first = Int(nodes[0].firstChildIndex)
+        #expect(nodes[first].fileSize == 30, "Expected 30 (B) first, got \(nodes[first].fileSize)")
+        #expect(nodes[first + 1].fileSize == 20, "Expected 20 (C) second, got \(nodes[first + 1].fileSize)")
+        #expect(nodes[first + 2].fileSize == 10, "Expected 10 (A) third, got \(nodes[first + 2].fileSize)")
+    }
+
     @Test("FileTree size accumulation works")
     func sizeAccumulation() {
         let tree = FileTree()

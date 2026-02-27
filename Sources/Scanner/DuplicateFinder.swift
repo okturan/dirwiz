@@ -216,7 +216,7 @@ public final class DuplicateFinder {
                         for nodeIndex in indices {
                             guard !Task.isCancelled else { break }
                             let digest = tree.withCPath(at: nodeIndex) { cPath in
-                                Self.fullFileHash(cPath: cPath)
+                                Self.fullFileHash(cPath: cPath, expectedSize: partialKey.size)
                             }
                             if let digest {
                                 let key = FullHashKey(size: partialKey.size, lo: digest.lo, hi: digest.hi)
@@ -312,13 +312,18 @@ public final class DuplicateFinder {
     /// the file while we're hashing it (mmap would crash the entire app).
     /// Returns 128 bits (two UInt64s) to minimise collision risk without the
     /// overhead of a cryptographic hash function.
-    private static func fullFileHash(cPath: UnsafePointer<CChar>) -> (lo: UInt64, hi: UInt64)? {
+    private static func fullFileHash(
+        cPath: UnsafePointer<CChar>,
+        expectedSize: UInt64
+    ) -> (lo: UInt64, hi: UInt64)? {
         let fd = open(cPath, O_RDONLY)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
 
         var fileInfo = stat()
         guard fstat(fd, &fileInfo) == 0 else { return nil }
+        // Reject files that mutated between the directory scan and now (TOCTOU).
+        guard UInt64(bitPattern: Int64(fileInfo.st_size)) == expectedSize else { return nil }
         let byteCount = Int(fileInfo.st_size)
 
         // Zero-byte files are valid duplicates of each other.

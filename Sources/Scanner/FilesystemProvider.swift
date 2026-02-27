@@ -112,7 +112,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
 
                 let entry = entryPtr
 
-                let entryName = parseEntryName(from: entry)
+                let entryName = parseEntryName(from: entry, entryLength: entryLength)
                 guard !entryName.isEmpty, entryName != ".", entryName != ".." else {
                     entryPtr = entryPtr.advanced(by: entryLength)
                     continue
@@ -203,7 +203,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
                     }
 
                     if isDir {
-                        let entryName = parseEntryName(from: entry)
+                        let entryName = parseEntryName(from: entry, entryLength: entryLength)
                         if !entryName.isEmpty, entryName != ".", entryName != ".." {
                             let devID  = entry.advanced(by: kOffsetDevID).loadUnaligned(as: Int32.self)
                             let fileID = entry.advanced(by: kOffsetFileID).loadUnaligned(as: UInt64.self)
@@ -271,11 +271,14 @@ private let kOffsetModTime:  Int = 40
 private let kOffsetFileID:   Int = 56
 private let kOffsetFileData: Int = 64
 
-private func parseEntryName(from entry: UnsafeRawPointer) -> String {
+private func parseEntryName(from entry: UnsafeRawPointer, entryLength: Int) -> String {
     let nameRef = entry.advanced(by: kOffsetName)
     let nameOffset = Int(nameRef.loadUnaligned(as: Int32.self))
     let nameLength = Int(nameRef.advanced(by: 4).loadUnaligned(as: UInt32.self))
-    guard nameLength > 1 else { return "" }
+    // Validate that the name bytes lie entirely within the declared entry boundary.
+    guard nameLength > 1,
+          kOffsetName + nameOffset >= 0,
+          kOffsetName + nameOffset + nameLength <= entryLength else { return "" }
     let namePtr = nameRef.advanced(by: nameOffset)
     let data = Data(bytes: namePtr, count: nameLength - 1)
     return String(data: data, encoding: .utf8) ?? ""

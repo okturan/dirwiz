@@ -91,16 +91,19 @@ public struct TemporalDiffService {
                 let currentSize = node.fileSize
                 // Threshold: max(4 MB, 5 % of old size) — ignore noise
                 let threshold = max(UInt64(4 * 1024 * 1024), oldSize / 20)
-                let delta = Int64(currentSize) - Int64(oldSize)
-
-                if UInt64(abs(delta)) < threshold {
-                    // no significant change — kinds[i] stays .none
-                } else if delta > 0 {
-                    kinds[i] = TemporalDiffKind.grown.rawValue
-                    strengths[i] = logStrength(abs: UInt64(delta), base: oldSize)
+                // Compare UInt64 values directly to avoid Int64 overflow on files > 8 EB.
+                if currentSize >= oldSize {
+                    let delta = currentSize - oldSize
+                    if delta >= threshold {
+                        kinds[i] = TemporalDiffKind.grown.rawValue
+                        strengths[i] = logStrength(abs: delta, base: oldSize)
+                    }
                 } else {
-                    kinds[i] = TemporalDiffKind.shrunk.rawValue
-                    strengths[i] = logStrength(abs: UInt64(-delta), base: oldSize)
+                    let delta = oldSize - currentSize
+                    if delta >= threshold {
+                        kinds[i] = TemporalDiffKind.shrunk.rawValue
+                        strengths[i] = logStrength(abs: delta, base: oldSize)
+                    }
                 }
             } else {
                 // Not in snapshot → new directory

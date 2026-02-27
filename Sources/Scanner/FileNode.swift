@@ -393,20 +393,26 @@ public final class FileTree: @unchecked Sendable {
                 guard end <= nodes.count, end <= lowercaseNameEntries.count else { continue }
 
                 // Sort by size descending via index permutation, then apply in-place
-                // using cycle sort to avoid allocating temporary copies of nodes/entries.
+                // using cycle-following on the src→dst mapping.
+                //
+                // perm[i] = absolute index of the element that belongs at position (start+i).
+                // This is a dst→src map; we invert it to src→dst so we can follow cycles
+                // by always swapping element i with its final destination.
                 let perm = (start..<end).sorted { nodes[$0].fileSize > nodes[$1].fileSize }
-                var localPerm = perm.map { $0 - start }
-                for k in 0..<localPerm.count {
-                    var j = localPerm[k]
-                    if j == k { continue } // already in place
-                    while j != k {
-                        nodes.swapAt(start + k, start + j)
-                        lowercaseNameEntries.swapAt(start + k, start + j)
-                        let next = localPerm[j]
-                        localPerm[j] = j // mark as done
-                        j = next
+                var dest = [Int](repeating: 0, count: perm.count)
+                for i in 0..<perm.count {
+                    dest[perm[i] - start] = i   // element at relative pos j goes to pos i
+                }
+                var i = 0
+                while i < dest.count {
+                    let target = dest[i]
+                    if target != i {
+                        nodes.swapAt(start + i, start + target)
+                        lowercaseNameEntries.swapAt(start + i, start + target)
+                        dest.swapAt(i, target)  // element at i is now at target; update
+                    } else {
+                        i += 1
                     }
-                    localPerm[k] = k
                 }
             }
             // Fix parentIndex on all children. After reordering, a child's parentIndex
