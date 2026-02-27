@@ -7,3 +7,5 @@ DerivedData/
 scorecard.png
 .desloppify/
 docs/
+.claude/worktrees/
+repomix-output*
