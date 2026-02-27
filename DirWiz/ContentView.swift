@@ -118,6 +118,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             VolumePickerView(appState: appState, onScan: startScan)
 
+            if !appState.hasFullDiskAccess {
+                fullDiskAccessBanner
+            }
+
             if appState.scanProgress.isScanning {
                 ScanProgressView(scanProgress: appState.scanProgress, onCancel: cancelScan)
             }
@@ -128,6 +132,38 @@ struct ContentView: View {
                 scanSummary
             }
         }
+        .onAppear { appState.hasFullDiskAccess = checkFullDiskAccess() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            // Re-check when the user returns from System Settings after granting FDA.
+            appState.hasFullDiskAccess = checkFullDiskAccess()
+        }
+    }
+
+    private var fullDiskAccessBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 13))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Full Disk Access not granted")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Results will be incomplete")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Grant") {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.1))
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.orange.opacity(0.3)), alignment: .bottom)
     }
 
     private var scanSummary: some View {
@@ -155,7 +191,7 @@ struct ContentView: View {
                 Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(SizeFormatter.shared.format(tree.nodes.first?.fileSize ?? 0))
+                Text(SizeFormatter.shared.format(tree.nodes.first?.displaySize ?? 0))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -234,7 +270,7 @@ struct ContentView: View {
                                 case .extensions:
                                     ExtensionListView(
                                         fileTypeStats: appState.fileTypeStats,
-                                        totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0,
+                                        totalSize: appState.fileTree?.nodes.first?.displaySize ?? 0,
                                         extensionPalette: appState.extensionPalette
                                     )
                                 case .duplicates:
@@ -271,7 +307,7 @@ struct ContentView: View {
                 Divider()
                 ExtensionLegend(
                     palette: appState.extensionPalette,
-                    totalSize: appState.fileTree?.nodes.first?.fileSize ?? 0
+                    totalSize: appState.fileTree?.nodes.first?.displaySize ?? 0
                 )
                 .frame(width: 220)
             }

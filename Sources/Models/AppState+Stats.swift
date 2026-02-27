@@ -12,7 +12,7 @@ extension AppState {
         let colorMap = ExtensionColorMap.shared
 
         let snapshot = tree.nodesSnapshot()
-        let totalSize = snapshot.first?.fileSize ?? 0
+        let totalSize = snapshot.first?.displaySize ?? 0
 
         for i in 0..<snapshot.count {
             let node = snapshot[i]
@@ -20,7 +20,7 @@ extension AppState {
 
             let name = tree.name(at: UInt32(i))
             let ext = Self.extractExtension(from: name)
-            sizeByExt[ext, default: 0] += node.fileSize
+            sizeByExt[ext, default: 0] += node.displaySize
             countByExt[ext, default: 0] += 1
         }
 

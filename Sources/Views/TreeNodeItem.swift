@@ -93,8 +93,8 @@ struct TreeNodeItem: Identifiable, Equatable {
                 return sortAscending ? order == .orderedAscending : order == .orderedDescending
             }
         case .percentage, .size:
-            if nodeA.fileSize != nodeB.fileSize {
-                return sortAscending ? nodeA.fileSize < nodeB.fileSize : nodeA.fileSize > nodeB.fileSize
+            if nodeA.displaySize != nodeB.displaySize {
+                return sortAscending ? nodeA.displaySize < nodeB.displaySize : nodeA.displaySize > nodeB.displaySize
             }
         case .allocated:
             if nodeA.allocatedSize != nodeB.allocatedSize {

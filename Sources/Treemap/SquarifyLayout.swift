@@ -82,7 +82,7 @@ public struct SquarifyLayout {
         let end = min(start + Int(node.childCount), nodes.count)
         guard start < end else { return [] }
         return (start..<end).map { UInt32($0) }
-            .sorted { nodes[Int($0)].fileSize > nodes[Int($1)].fileSize }
+            .sorted { nodes[Int($0)].displaySize > nodes[Int($1)].displaySize }
     }
 
     /// Emit a TreemapRect if large enough to be visible.
@@ -148,7 +148,7 @@ public struct SquarifyLayout {
 
         // Compute total size of children.
         let totalSize = childIndices.reduce(Float(0)) { sum, idx in
-            sum + max(Float(nodeAt(idx, nodes)?.fileSize ?? 0), 1)
+            sum + max(Float(nodeAt(idx, nodes)?.displaySize ?? 0), 1)
         }
 
         guard totalSize > 0, rect.area > 0 else { return }
@@ -156,7 +156,7 @@ public struct SquarifyLayout {
         // Normalize areas to fit the target rectangle.
         let scaleFactor = rect.area / totalSize
         let children: [(index: UInt32, area: Float)] = childIndices.map { idx in
-            let area = max(Float(nodeAt(idx, nodes)?.fileSize ?? 0), 1) * scaleFactor
+            let area = max(Float(nodeAt(idx, nodes)?.displaySize ?? 0), 1) * scaleFactor
             return (index: idx, area: area)
         }
 

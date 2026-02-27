@@ -191,8 +191,8 @@ public struct TreeTableView: View {
         HStack(spacing: 0) {
             headerButton("Name", key: .name, minWidth: 200, alignment: .leading)
             headerButton("% of Parent", key: .percentage, minWidth: 100, alignment: .leading)
-            headerButton("Size", key: .size, minWidth: 80, alignment: .trailing)
-            headerButton("Allocated", key: .allocated, minWidth: 80, alignment: .trailing)
+            headerButton("On Disk", key: .size, minWidth: 80, alignment: .trailing)
+            headerButton("Logical", key: .allocated, minWidth: 80, alignment: .trailing)
             headerButton("Items", key: .items, minWidth: 60, alignment: .trailing)
             headerButton("Modified", key: .modified, minWidth: 100, alignment: .trailing)
         }
@@ -429,8 +429,8 @@ public struct TreeTableView: View {
 
     private func parentSize(for item: TreeNodeItem, tree: FileTree) -> UInt64 {
         let parentIdx = item.node.parentIndex
-        if parentIdx == FileNode.invalid { return item.node.fileSize }
-        return tree.node(at: parentIdx)?.fileSize ?? item.node.fileSize
+        if parentIdx == FileNode.invalid { return item.node.displaySize }
+        return tree.node(at: parentIdx)?.displaySize ?? item.node.displaySize
     }
 
 }

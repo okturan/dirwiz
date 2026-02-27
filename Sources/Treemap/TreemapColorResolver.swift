@@ -162,7 +162,7 @@ struct TreemapColorResolver {
         for childIndex in start..<end {
             let child = nodes[childIndex]
             guard !child.isDirectory else { continue }
-            scratchSizeByExt[child.extensionHash, default: 0] += child.fileSize
+            scratchSizeByExt[child.extensionHash, default: 0] += child.displaySize
         }
 
         return scratchSizeByExt.max(by: { $0.value < $1.value })?.key

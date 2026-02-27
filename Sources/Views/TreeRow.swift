@@ -17,10 +17,10 @@ struct TreeRow: View {
                 .frame(minWidth: 200, alignment: .leading)
             percentageColumn
                 .frame(minWidth: 100, alignment: .leading)
-            Text(SizeFormatter.shared.format(item.node.fileSize))
+            Text(SizeFormatter.shared.format(item.node.displaySize))
                 .font(.system(size: 11, design: .monospaced))
                 .frame(minWidth: 80, alignment: .trailing)
-            Text(SizeFormatter.shared.format(item.node.allocatedSize))
+            Text(SizeFormatter.shared.format(item.node.fileSize))
                 .font(.system(size: 11, design: .monospaced))
                 .frame(minWidth: 80, alignment: .trailing)
             itemsColumn
@@ -66,7 +66,7 @@ struct TreeRow: View {
     }
 
     private var percentageColumn: some View {
-        let pct = parentSize > 0 ? Double(item.node.fileSize) / Double(parentSize) : 0
+        let pct = parentSize > 0 ? Double(item.node.displaySize) / Double(parentSize) : 0
 
         return HStack(spacing: 4) {
             GeometryReader { geo in

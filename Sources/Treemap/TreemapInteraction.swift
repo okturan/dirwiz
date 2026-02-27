@@ -136,7 +136,7 @@ public struct InteractiveTreemapView: View {
             // Show size of current root.
             if let tree = appState.fileTree,
                let rootNode = tree.node(at: appState.navigation.treemapRootIndex) {
-                Text(SizeFormatter.shared.format(rootNode.fileSize))
+                Text(SizeFormatter.shared.format(rootNode.displaySize))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -275,7 +275,7 @@ public struct InteractiveTreemapView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if showSize, let node = node {
-                Text(SizeFormatter.shared.format(node.fileSize))
+                Text(SizeFormatter.shared.format(node.displaySize))
                     .font(.system(size: max(8, fontSize - 2), design: .monospaced))
                     .lineLimit(1)
             }
@@ -347,7 +347,7 @@ public struct InteractiveTreemapView: View {
         if let tree = appState.fileTree,
            let node = tree.node(at: nodeIndex) {
             let name = tree.name(at: nodeIndex)
-            let size = SizeFormatter.shared.format(node.fileSize)
+            let size = SizeFormatter.shared.format(node.displaySize)
             let category = ExtensionColorMap.shared.category(forHash: node.extensionHash)
 
             VStack(alignment: .leading, spacing: 3) {

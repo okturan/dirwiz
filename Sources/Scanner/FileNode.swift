@@ -23,6 +23,15 @@ public struct FileNode: Sendable {
 
     public static let invalid: UInt32 = UInt32.max
 
+    /// On-disk size for display and treemap layout: allocated blocks when reported by the
+    /// filesystem (accurate for APFS compression, sparse files, etc.), falling back to the
+    /// logical data length if allocatedSize is zero (e.g. a node that hasn't been flushed).
+    /// Use this everywhere a size is shown to the user. Keep fileSize for duplicate detection
+    /// and temporal diff, where logical content equality matters.
+    public var displaySize: UInt64 {
+        allocatedSize > 0 ? allocatedSize : fileSize
+    }
+
     public var isDirectory: Bool {
         get { flags & FileNodeFlags.isDirectory != 0 }
         set {
