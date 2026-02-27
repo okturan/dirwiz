@@ -1,19 +1,27 @@
 import SwiftUI
 
 /// Sortable table of file extensions showing total size, count, and category.
+/// Tap any row to drill down into those files in the Search tab (via `onDrillDown`).
 public struct ExtensionListView: View {
     let fileTypeStats: [FileTypeStat]
     let totalSize: UInt64
     let extensionPalette: ExtensionPalette
+    var onDrillDown: ((FileTypeStat) -> Void)?
 
     @State private var sortOrder: SortOrder = .size
     @State private var sortAscending: Bool = false
     @State private var searchText: String = ""
 
-    public init(fileTypeStats: [FileTypeStat], totalSize: UInt64, extensionPalette: ExtensionPalette) {
+    public init(
+        fileTypeStats: [FileTypeStat],
+        totalSize: UInt64,
+        extensionPalette: ExtensionPalette,
+        onDrillDown: ((FileTypeStat) -> Void)? = nil
+    ) {
         self.fileTypeStats = fileTypeStats
         self.totalSize = totalSize
         self.extensionPalette = extensionPalette
+        self.onDrillDown = onDrillDown
     }
 
     public var body: some View {
@@ -49,6 +57,11 @@ public struct ExtensionListView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(sortedAndFiltered) { stat in
                             extensionRow(stat)
+                                .contentShape(Rectangle())
+                                .onTapGesture { onDrillDown?(stat) }
+                                .help(onDrillDown != nil
+                                      ? "Show \(stat.extensionName.isEmpty ? "files with no extension" : ".\(stat.extensionName) files") in Search"
+                                      : "")
                             Divider().padding(.leading, 8)
                         }
                     }
@@ -143,6 +156,7 @@ public struct ExtensionListView: View {
 
     private func extensionRow(_ stat: FileTypeStat) -> some View {
         let paletteColor = extensionPalette.swiftUIColor(forHash: stat.extensionHash)
+        let isDrillable = onDrillDown != nil
 
         return HStack(spacing: 0) {
             // Extension name with color dot.
@@ -192,7 +206,15 @@ public struct ExtensionListView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .frame(width: 65, alignment: .trailing)
 
-            Spacer()
+            // Drill-down affordance.
+            if isDrillable {
+                Image(systemName: "arrow.right.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, alignment: .trailing)
+            } else {
+                Spacer()
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

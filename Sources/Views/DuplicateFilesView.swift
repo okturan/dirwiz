@@ -108,7 +108,9 @@ public struct DuplicateFilesView: View {
             Spacer()
             ProgressView()
                 .controlSize(.large)
-            Text("Scanning for duplicates...")
+            Text(appState.duplicate.duplicatePhaseMessage.isEmpty
+                 ? "Scanning for duplicates…"
+                 : appState.duplicate.duplicatePhaseMessage)
                 .font(.headline)
             if appState.duplicate.duplicateProgress.total > 0 {
                 Text("\(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.processed)) / \(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.total)) candidates")
@@ -186,6 +188,7 @@ public struct DuplicateFilesView: View {
         appState.duplicate.duplicateCheckedPaths.removeAll()
         appState.duplicate.duplicateExpandedGroups.removeAll()
         appState.duplicate.duplicateProgress = (0, 0)
+        appState.duplicate.duplicatePhaseMessage = "Grouping files by size…"
 
         // Task.detached so findDuplicates runs on the cooperative pool, not the main actor.
         // Without this, Pass 1 (building the size-group dictionary over 1M+ nodes) runs on
@@ -198,6 +201,10 @@ public struct DuplicateFilesView: View {
                 // Ensure progress only goes up (tasks complete out of order).
                 let clamped = max(appState.duplicate.duplicateProgress.processed, processed)
                 appState.duplicate.duplicateProgress = (clamped, total)
+                // First callback signals that Pass 2 (hashing) has begun.
+                if appState.duplicate.duplicatePhaseMessage != "Hashing candidates…" {
+                    appState.duplicate.duplicatePhaseMessage = "Hashing candidates…"
+                }
             }
             await MainActor.run {
                 guard appState.duplicateToken == token else { return }

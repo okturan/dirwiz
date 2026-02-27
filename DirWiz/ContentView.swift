@@ -271,7 +271,15 @@ struct ContentView: View {
                                     ExtensionListView(
                                         fileTypeStats: appState.fileTypeStats,
                                         totalSize: appState.fileTree?.nodes.first?.displaySize ?? 0,
-                                        extensionPalette: appState.extensionPalette
+                                        extensionPalette: appState.extensionPalette,
+                                        onDrillDown: { stat in
+                                            appState.search.extensionFilter = stat.extensionHash
+                                            appState.search.extensionFilterName = stat.extensionName.isEmpty
+                                                ? "(no ext)"
+                                                : ".\(stat.extensionName)"
+                                            appState.search.searchQuery = ""
+                                            appState.activeTab = .search
+                                        }
                                     )
                                 case .duplicates:
                                     DuplicateFilesView(appState: appState)

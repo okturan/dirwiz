@@ -51,7 +51,20 @@ public struct SearchView: View {
                 Divider()
                 statusBar
             }
-            .onAppear { focusedField = .searchBar }
+            .onAppear {
+                focusedField = .searchBar
+                // Apply extension filter that may have been set via drill-down from Extensions tab.
+                if filters.extensionHash != appState.search.extensionFilter {
+                    filters.extensionHash = appState.search.extensionFilter
+                    previousMatchIndices = nil
+                    triggerSearch()
+                }
+            }
+            .onChange(of: appState.search.extensionFilter) { _, newValue in
+                filters.extensionHash = newValue
+                previousMatchIndices = nil
+                triggerSearch()
+            }
         }
     }
 
@@ -125,6 +138,27 @@ public struct SearchView: View {
                 Text("> 1 GB").tag(UInt64(1_073_741_824))
             }
             .frame(width: 130)
+
+            // Extension drill-down chip — shown when an extension filter is active.
+            if appState.search.extensionFilter != nil {
+                Button(action: {
+                    appState.search.extensionFilter = nil
+                    appState.search.extensionFilterName = ""
+                }) {
+                    HStack(spacing: 4) {
+                        Text(appState.search.extensionFilterName)
+                            .font(.system(size: 10, weight: .medium))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.15))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Clear extension filter")
+            }
 
             Spacer()
         }
@@ -372,7 +406,9 @@ public struct SearchView: View {
         let thisGeneration = searchGeneration
         let thisScanToken = appState.scanToken
 
-        guard !appState.search.searchQuery.isEmpty, let tree = appState.fileTree else {
+        // Allow empty query when an extension filter is active — show all files with that extension.
+        guard (!appState.search.searchQuery.isEmpty || filters.extensionHash != nil),
+              let tree = appState.fileTree else {
             appState.search.searchResults = []
             totalMatches = 0
             searchTimeMs = 0

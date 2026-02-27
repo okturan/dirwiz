@@ -7,6 +7,8 @@ public struct SearchFilters: Sendable {
     public var nodeType: NodeType = .all
     public var minimumSize: UInt64 = 0
     public var category: FileCategory? = nil
+    /// Extension drill-down: exact extensionHash match. nil = no filter, 0 = no-extension files.
+    public var extensionHash: UInt32? = nil
 
     public init() {}
 }
@@ -44,7 +46,9 @@ public enum SearchEngine {
             #endif
         }
 
-        guard !query.isEmpty, !nodes.isEmpty, !searchEntries.isEmpty else {
+        // Allow empty query when an extension filter is active (show all files with that extension).
+        let hasExtFilter = filters.extensionHash != nil
+        guard (!query.isEmpty || hasExtFilter), !nodes.isEmpty, !searchEntries.isEmpty else {
             return SearchResult(matchingIndices: [], totalMatches: 0,
                                 elapsedTime: CFAbsoluteTimeGetCurrent() - start)
         }
@@ -138,6 +142,7 @@ public enum SearchEngine {
         if let cat = filterCategory, let map = colorMap {
             if map.category(forHash: node.extensionHash) != cat { return false }
         }
+        if let extHash = filters.extensionHash, node.extensionHash != extHash { return false }
 
         let entry = entriesBuf[i]
         let nameStart = Int(entry.offset)

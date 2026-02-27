@@ -15,6 +15,13 @@ public final class SearchState {
     /// Whether a search is currently running.
     public var isSearching: Bool = false
 
+    /// Extension drill-down filter: extensionHash of the pinned extension, nil = no filter.
+    /// Set by clicking a row in the Extensions tab.
+    public var extensionFilter: UInt32? = nil
+
+    /// Display name for the active extension filter (e.g. ".swift" or "(no ext)").
+    public var extensionFilterName: String = ""
+
     public init() {}
 
     /// Reset search state for a new scan.
@@ -22,5 +29,7 @@ public final class SearchState {
         searchQuery = ""
         searchResults = []
         isSearching = false
+        extensionFilter = nil
+        extensionFilterName = ""
     }
 }

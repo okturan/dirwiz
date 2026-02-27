@@ -21,6 +21,9 @@ public final class DuplicateState {
     /// Whether a duplicate scan is in progress.
     public var isDuplicateScanRunning: Bool = false
 
+    /// Human-readable phase description shown during an active scan.
+    public var duplicatePhaseMessage: String = ""
+
     public init() {}
 
     /// Reset duplicate state for a new scan.
@@ -30,5 +33,6 @@ public final class DuplicateState {
         duplicateExpandedGroups = []
         duplicateProgress = (0, 0)
         isDuplicateScanRunning = false
+        duplicatePhaseMessage = ""
     }
 }
