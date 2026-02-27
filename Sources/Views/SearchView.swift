@@ -370,6 +370,7 @@ public struct SearchView: View {
         showMoreCount = pageSize
         searchGeneration &+= 1
         let thisGeneration = searchGeneration
+        let thisScanToken = appState.scanToken
 
         guard !appState.search.searchQuery.isEmpty, let tree = appState.fileTree else {
             appState.search.searchResults = []
@@ -425,8 +426,9 @@ public struct SearchView: View {
             let finalIndices = sortedIndices
             let resultWasCapped = searchResult.totalMatches > searchResult.matchingIndices.count
             await MainActor.run {
-                // Discard if a newer search was triggered while we ran.
-                guard thisGeneration == searchGeneration else { return }
+                // Discard if a newer search was triggered or a new scan started while we ran.
+                guard thisGeneration == searchGeneration,
+                      appState.scanToken == thisScanToken else { return }
                 cachedNodes = nodes
                 cachedPool = displayPool
                 appState.search.searchResults = finalIndices

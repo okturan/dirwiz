@@ -154,8 +154,10 @@ public final class DuplicateFinder {
                     var results: [(PartialHashKey, UInt32)] = []
                     var processed = 0
                     for sizeGroup in chunk {
+                        guard !Task.isCancelled else { break }
                         let fileSize = snapshot[Int(sizeGroup[0])].fileSize
                         for nodeIndex in sizeGroup {
+                            guard !Task.isCancelled else { break }
                             let hash = tree.withCPath(at: nodeIndex) { cPath in
                                 Self.partialHash(cPath: cPath, fileSize: fileSize, readSize: readSize)
                             }
@@ -210,7 +212,9 @@ public final class DuplicateFinder {
                 group.addTask {
                     var results: [(FullHashKey, UInt32)] = []
                     for (partialKey, indices) in chunk {
+                        guard !Task.isCancelled else { break }
                         for nodeIndex in indices {
+                            guard !Task.isCancelled else { break }
                             let digest = tree.withCPath(at: nodeIndex) { cPath in
                                 Self.fullFileHash(cPath: cPath)
                             }

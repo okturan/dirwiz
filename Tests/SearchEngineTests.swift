@@ -342,4 +342,35 @@ struct SearchEngineTests {
             #expect(name.contains(".png"), "Matched '\(name)' which doesn't contain .png")
         }
     }
+
+    @Test("Uppercase names are found by lowercase query on case-sensitive volume")
+    func caseSensitiveVolumeSearch() {
+        // Simulate a case-sensitive volume by calling setCaseSensitivity(true) before adding nodes.
+        let tree = FileTree()
+        tree.setCaseSensitivity(true)
+
+        var root = FileNode(); root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        var children: [(node: FileNode, name: String)] = []
+        for name in ["README.md", "Build", "build", "NOTES.txt", "notes.txt"] {
+            var node = FileNode(); node.fileSize = 100
+            children.append((node: node, name: name))
+        }
+        tree.addChildren(children, parentIndex: 0)
+
+        // Lower-case query "readme" must find "README.md" regardless of case sensitivity flag.
+        let result = search(tree: tree, query: "readme")
+        #expect(result.totalMatches == 1)
+        let matched = tree.name(at: result.matchingIndices[0])
+        #expect(matched == "README.md")
+
+        // "build" must find both "Build" and "build".
+        let result2 = search(tree: tree, query: "build")
+        #expect(result2.totalMatches == 2)
+
+        // "notes" must find both "NOTES.txt" and "notes.txt".
+        let result3 = search(tree: tree, query: "notes")
+        #expect(result3.totalMatches == 2)
+    }
 }

@@ -122,13 +122,17 @@ public struct HardlinkView: View {
 
     private func startHardlinkScan() {
         guard let tree = appState.fileTree else { return }
+        appState.hardlinkTask?.cancel()
+        appState.hardlinkToken &+= 1
+        let token = appState.hardlinkToken
         appState.isHardlinkScanRunning = true
         appState.hardlinkExpandedGroups.removeAll()
 
-        Task {
+        appState.hardlinkTask = Task {
             let finder = HardlinkFinder()
             let groups = await finder.findHardlinks(in: tree)
             await MainActor.run {
+                guard appState.hardlinkToken == token else { return }
                 appState.hardlinkGroups = groups
                 appState.isHardlinkScanRunning = false
             }

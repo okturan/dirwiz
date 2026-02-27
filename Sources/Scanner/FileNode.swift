@@ -296,7 +296,9 @@ public final class FileTree: @unchecked Sendable {
             // lowercasing so that Ü→ü, É→é, etc. are searchable. On case-sensitive volumes,
             // store the original name to avoid merging directories that differ only in case.
             let lcOffset = UInt32(lowercaseNamePool.count)
-            let lcUTF8 = isCaseSensitive ? utf8 : Array(name.lowercased().utf8)
+            // Always lowercase: search is always case-insensitive from the user's
+            // perspective, regardless of whether the volume is case-sensitive.
+            let lcUTF8 = Array(name.lowercased().utf8)
             lowercaseNamePool.append(contentsOf: lcUTF8)
             lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
             nodes.append(n)
@@ -327,7 +329,7 @@ public final class FileTree: @unchecked Sendable {
                 node.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
                 stringPool.append(contentsOf: utf8)
                 let lcOffset = UInt32(lowercaseNamePool.count)
-                let lcUTF8 = isCaseSensitive ? utf8 : Array(childName.lowercased().utf8)
+                let lcUTF8 = Array(childName.lowercased().utf8)
                 lowercaseNamePool.append(contentsOf: lcUTF8)
                 lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
                 nodes.append(node)

@@ -33,6 +33,8 @@ public final class AppState {
     public var hardlinkGroups: [HardlinkGroup] = []
     public var hardlinkExpandedGroups: Set<UUID> = []
     public var isHardlinkScanRunning: Bool = false
+    var hardlinkToken: UInt64 = 0
+    @ObservationIgnored var hardlinkTask: Task<Void, Never>?
 
     /// Temporal diff overlay state (snapshot, kinds, strengths, generation).
     public var temporalDiff = TemporalDiffState()
@@ -101,6 +103,9 @@ public final class AppState {
         hardlinkGroups = []
         hardlinkExpandedGroups = []
         isHardlinkScanRunning = false
+        hardlinkToken &+= 1
+        hardlinkTask?.cancel()
+        hardlinkTask = nil
         selectedNodeIndex = nil
         fileTypeStats = []
         extensionPalette = ExtensionPalette()
@@ -120,6 +125,9 @@ public final class AppState {
         temporalDiffToken &+= 1
         scanStartTime = 0
         scanDuration = 0
+        // Create a fresh ScanProgress so old scanner finalizations write to the
+        // abandoned instance and cannot corrupt the new scan's counters.
+        scanProgress = ScanProgress()
     }
 }
 
