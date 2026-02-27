@@ -38,7 +38,7 @@ public struct DuplicateFilesView: View {
                     Text("Scan for Duplicates")
                 }
             }
-            .disabled(appState.fileTree == nil || appState.duplicate.isDuplicateScanRunning)
+            .disabled(!appState.canStartHeavyTask(.duplicateScan))
 
             Divider()
                 .frame(height: 20)
@@ -86,14 +86,43 @@ public struct DuplicateFilesView: View {
                 }
             }
 
+            if !appState.duplicate.duplicateGroups.isEmpty && !appState.isCloneCheckRunning {
+                Button(action: { appState.checkClonesForDuplicates() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.on.doc.fill")
+                        Text("Check Clones")
+                    }
+                }
+                .disabled(!appState.canStartHeavyTask(.cloneCheck))
+                .help("Check if duplicates are APFS clones (shared blocks, no real wasted space)")
+            }
+
+            if appState.isCloneCheckRunning {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
             if !appState.duplicate.duplicateGroups.isEmpty {
                 Text("\(filteredGroups.count) groups")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                Text(SizeFormatter.shared.format(totalWastedSpace))
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.orange)
+                let realWasted = realWastedSpace
+                if realWasted < totalWastedSpace && !appState.cloneResults.isEmpty {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(SizeFormatter.shared.format(realWasted) + " real waste")
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundStyle(.orange)
+                        Text(SizeFormatter.shared.format(totalWastedSpace) + " naive")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .strikethrough()
+                    }
+                } else {
+                    Text(SizeFormatter.shared.format(totalWastedSpace))
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(.orange)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -108,12 +137,14 @@ public struct DuplicateFilesView: View {
             Spacer()
             ProgressView()
                 .controlSize(.large)
-            Text(appState.duplicate.duplicatePhaseMessage.isEmpty
-                 ? "Scanning for duplicates…"
-                 : appState.duplicate.duplicatePhaseMessage)
+            Text(appState.duplicate.duplicatePhase.message)
                 .font(.headline)
             if appState.duplicate.duplicateProgress.total > 0 {
-                Text("\(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.processed)) / \(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.total)) candidates")
+                Text(
+                    "\(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.processed)) / " +
+                    "\(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.total)) " +
+                    appState.duplicate.duplicatePhase.unitLabel
+                )
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 ProgressView(
@@ -150,6 +181,7 @@ public struct DuplicateFilesView: View {
                 ForEach(filteredGroups) { group in
                     DuplicateGroupRow(
                         group: group,
+                        cloneResult: cloneMap[group.id],
                         isExpanded: appState.duplicate.duplicateExpandedGroups.contains(group.id),
                         checkedPaths: $appState.duplicate.duplicateCheckedPaths,
                         onToggleExpand: {
@@ -173,14 +205,31 @@ public struct DuplicateFilesView: View {
         appState.duplicate.duplicateGroups.filter { $0.fileSize >= minimumSizeFilter }
     }
 
+    private var cloneMap: [UUID: CloneCheckResult] {
+        Dictionary(uniqueKeysWithValues: appState.cloneResults.map { ($0.group.id, $0) })
+    }
+
     private var totalWastedSpace: UInt64 {
         filteredGroups.reduce(0) { $0 + $1.wastedSpace }
+    }
+
+    /// Wasted space accounting for APFS clones (if clone check has been run).
+    private var realWastedSpace: UInt64 {
+        guard !appState.cloneResults.isEmpty else { return totalWastedSpace }
+        let map = cloneMap
+        return filteredGroups.reduce(UInt64(0)) { total, group in
+            if let check = map[group.id] {
+                return total + check.realWastedSpace
+            }
+            return total + group.wastedSpace
+        }
     }
 
     // MARK: - Actions
 
     private func startDuplicateScan() {
         guard let tree = appState.fileTree else { return }
+        guard appState.canStartHeavyTask(.duplicateScan) else { return }
         appState.duplicateTask?.cancel()
         appState.duplicateToken &+= 1
         let token = appState.duplicateToken
@@ -188,22 +237,22 @@ public struct DuplicateFilesView: View {
         appState.duplicate.duplicateCheckedPaths.removeAll()
         appState.duplicate.duplicateExpandedGroups.removeAll()
         appState.duplicate.duplicateProgress = (0, 0)
-        appState.duplicate.duplicatePhaseMessage = "Grouping files by size…"
+        appState.duplicate.duplicatePhase = .groupingBySize
 
         // Task.detached so findDuplicates runs on the cooperative pool, not the main actor.
         // Without this, Pass 1 (building the size-group dictionary over 1M+ nodes) runs on
         // the main thread and freezes the UI until it completes.
         appState.duplicateTask = Task.detached(priority: .userInitiated) {
             let finder = DuplicateFinder()
-            let groups = await finder.findDuplicates(in: tree) { [token] processed, total in
+            let groups = await finder.findDuplicates(in: tree) { [token] update in
                 // Progress callback is @MainActor — hops to main thread automatically.
                 guard appState.duplicateToken == token else { return }
-                // Ensure progress only goes up (tasks complete out of order).
-                let clamped = max(appState.duplicate.duplicateProgress.processed, processed)
-                appState.duplicate.duplicateProgress = (clamped, total)
-                // First callback signals that Pass 2 (hashing) has begun.
-                if appState.duplicate.duplicatePhaseMessage != "Hashing candidates…" {
-                    appState.duplicate.duplicatePhaseMessage = "Hashing candidates…"
+                if appState.duplicate.duplicatePhase == update.phase {
+                    let clamped = max(appState.duplicate.duplicateProgress.processed, update.processed)
+                    appState.duplicate.duplicateProgress = (clamped, update.total)
+                } else {
+                    appState.duplicate.duplicatePhase = update.phase
+                    appState.duplicate.duplicateProgress = (update.processed, update.total)
                 }
             }
             await MainActor.run {
@@ -250,6 +299,7 @@ public struct DuplicateFilesView: View {
 
 private struct DuplicateGroupRow: View {
     let group: DuplicateGroup
+    let cloneResult: CloneCheckResult?
     let isExpanded: Bool
     @Binding var checkedPaths: Set<String>
     var onToggleExpand: () -> Void
@@ -279,6 +329,19 @@ private struct DuplicateGroupRow: View {
                         Text("Wasted: " + SizeFormatter.shared.format(group.wastedSpace))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.orange)
+
+                        if let cr = cloneResult {
+                            let pct = Int((cr.sharingConfidence * 100).rounded())
+                            Text(cr.areClones ? "\(pct)% shared" : "Independent")
+                                .font(.system(size: 10, weight: .medium))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(cr.areClones ? Color.green.opacity(0.15) : Color.clear)
+                                )
+                                .foregroundStyle(cr.areClones ? .green : .secondary)
+                        }
                     }
                 }
                 .buttonStyle(.plain)

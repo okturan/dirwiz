@@ -156,11 +156,16 @@ public struct TreeTableView: View {
                 }
 
                 Button("Move to Trash") {
-                    let url = URL(fileURLWithPath: path)
-                    let size = tree.node(at: item.id)?.fileSize ?? 0
+                    let size = tree.node(at: item.id)?.displaySize ?? 0
                     confirmTrash(name: item.name, size: size) {
-                        if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
-                            appState.rescanVolume()
+                        Task {
+                            let result = await appState.trashNode(at: item.id)
+                            if result.success {
+                                // Node indices are rebuilt after subtree removal, so reset the
+                                // local expansion cache before rebuilding visible items.
+                                expandedFolders.removeAll()
+                                cachedItems = flattenedVisibleItems(tree: tree)
+                            }
                         }
                     }
                 }

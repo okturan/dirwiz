@@ -40,7 +40,7 @@ public struct HardlinkView: View {
                     Text("Scan for Hardlinks")
                 }
             }
-            .disabled(appState.fileTree == nil || appState.isHardlinkScanRunning)
+            .disabled(!appState.canStartHeavyTask(.hardlinkScan))
 
             Spacer()
 
@@ -68,9 +68,24 @@ public struct HardlinkView: View {
                 .controlSize(.large)
             Text("Scanning for hardlinks...")
                 .font(.headline)
-            Text("Calling lstat on each file to detect shared inodes.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            if appState.hardlinkProgress.total > 0 {
+                Text(
+                    "\(SizeFormatter.shared.formatCount(appState.hardlinkProgress.processed)) / " +
+                    "\(SizeFormatter.shared.formatCount(appState.hardlinkProgress.total)) files"
+                )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                ProgressView(
+                    value: Double(appState.hardlinkProgress.processed),
+                    total: Double(max(appState.hardlinkProgress.total, 1))
+                )
+                .progressViewStyle(.linear)
+                .frame(maxWidth: 300)
+            } else {
+                Text("Calling lstat on each file to detect shared inodes.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -122,19 +137,29 @@ public struct HardlinkView: View {
 
     private func startHardlinkScan() {
         guard let tree = appState.fileTree else { return }
+        guard appState.canStartHeavyTask(.hardlinkScan) else { return }
         appState.hardlinkTask?.cancel()
         appState.hardlinkToken &+= 1
         let token = appState.hardlinkToken
         appState.isHardlinkScanRunning = true
         appState.hardlinkExpandedGroups.removeAll()
+        appState.hardlinkProgress = (0, 0)
 
-        appState.hardlinkTask = Task {
+        appState.hardlinkTask = Task.detached(priority: .userInitiated) {
             let finder = HardlinkFinder()
-            let groups = await finder.findHardlinks(in: tree)
+            let groups = await finder.findHardlinks(in: tree) { processed, total in
+                guard appState.hardlinkToken == token else { return }
+                appState.hardlinkProgress = (processed, total)
+            }
             await MainActor.run {
                 guard appState.hardlinkToken == token else { return }
                 appState.hardlinkGroups = groups
                 appState.isHardlinkScanRunning = false
+                appState.hardlinkProgress = (
+                    appState.hardlinkProgress.total,
+                    appState.hardlinkProgress.total
+                )
+                appState.hardlinkTask = nil
             }
         }
     }

@@ -82,11 +82,15 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .automatic) {
-                    Button { exportReport() } label: {
+                    Menu {
+                        Button("Export CSV...") { exportReport() }
+                            .keyboardShortcut("e", modifiers: [.command, .option])
+                        Button("Export JSON...") { exportJSON() }
+                            .keyboardShortcut("j", modifiers: [.command, .option])
+                    } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    .help("Export Report as CSV (Cmd+Opt+E)")
-                    .keyboardShortcut("e", modifiers: [.command, .option])
+                    .help("Export Report (Cmd+Opt+E)")
                     .disabled(appState.fileTree == nil)
                 }
                 ToolbarItem(placement: .automatic) {
@@ -287,6 +291,10 @@ struct ContentView: View {
                                     HardlinkView(appState: appState)
                                 case .search:
                                     SearchView(appState: appState)
+                                case .spaceAnalysis:
+                                    SpaceAnalysisView(appState: appState)
+                                case .insights:
+                                    InsightsView(appState: appState)
                                 }
                             }
                         }
@@ -451,6 +459,9 @@ struct ContentView: View {
                 appState.activeScanner = nil
                 appState.setTreemapRoot(0, recordHistory: false)
                 appState.computeExtensionStats()
+                Task {
+                    await appState.runPostScanAnalyses(tree: tree, volumePath: path, token: token)
+                }
             }
         }
     }
@@ -541,6 +552,37 @@ struct ContentView: View {
         }
 
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    // MARK: - JSON Export
+
+    private func exportJSON() {
+        guard appState.fileTree != nil else { return }
+
+        let panel = NSSavePanel()
+        panel.title = "Export JSON Report"
+        panel.nameFieldStringValue = "DirWiz Report.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        Task {
+            do {
+                try await appState.exportJSON(to: url)
+                await MainActor.run {
+                    exportAlertTitle = "Export Successful"
+                    exportAlertMessage = "JSON report saved to \(url.lastPathComponent)."
+                    showExportAlert = true
+                }
+            } catch {
+                await MainActor.run {
+                    exportAlertTitle = "Export Failed"
+                    exportAlertMessage = error.localizedDescription
+                    showExportAlert = true
+                }
+            }
+        }
     }
 
     private func csvQuote(_ value: String) -> String {

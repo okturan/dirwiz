@@ -112,14 +112,16 @@ public struct SearchView: View {
     // MARK: - Filter Bar
 
     private var filterBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Picker("", selection: $filters.nodeType) {
                 Text("All").tag(SearchFilters.NodeType.all)
                 Text("Files").tag(SearchFilters.NodeType.filesOnly)
                 Text("Dirs").tag(SearchFilters.NodeType.directoriesOnly)
             }
             .pickerStyle(.segmented)
-            .frame(width: 180)
+            .frame(width: 190)
+
+            Divider().frame(height: 18)
 
             Picker("Category", selection: $filters.category) {
                 Text("Any Category").tag(FileCategory?.none)
@@ -128,6 +130,8 @@ public struct SearchView: View {
                 }
             }
             .frame(width: 160)
+
+            Divider().frame(height: 18)
 
             Picker("Min Size", selection: $filters.minimumSize) {
                 Text("Any Size").tag(UInt64(0))
@@ -141,17 +145,19 @@ public struct SearchView: View {
 
             // Extension drill-down chip — shown when an extension filter is active.
             if appState.search.extensionFilter != nil {
+                Divider().frame(height: 18)
+
                 Button(action: {
                     appState.search.extensionFilter = nil
                     appState.search.extensionFilterName = ""
                 }) {
                     HStack(spacing: 4) {
                         Text(appState.search.extensionFilterName)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                         Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                     }
-                    .padding(.horizontal, 7)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(Color.accentColor.opacity(0.15))
                     .clipShape(Capsule())
@@ -163,8 +169,8 @@ public struct SearchView: View {
             Spacer()
         }
         .font(.system(size: 11))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background(.bar)
         .onChange(of: filters.nodeType) { _, _ in
             previousMatchIndices = nil

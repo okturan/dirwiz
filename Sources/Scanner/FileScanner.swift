@@ -1,5 +1,8 @@
 import Foundation
 import Synchronization
+import os
+
+private let scanLog = Logger(subsystem: "com.dirwiz", category: "FileScanner")
 
 // MARK: - Full Disk Access Detection
 
@@ -86,19 +89,23 @@ public final class FileScanner: @unchecked Sendable {
         // Estimate total items using inode counts (blocking I/O, done off main thread).
         var estimatedItems = 0
         if let sf = filesystem.volumeStats(forPath: path) {
-            // Int64(clamping:) saturates at Int64.max instead of trapping on UInt64 values
-            // that exceed Int64.max (e.g. a mock or corrupted statfs result with UInt64.max).
-            let usedInodes = max(0, Int64(clamping: sf.totalFiles) - Int64(clamping: sf.freeFiles))
-            if usedInodes > 0 {
-                estimatedItems = Int(clamping: usedInodes)
-            }
+            let normalizedPath = Self.normalizePath(path)
+            let normalizedMountPoint = Self.normalizePath(sf.mountPoint)
+            if normalizedPath == normalizedMountPoint {
+                // Int64(clamping:) saturates at Int64.max instead of trapping on UInt64 values
+                // that exceed Int64.max (e.g. a mock or corrupted statfs result with UInt64.max).
+                let usedInodes = max(0, Int64(clamping: sf.totalFiles) - Int64(clamping: sf.freeFiles))
+                if usedInodes > 0 {
+                    estimatedItems = Int(clamping: usedInodes)
+                }
 
-            // Scanning "/" follows firmlinks into the Data volume; include its inode usage too.
-            if path == "/" {
-                if let dataSF = filesystem.volumeStats(forPath: "/System/Volumes/Data") {
-                    let dataUsedInodes = max(0, Int64(clamping: dataSF.totalFiles) - Int64(clamping: dataSF.freeFiles))
-                    if dataUsedInodes > 0 {
-                        estimatedItems += Int(clamping: dataUsedInodes)
+                // Scanning "/" follows firmlinks into the Data volume; include its inode usage too.
+                if normalizedPath == "/" {
+                    if let dataSF = filesystem.volumeStats(forPath: "/System/Volumes/Data") {
+                        let dataUsedInodes = max(0, Int64(clamping: dataSF.totalFiles) - Int64(clamping: dataSF.freeFiles))
+                        if dataUsedInodes > 0 {
+                            estimatedItems += Int(clamping: dataUsedInodes)
+                        }
                     }
                 }
             }
@@ -274,6 +281,7 @@ public final class FileScanner: @unchecked Sendable {
 
         // nil means open() failed (permission denied, etc.) — matches original behaviour.
         guard let rawEntries = filesystem.listDirectory(path: dirPath) else {
+            scanLog.warning("Skipped (permission denied): \(dirPath, privacy: .public)")
             progress.incrementSkippedDirectories()
             return
         }
@@ -380,5 +388,15 @@ public final class FileScanner: @unchecked Sendable {
             let subdirPath = dirPath + "/" + subdir.name
             enqueue(subdirPath, childTreeIndex)
         }
+    }
+
+    private static func normalizePath(_ path: String) -> String {
+        guard !path.isEmpty else { return path }
+        if path == "/" { return "/" }
+        var normalized = path
+        while normalized.count > 1 && normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
     }
 }

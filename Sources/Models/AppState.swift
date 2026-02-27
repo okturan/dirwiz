@@ -32,6 +32,7 @@ public final class AppState {
     /// Hardlink groups (populated after hardlink scan).
     public var hardlinkGroups: [HardlinkGroup] = []
     public var hardlinkExpandedGroups: Set<UUID> = []
+    public var hardlinkProgress: (processed: Int, total: Int) = (0, 0)
     public var isHardlinkScanRunning: Bool = false
     var hardlinkToken: UInt64 = 0
     @ObservationIgnored var hardlinkTask: Task<Void, Never>?
@@ -66,6 +67,54 @@ public final class AppState {
     /// Whether a Spotlight recency query is in progress.
     public var isRecencyQueryRunning: Bool = false
 
+    // MARK: - Space Analysis
+
+    /// Results of the space categorization analysis.
+    public var spaceAnalysis: SpaceAnalysisResult?
+    public var spaceAnalysisProgress: (completed: Int, total: Int) = (0, 0)
+    public var isSpaceAnalysisRunning: Bool = false
+
+    /// File age analysis results.
+    public var fileAgeResult: FileAgeResult?
+    public var isFileAgeRunning: Bool = false
+
+    /// Size distribution analysis results.
+    public var sizeDistribution: SizeDistributionResult?
+    public var isSizeDistRunning: Bool = false
+
+    // MARK: - iCloud
+
+    /// iCloud analysis results.
+    public var iCloudResult: iCloudAnalysisResult?
+    public var isICloudAnalysisRunning: Bool = false
+
+    // MARK: - APFS Intelligence
+
+    /// Purgeable space info for the scanned volume.
+    public var purgeableSpace: PurgeableSpaceInfo?
+
+    /// Time Machine local snapshots.
+    public var tmSnapshots: TMSnapshotInfo?
+    public var isAPFSQueryRunning: Bool = false
+
+    /// Clone check results for duplicate groups.
+    public var cloneResults: [CloneCheckResult] = []
+    public var isCloneCheckRunning: Bool = false
+
+    // MARK: - FSEvents Monitoring
+
+    /// Active FSEvents monitor for the scanned directory.
+    @ObservationIgnored public var fsEventsMonitor: FSEventsMonitor?
+
+    /// Accumulated filesystem changes since scan.
+    public var fsChanges: [DirectoryChangeSummary] = []
+    public var isFSMonitoringActive: Bool = false
+
+    // MARK: - Storage Trends
+
+    /// Historical scan summaries.
+    public var storageTrendHistory: [ScanSummary] = []
+
     // MARK: - Scan Timing
 
     /// Wall-clock time when the most recent scan started (CFAbsoluteTime).
@@ -92,8 +141,93 @@ public final class AppState {
     var temporalDiffToken: UInt64 = 0
     var temporalDiffTask: Task<Void, Never>?
     @ObservationIgnored var snapshotBuildTask: Task<Void, Never>?
+    @ObservationIgnored var spaceAnalysisTask: Task<Void, Never>?
+    @ObservationIgnored var iCloudAnalysisTask: Task<Void, Never>?
+    @ObservationIgnored var apfsQueryTask: Task<Void, Never>?
+    @ObservationIgnored var cloneCheckTask: Task<Void, Never>?
 
     public init() {}
+
+    public enum HeavyTaskKind: String, Sendable, CaseIterable {
+        case duplicateScan
+        case hardlinkScan
+        case spaceAnalysis
+        case iCloudAnalysis
+        case apfsQuery
+        case cloneCheck
+
+        var statusText: String {
+            switch self {
+            case .duplicateScan:
+                return "Scanning duplicates"
+            case .hardlinkScan:
+                return "Scanning hardlinks"
+            case .spaceAnalysis:
+                return "Running insights analysis"
+            case .iCloudAnalysis:
+                return "Checking iCloud status"
+            case .apfsQuery:
+                return "Querying volume info"
+            case .cloneCheck:
+                return "Checking APFS clones"
+            }
+        }
+    }
+
+    public var activeHeavyTask: HeavyTaskKind? {
+        if duplicate.isDuplicateScanRunning { return .duplicateScan }
+        if isHardlinkScanRunning { return .hardlinkScan }
+        if isSpaceAnalysisRunning { return .spaceAnalysis }
+        if isICloudAnalysisRunning { return .iCloudAnalysis }
+        if isAPFSQueryRunning { return .apfsQuery }
+        if isCloneCheckRunning { return .cloneCheck }
+        return nil
+    }
+
+    public var activeHeavyTaskStatusText: String? {
+        activeHeavyTask?.statusText
+    }
+
+    public func canStartHeavyTask(_ kind: HeavyTaskKind) -> Bool {
+        guard fileTree != nil, !scanProgress.isScanning else { return false }
+
+        switch kind {
+        case .duplicateScan:
+            return !duplicate.isDuplicateScanRunning && activeHeavyTaskExcluding(kind) == nil
+        case .hardlinkScan:
+            return !isHardlinkScanRunning && activeHeavyTaskExcluding(kind) == nil
+        case .spaceAnalysis:
+            return !isSpaceAnalysisRunning && activeHeavyTaskExcluding(kind) == nil
+        case .iCloudAnalysis:
+            return !isICloudAnalysisRunning && activeHeavyTaskExcluding(kind) == nil
+        case .apfsQuery:
+            return !isAPFSQueryRunning && activeHeavyTaskExcluding(kind) == nil
+        case .cloneCheck:
+            return !isCloneCheckRunning && activeHeavyTaskExcluding(kind) == nil
+        }
+    }
+
+    private func activeHeavyTaskExcluding(_ excluded: HeavyTaskKind) -> HeavyTaskKind? {
+        for kind in HeavyTaskKind.allCases where kind != excluded {
+            switch kind {
+            case .duplicateScan where duplicate.isDuplicateScanRunning:
+                return kind
+            case .hardlinkScan where isHardlinkScanRunning:
+                return kind
+            case .spaceAnalysis where isSpaceAnalysisRunning:
+                return kind
+            case .iCloudAnalysis where isICloudAnalysisRunning:
+                return kind
+            case .apfsQuery where isAPFSQueryRunning:
+                return kind
+            case .cloneCheck where isCloneCheckRunning:
+                return kind
+            default:
+                continue
+            }
+        }
+        return nil
+    }
 
     /// Reset navigation state for a new scan.
     public func resetForNewScan() {
@@ -103,6 +237,7 @@ public final class AppState {
         temporalDiff.reset()
         hardlinkGroups = []
         hardlinkExpandedGroups = []
+        hardlinkProgress = (0, 0)
         isHardlinkScanRunning = false
         hardlinkToken &+= 1
         hardlinkTask?.cancel()
@@ -126,6 +261,32 @@ public final class AppState {
         temporalDiffToken &+= 1
         snapshotBuildTask?.cancel()
         snapshotBuildTask = nil
+        spaceAnalysisTask?.cancel()
+        spaceAnalysisTask = nil
+        iCloudAnalysisTask?.cancel()
+        iCloudAnalysisTask = nil
+        apfsQueryTask?.cancel()
+        apfsQueryTask = nil
+        cloneCheckTask?.cancel()
+        cloneCheckTask = nil
+        spaceAnalysis = nil
+        spaceAnalysisProgress = (0, 0)
+        isSpaceAnalysisRunning = false
+        fileAgeResult = nil
+        isFileAgeRunning = false
+        sizeDistribution = nil
+        isSizeDistRunning = false
+        iCloudResult = nil
+        isICloudAnalysisRunning = false
+        purgeableSpace = nil
+        tmSnapshots = nil
+        isAPFSQueryRunning = false
+        cloneResults = []
+        isCloneCheckRunning = false
+        fsEventsMonitor?.stop()
+        fsEventsMonitor = nil
+        fsChanges = []
+        isFSMonitoringActive = false
         scanStartTime = 0
         scanDuration = 0
         // Create a fresh ScanProgress so old scanner finalizations write to the
@@ -142,6 +303,8 @@ public enum DetailTab: String, CaseIterable, Identifiable {
     case duplicates = "Duplicates"
     case hardlinks = "Hardlinks"
     case search = "Search"
+    case spaceAnalysis = "Space"
+    case insights = "Insights"
 
     public var id: String { rawValue }
 }

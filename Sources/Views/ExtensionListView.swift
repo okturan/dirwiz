@@ -131,25 +131,23 @@ public struct ExtensionListView: View {
     }
 
     private func sortButton(_ title: String, key: SortOrder, width: CGFloat, alignment: Alignment) -> some View {
-        Button(action: {
+        HStack(spacing: 3) {
+            Text(title)
+            if sortOrder == key {
+                Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 8))
+            }
+        }
+        .frame(width: width, alignment: alignment)
+        .contentShape(Rectangle())
+        .onTapGesture {
             if sortOrder == key {
                 sortAscending.toggle()
             } else {
                 sortOrder = key
                 sortAscending = false
             }
-        }) {
-            HStack(spacing: 3) {
-                Text(title)
-                if sortOrder == key {
-                    Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 8))
-                }
-            }
-            .frame(width: width, alignment: alignment)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Row
@@ -206,14 +204,12 @@ public struct ExtensionListView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .frame(width: 65, alignment: .trailing)
 
-            // Drill-down affordance.
+            // Drill-down affordance — always Spacer so the row fills full width.
+            Spacer(minLength: 0)
             if isDrillable {
                 Image(systemName: "arrow.right.circle")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                    .frame(width: 20, alignment: .trailing)
-            } else {
-                Spacer()
             }
         }
         .padding(.horizontal, 8)

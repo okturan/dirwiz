@@ -89,7 +89,8 @@ final class MockFilesystemProvider: @unchecked Sendable, FilesystemProvider {
     var mockVolumeStats: StatfsResult? = StatfsResult(
         totalFiles: 10_000,
         freeFiles: 5_000,
-        filesystemType: "apfs"
+        filesystemType: "apfs",
+        mountPoint: "/"
     )
 
     // MARK: - FilesystemProvider

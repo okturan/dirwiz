@@ -369,6 +369,152 @@ public final class FileTree: @unchecked Sendable {
         }
     }
 
+    /// Zero a node's sizes and subtract the freed amount from all ancestors.
+    /// Used after trashing a file to keep the tree consistent without a full re-scan.
+    public func zeroNodeSize(at index: UInt32) {
+        lock.withLock { _ in
+            let i = Int(index)
+            guard i < nodes.count else { return }
+            let oldSize = nodes[i].displaySize
+            nodes[i].fileSize = 0
+            nodes[i].allocatedSize = 0
+            var current = nodes[i].parentIndex
+            while current != FileNode.invalid {
+                let ci = Int(current)
+                guard ci < nodes.count else { break }
+                if nodes[ci].fileSize >= oldSize {
+                    nodes[ci].fileSize -= oldSize
+                } else {
+                    nodes[ci].fileSize = 0
+                }
+                if nodes[ci].allocatedSize >= oldSize {
+                    nodes[ci].allocatedSize -= oldSize
+                } else {
+                    nodes[ci].allocatedSize = 0
+                }
+                current = nodes[ci].parentIndex
+            }
+        }
+    }
+
+    /// Remove a node and all descendants, then rebuild parent/child links and aggregate sizes.
+    /// Keeps the root node in place if asked to remove index 0 so the tree remains usable.
+    public func removeSubtree(at index: UInt32) {
+        lock.withLock { _ in
+            let removeIndex = Int(index)
+            guard removeIndex >= 0, removeIndex < nodes.count else { return }
+
+            if removeIndex == 0 {
+                guard !nodes.isEmpty else { return }
+                var root = nodes[0]
+                root.firstChildIndex = FileNode.invalid
+                root.childCount = 0
+                root.fileSize = 0
+                root.allocatedSize = 0
+                nodes = [root]
+                return
+            }
+
+            var removed = Set<UInt32>()
+            var stack: [UInt32] = [index]
+            while let current = stack.popLast() {
+                guard removed.insert(current).inserted else { continue }
+                let i = Int(current)
+                guard i < nodes.count else { continue }
+                let node = nodes[i]
+                guard node.firstChildIndex != FileNode.invalid else { continue }
+                let start = Int(node.firstChildIndex)
+                let end = min(start + Int(node.childCount), nodes.count)
+                for child in start..<end {
+                    stack.append(UInt32(child))
+                }
+            }
+
+            guard !removed.isEmpty else { return }
+
+            let oldNodes = nodes
+            let oldStringPool = stringPool
+            let oldSearchPool = lowercaseNamePool
+            let oldSearchEntries = lowercaseNameEntries
+
+            var oldToNew = Array(repeating: FileNode.invalid, count: oldNodes.count)
+            var newNodes: [FileNode] = []
+            var newStringPool = Data()
+            var newSearchPool = Data()
+            var newSearchEntries: [(offset: UInt32, length: UInt16)] = []
+
+            newNodes.reserveCapacity(oldNodes.count - removed.count)
+            newStringPool.reserveCapacity(oldStringPool.count)
+            newSearchPool.reserveCapacity(oldSearchPool.count)
+            newSearchEntries.reserveCapacity(oldSearchEntries.count - removed.count)
+
+            for oldIndex in oldNodes.indices {
+                let oldUInt = UInt32(oldIndex)
+                guard !removed.contains(oldUInt) else { continue }
+
+                var node = oldNodes[oldIndex]
+
+                let nameStart = Int(node.nameOffset)
+                let nameEnd = nameStart + Int(node.nameLength)
+                guard nameEnd <= oldStringPool.count else { continue }
+                let nameBytes = oldStringPool[nameStart..<nameEnd]
+                node.nameOffset = UInt32(newStringPool.count)
+                node.nameLength = UInt16(nameBytes.count)
+                newStringPool.append(contentsOf: nameBytes)
+
+                let searchEntry = oldSearchEntries[oldIndex]
+                let searchStart = Int(searchEntry.offset)
+                let searchEnd = searchStart + Int(searchEntry.length)
+                guard searchEnd <= oldSearchPool.count else { continue }
+                let searchBytes = oldSearchPool[searchStart..<searchEnd]
+                let newSearchOffset = UInt32(newSearchPool.count)
+                newSearchPool.append(contentsOf: searchBytes)
+                newSearchEntries.append((offset: newSearchOffset, length: searchEntry.length))
+
+                node.parentIndex = FileNode.invalid
+                node.firstChildIndex = FileNode.invalid
+                node.childCount = 0
+                if node.isDirectory && !node.isBundle {
+                    node.fileSize = 0
+                    node.allocatedSize = 0
+                }
+
+                oldToNew[oldIndex] = UInt32(newNodes.count)
+                newNodes.append(node)
+            }
+
+            for oldIndex in oldNodes.indices {
+                let newIndex = oldToNew[oldIndex]
+                guard newIndex != FileNode.invalid else { continue }
+                let oldParent = oldNodes[oldIndex].parentIndex
+                guard oldParent != FileNode.invalid else { continue }
+                let newParent = oldToNew[Int(oldParent)]
+                guard newParent != FileNode.invalid else { continue }
+
+                let parentIndex = Int(newParent)
+                let childIndex = Int(newIndex)
+                newNodes[childIndex].parentIndex = newParent
+                if newNodes[parentIndex].firstChildIndex == FileNode.invalid {
+                    newNodes[parentIndex].firstChildIndex = newIndex
+                }
+                newNodes[parentIndex].childCount &+= 1
+            }
+
+            for i in stride(from: newNodes.count - 1, through: 0, by: -1) {
+                let parent = newNodes[i].parentIndex
+                guard parent != FileNode.invalid else { continue }
+                let parentIndex = Int(parent)
+                newNodes[parentIndex].fileSize += newNodes[i].fileSize
+                newNodes[parentIndex].allocatedSize += newNodes[i].allocatedSize
+            }
+
+            nodes = newNodes
+            stringPool = newStringPool
+            lowercaseNamePool = newSearchPool
+            lowercaseNameEntries = newSearchEntries
+        }
+    }
+
     /// Single-pass bottom-up size propagation. Call after all nodes are added (post-scan).
     /// Each node's fileSize starts as its own direct size. This walk adds each node's size
     /// to its parent, naturally bubbling totals up to the root in O(n) time.

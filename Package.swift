@@ -19,6 +19,14 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ]
         ),
+        .executableTarget(
+            name: "dirwiz-cli",
+            dependencies: ["DirWizLib"],
+            path: "CLI",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
         .target(
             name: "DirWizLib",
             path: "Sources",

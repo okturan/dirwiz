@@ -74,7 +74,124 @@ private struct StreamingHash128 {
     }
 }
 
+/// Thread-safe counter for reporting progress from concurrent tasks
+/// independently of task completion. The timer reads this while workers
+/// increment it per-file, so the UI advances even when individual tasks
+/// are blocked on large file I/O.
+final class ProgressCounter: @unchecked Sendable {
+    private var _value = 0
+    private let lock = NSLock()
+    func add(_ n: Int) { lock.lock(); _value += n; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return _value }
+}
+
+/// GCD-based timer bridge that reads a `ProgressCounter` every 250ms on a
+/// real OS thread and dispatches progress updates to the main actor.
+/// Unlike `Task.sleep`, GCD timers are not affected by cooperative pool
+/// starvation — they fire reliably even when all Swift Concurrency threads
+/// are busy hashing files.
+private final class ProgressTimerBridge: @unchecked Sendable {
+    private let timer: DispatchSourceTimer
+
+    init(
+        phase: DuplicateScanPhase,
+        total: Int,
+        counter: ProgressCounter,
+        progress: (@MainActor @Sendable (DuplicateScanUpdate) -> Void)?
+    ) {
+        self.timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+        timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
+        timer.setEventHandler { [counter] in
+            let current = counter.value
+            guard current > 0 else { return }
+            let update = DuplicateScanUpdate(
+                phase: phase,
+                processed: min(current, total),
+                total: total
+            )
+            Task { @MainActor in
+                progress?(update)
+            }
+        }
+        timer.resume()
+    }
+
+    func stop() {
+        timer.cancel()
+    }
+}
+
+/// GCD timer for simple (processed, total) progress handlers (used by HardlinkFinder).
+final class DeterminateProgressTimer: @unchecked Sendable {
+    private let timer: DispatchSourceTimer
+
+    init(
+        total: Int,
+        counter: ProgressCounter,
+        progress: (@MainActor @Sendable (_ processed: Int, _ total: Int) -> Void)?
+    ) {
+        self.timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+        timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
+        timer.setEventHandler { [counter] in
+            let current = counter.value
+            guard current > 0 else { return }
+            let clamped = min(current, total)
+            Task { @MainActor in
+                progress?(clamped, total)
+            }
+        }
+        timer.resume()
+    }
+
+    func stop() {
+        timer.cancel()
+    }
+}
+
 // MARK: - DuplicateFinder
+
+public enum DuplicateScanPhase: Sendable, Hashable {
+    case groupingBySize
+    case partialHashing
+    case fullHashing
+    case finalizing
+
+    public var message: String {
+        switch self {
+        case .groupingBySize:
+            return "Grouping files by size…"
+        case .partialHashing:
+            return "Hashing candidates…"
+        case .fullHashing:
+            return "Verifying matching hashes…"
+        case .finalizing:
+            return "Building duplicate groups…"
+        }
+    }
+
+    public var unitLabel: String {
+        switch self {
+        case .groupingBySize:
+            return "items"
+        case .partialHashing, .fullHashing:
+            return "candidates"
+        case .finalizing:
+            return "groups"
+        }
+    }
+}
+
+public struct DuplicateScanUpdate: Sendable {
+    public let phase: DuplicateScanPhase
+    public let processed: Int
+    public let total: Int
+
+    public init(phase: DuplicateScanPhase, processed: Int, total: Int) {
+        self.phase = phase
+        self.processed = processed
+        self.total = total
+    }
+}
 
 /// Two-pass duplicate file detection engine.
 ///
@@ -99,11 +216,11 @@ public final class DuplicateFinder {
     ///
     /// - Parameters:
     ///   - tree: The scanned file tree.
-    ///   - progress: Optional callback with (filesProcessed, totalCandidates).
+    ///   - progress: Optional progress callback for the current scan phase.
     /// - Returns: Array of DuplicateGroup sorted by wastedSpace descending.
     public func findDuplicates(
         in tree: FileTree,
-        progress: (@MainActor @Sendable (Int, Int) -> Void)? = nil
+        progress: (@MainActor @Sendable (DuplicateScanUpdate) -> Void)? = nil
     ) async -> [DuplicateGroup] {
 
         // ---------------------------------------------------------------
@@ -112,11 +229,27 @@ public final class DuplicateFinder {
         let snapshot = tree.nodesSnapshot()
         var sizeGroups: [UInt64: [UInt32]] = [:]
         sizeGroups.reserveCapacity(snapshot.count / 2)
+        let groupingTotal = snapshot.count
+        var lastGroupingProgressTime = CFAbsoluteTimeGetCurrent()
 
         for i in 0..<snapshot.count {
+            if Task.isCancelled { return [] }
+
             let node = snapshot[i]
-            guard !node.isDirectory, node.fileSize >= minimumFileSize else { continue }
-            sizeGroups[node.fileSize, default: []].append(UInt32(i))
+            if !node.isDirectory, node.fileSize >= minimumFileSize {
+                sizeGroups[node.fileSize, default: []].append(UInt32(i))
+            }
+
+            let now = CFAbsoluteTimeGetCurrent()
+            let processed = i + 1
+            if now - lastGroupingProgressTime >= 0.2 || processed == groupingTotal {
+                lastGroupingProgressTime = now
+                await progress?(DuplicateScanUpdate(
+                    phase: .groupingBySize,
+                    processed: processed,
+                    total: groupingTotal
+                ))
+            }
         }
 
         // Remove unique sizes (can't be duplicates)
@@ -127,6 +260,7 @@ public final class DuplicateFinder {
         let totalCandidates = candidateGroups.reduce(0) { $0 + $1.count }
 
         if totalCandidates == 0 {
+            await progress?(DuplicateScanUpdate(phase: .finalizing, processed: 0, total: 0))
             return []
         }
 
@@ -136,65 +270,100 @@ public final class DuplicateFinder {
         let readSize = partialReadSize
 
         // Collect partial-hash groups using TaskGroup for concurrency.
-        // Batch small size groups into chunks to avoid spawning one task per group
-        // (e.g., 50K groups of 2 files each → 50K tasks). Each task opens files
-        // sequentially, so the concurrent FD count is bounded by the cooperative
-        // thread pool size (~CPU count), well within OPEN_MAX.
-        let maxGroupsPerTask = 64
-        typealias PartialBatch = (matches: [(PartialHashKey, UInt32)], processed: Int)
+        // Split very large same-size groups so progress can advance during hashing
+        // instead of waiting for one giant batch to finish.
+        let maxPartialFilesPerWorkItem = 64
+        let maxFullFilesPerWorkItem = 8
+        struct PartialWorkItem: Sendable {
+            let fileSize: UInt64
+            let indices: ArraySlice<UInt32>
+        }
+        var partialWorkItems: [PartialWorkItem] = []
+        partialWorkItems.reserveCapacity(candidateGroups.count)
+        for sizeGroup in candidateGroups {
+            let fileSize = snapshot[Int(sizeGroup[0])].fileSize
+            for start in stride(from: 0, to: sizeGroup.count, by: maxPartialFilesPerWorkItem) {
+                let end = min(start + maxPartialFilesPerWorkItem, sizeGroup.count)
+                partialWorkItems.append(PartialWorkItem(
+                    fileSize: fileSize,
+                    indices: sizeGroup[start..<end]
+                ))
+            }
+        }
+
+        await progress?(DuplicateScanUpdate(
+            phase: .partialHashing,
+            processed: 0,
+            total: totalCandidates
+        ))
+
+        // Progress uses a GCD timer + shared counter so the UI updates even
+        // when the `for await` consumer loop is starved by worker tasks on
+        // the cooperative pool. Without this, 23K+ tasks saturate the pool
+        // and the consumer never gets scheduled to report progress.
+        let partialHashCounter = ProgressCounter()
+        let partialProgressTimer = ProgressTimerBridge(
+            phase: .partialHashing,
+            total: totalCandidates,
+            counter: partialHashCounter,
+            progress: progress
+        )
+
+        let partialItemsPerTask = 1
+        let fullItemsPerTask = 1
+        typealias PartialBatch = [(PartialHashKey, UInt32)]
         let partialGroups: [PartialHashKey: [UInt32]] = await withTaskGroup(
             of: PartialBatch.self,
             returning: [PartialHashKey: [UInt32]].self
         ) { group in
-            // Batch size groups into chunks to reduce task overhead
-            for chunkStart in stride(from: 0, to: candidateGroups.count, by: maxGroupsPerTask) {
-                let chunkEnd = min(chunkStart + maxGroupsPerTask, candidateGroups.count)
-                let chunk = candidateGroups[chunkStart..<chunkEnd]
+            for chunkStart in stride(from: 0, to: partialWorkItems.count, by: partialItemsPerTask) {
+                let chunkEnd = min(chunkStart + partialItemsPerTask, partialWorkItems.count)
+                let chunk = partialWorkItems[chunkStart..<chunkEnd]
                 group.addTask {
                     var results: [(PartialHashKey, UInt32)] = []
-                    var processed = 0
-                    for sizeGroup in chunk {
+                    for workItem in chunk {
                         guard !Task.isCancelled else { break }
-                        let fileSize = snapshot[Int(sizeGroup[0])].fileSize
-                        for nodeIndex in sizeGroup {
+                        for nodeIndex in workItem.indices {
                             guard !Task.isCancelled else { break }
                             let hash = tree.withCPath(at: nodeIndex) { cPath in
-                                Self.partialHash(cPath: cPath, fileSize: fileSize, readSize: readSize)
+                                Self.partialHash(cPath: cPath, fileSize: workItem.fileSize, readSize: readSize)
                             }
                             if let hash {
-                                let key = PartialHashKey(size: fileSize, hash: hash)
+                                let key = PartialHashKey(size: workItem.fileSize, hash: hash)
                                 results.append((key, nodeIndex))
                             }
-                            processed += 1
+                            partialHashCounter.add(1)
                         }
                     }
-                    return (results, processed)
+                    return results
                 }
             }
 
-            // Collect results
             var collected: [PartialHashKey: [UInt32]] = [:]
-            var processedTotal = 0
-            var lastProgressTime = CFAbsoluteTimeGetCurrent()
             for await batch in group {
-                processedTotal += batch.processed
-                let now = CFAbsoluteTimeGetCurrent()
-                if now - lastProgressTime >= 0.2 || processedTotal == totalCandidates {
-                    lastProgressTime = now
-                    await progress?(processedTotal, totalCandidates)
-                }
-                for (key, nodeIndex) in batch.matches {
+                for (key, nodeIndex) in batch {
                     collected[key, default: []].append(nodeIndex)
                 }
             }
             return collected
         }
 
+        partialProgressTimer.stop()
+        await progress?(DuplicateScanUpdate(
+            phase: .partialHashing,
+            processed: totalCandidates,
+            total: totalCandidates
+        ))
+
         // Remove groups with only one member (partial hash unique)
         let partialMatches = partialGroups.filter { $0.value.count >= 2 }
 
         if partialMatches.isEmpty {
-            await progress?(totalCandidates, totalCandidates)
+            await progress?(DuplicateScanUpdate(
+                phase: .finalizing,
+                processed: totalCandidates,
+                total: totalCandidates
+            ))
             return []
         }
 
@@ -202,26 +371,62 @@ public final class DuplicateFinder {
         // Pass 3: Full-file hash for remaining candidates
         // ---------------------------------------------------------------
         let partialMatchArray = Array(partialMatches)
+        let totalFullCandidates = partialMatchArray.reduce(0) { $0 + $1.value.count }
+        struct FullWorkItem: Sendable {
+            let key: PartialHashKey
+            let indices: ArraySlice<UInt32>
+        }
+        var fullWorkItems: [FullWorkItem] = []
+        fullWorkItems.reserveCapacity(partialMatchArray.count)
+        for (partialKey, indices) in partialMatchArray {
+            for start in stride(from: 0, to: indices.count, by: maxFullFilesPerWorkItem) {
+                let end = min(start + maxFullFilesPerWorkItem, indices.count)
+                fullWorkItems.append(FullWorkItem(
+                    key: partialKey,
+                    indices: indices[start..<end]
+                ))
+            }
+        }
+
+        await progress?(DuplicateScanUpdate(
+            phase: .fullHashing,
+            processed: 0,
+            total: totalFullCandidates
+        ))
+
+        // Full-hash progress uses a shared counter + GCD timer so progress
+        // advances per-file even when a single large file blocks a task.
+        // A GCD timer runs on a real OS thread, immune to Swift cooperative
+        // pool starvation that happens when 400K+ hash tasks saturate it.
+        let fullHashCounter = ProgressCounter()
+        let fullProgressContinuation = ProgressTimerBridge(
+            phase: .fullHashing,
+            total: totalFullCandidates,
+            counter: fullHashCounter,
+            progress: progress
+        )
+
         let fullGroups: [FullHashKey: [UInt32]] = await withTaskGroup(
             of: [(FullHashKey, UInt32)].self,
             returning: [FullHashKey: [UInt32]].self
         ) { group in
-            for chunkStart in stride(from: 0, to: partialMatchArray.count, by: maxGroupsPerTask) {
-                let chunkEnd = min(chunkStart + maxGroupsPerTask, partialMatchArray.count)
-                let chunk = partialMatchArray[chunkStart..<chunkEnd]
+            for chunkStart in stride(from: 0, to: fullWorkItems.count, by: fullItemsPerTask) {
+                let chunkEnd = min(chunkStart + fullItemsPerTask, fullWorkItems.count)
+                let chunk = fullWorkItems[chunkStart..<chunkEnd]
                 group.addTask {
                     var results: [(FullHashKey, UInt32)] = []
-                    for (partialKey, indices) in chunk {
+                    for workItem in chunk {
                         guard !Task.isCancelled else { break }
-                        for nodeIndex in indices {
+                        for nodeIndex in workItem.indices {
                             guard !Task.isCancelled else { break }
                             let digest = tree.withCPath(at: nodeIndex) { cPath in
-                                Self.fullFileHash(cPath: cPath, expectedSize: partialKey.size)
+                                Self.fullFileHash(cPath: cPath, expectedSize: workItem.key.size)
                             }
                             if let digest {
-                                let key = FullHashKey(size: partialKey.size, lo: digest.lo, hi: digest.hi)
+                                let key = FullHashKey(size: workItem.key.size, lo: digest.lo, hi: digest.hi)
                                 results.append((key, nodeIndex))
                             }
+                            fullHashCounter.add(1)
                         }
                     }
                     return results
@@ -237,15 +442,43 @@ public final class DuplicateFinder {
             return collected
         }
 
-        // Build DuplicateGroup results from confirmed duplicates
+        fullProgressContinuation.stop()
+        await progress?(DuplicateScanUpdate(
+            phase: .fullHashing,
+            processed: totalFullCandidates,
+            total: totalFullCandidates
+        ))
+
+        // Build DuplicateGroup results from confirmed duplicates.
+        // Filter out hardlinks: files sharing the same (device, inode) are hardlinks
+        // and removing one doesn't free space, so keep only one representative per inode.
+        struct DevIno: Hashable {
+            let dev: Int32
+            let ino: UInt64
+        }
         var results: [DuplicateGroup] = []
         for (key, indices) in fullGroups {
             guard indices.count >= 2 else { continue }
-            let paths = indices.map { tree.path(at: $0) }
+
+            // Deduplicate by (device, inode) — hardlinked files share both.
+            var seenInodes: [DevIno: String] = [:]  // first path per unique inode
+            for nodeIndex in indices {
+                let path = tree.path(at: nodeIndex)
+                var st = Darwin.stat()
+                guard lstat(path, &st) == 0 else { continue }
+                let devIno = DevIno(dev: st.st_dev, ino: st.st_ino)
+                if seenInodes[devIno] == nil {
+                    seenInodes[devIno] = path
+                }
+            }
+
+            let dedupedPaths = Array(seenInodes.values)
+            guard dedupedPaths.count >= 2 else { continue }
+
             let dupGroup = DuplicateGroup(
                 fileSize: key.size,
                 hash: key.lo,  // Lower 64 bits for display identity
-                paths: paths
+                paths: dedupedPaths
             )
             results.append(dupGroup)
         }
@@ -253,7 +486,11 @@ public final class DuplicateFinder {
         // Sort by wasted space descending
         results.sort { $0.wastedSpace > $1.wastedSpace }
 
-        await progress?(totalCandidates, totalCandidates)
+        await progress?(DuplicateScanUpdate(
+            phase: .finalizing,
+            processed: results.count,
+            total: results.count
+        ))
         return results
     }
 

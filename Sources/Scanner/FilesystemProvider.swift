@@ -68,10 +68,17 @@ public struct StatfsResult: Sendable {
     public var totalFiles: UInt64     // f_files
     public var freeFiles: UInt64      // f_ffree
     public var filesystemType: String // f_fstypename
-    public init(totalFiles: UInt64, freeFiles: UInt64, filesystemType: String) {
+    public var mountPoint: String     // f_mntonname
+    public init(
+        totalFiles: UInt64,
+        freeFiles: UInt64,
+        filesystemType: String,
+        mountPoint: String = "/"
+    ) {
         self.totalFiles = totalFiles
         self.freeFiles = freeFiles
         self.filesystemType = filesystemType
+        self.mountPoint = mountPoint
     }
 }
 
@@ -300,9 +307,13 @@ private func callStatfs(path: String) -> StatfsResult? {
     let name: String = withUnsafePointer(to: s.f_fstypename) { ptr in
         ptr.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
     }
+    let mountPoint: String = withUnsafePointer(to: s.f_mntonname) { ptr in
+        ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+    }
     return StatfsResult(
         totalFiles: s.f_files,
         freeFiles: s.f_ffree,
-        filesystemType: name
+        filesystemType: name,
+        mountPoint: mountPoint
     )
 }

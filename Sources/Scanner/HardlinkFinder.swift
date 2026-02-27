@@ -35,6 +35,7 @@ public struct HardlinkGroup: Identifiable, Sendable {
 /// This approach avoids modifying the packed FileNode struct — we do a post-scan
 /// pass using the existing path-building infrastructure.
 public struct HardlinkFinder {
+    public typealias ProgressHandler = @MainActor @Sendable (_ processed: Int, _ total: Int) -> Void
 
     public init() {}
 
@@ -43,9 +44,13 @@ public struct HardlinkFinder {
     /// Find all hardlink groups in the given FileTree.
     ///
     /// - Parameter tree: The scanned file tree to inspect.
+    /// - Parameter progress: Optional determinate progress callback for processed files.
     /// - Returns: Array of HardlinkGroup sorted by extraLinkBytes descending,
     ///            containing only groups with 2 or more paths.
-    public func findHardlinks(in tree: FileTree) async -> [HardlinkGroup] {
+    public func findHardlinks(
+        in tree: FileTree,
+        progress: ProgressHandler? = nil
+    ) async -> [HardlinkGroup] {
         // Take a snapshot so we can walk all nodes lock-free.
         let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
 
@@ -59,10 +64,10 @@ public struct HardlinkFinder {
         }
 
         guard !fileIndices.isEmpty else { return [] }
+        await progress?(0, fileIndices.count)
 
         // For each file, call lstat to get its (device, inode).
         // Group by (dev, ino) — files sharing both fields are hardlinks to the same data.
-        typealias InodeKey = (dev: Int32, ino: UInt64)
 
         // Dictionary keyed by a hashable representation of (dev, ino).
         struct DevIno: Hashable {
@@ -77,9 +82,17 @@ public struct HardlinkFinder {
         // Process in batches via TaskGroup to get parallelism on lstat calls,
         // which are cheap but benefit from concurrency on large trees.
         let batchSize = 512
-        // Include the path string so the final grouping pass can reuse it without
-        // calling pathFromSnapshot a second time.
-        typealias BatchResult = [(DevIno, UInt32, UInt64, String)] // (key, nodeIndex, fileSize, path)
+        struct BatchResult {
+            let members: [(DevIno, UInt32, UInt64, String)] // (key, nodeIndex, fileSize, path)
+        }
+
+        // GCD timer for progress — immune to cooperative pool starvation.
+        let hardlinkCounter = ProgressCounter()
+        let hardlinkTimer = DeterminateProgressTimer(
+            total: fileIndices.count,
+            counter: hardlinkCounter,
+            progress: progress
+        )
 
         let batchResults: [BatchResult] = await withTaskGroup(
             of: BatchResult.self,
@@ -90,8 +103,10 @@ public struct HardlinkFinder {
                 let batchEnd = min(batchStart + batchSize, fileIndices.count)
                 let batch = fileIndices[batchStart..<batchEnd]
                 group.addTask {
-                    guard !Task.isCancelled else { return [] }
-                    var results: BatchResult = []
+                    guard !Task.isCancelled else {
+                        return BatchResult(members: [])
+                    }
+                    var results: [(DevIno, UInt32, UInt64, String)] = []
                     results.reserveCapacity(batch.count)
                     for nodeIndex in batch {
                         guard !Task.isCancelled else { break }
@@ -102,18 +117,18 @@ public struct HardlinkFinder {
                             rootPath: rootPath
                         )
                         var st = Darwin.stat()
-                        // Use lstat so we get the link's own inode (not target for symlinks,
-                        // but we only process files flagged as non-directory anyway).
-                        guard lstat(path, &st) == 0 else { continue }
+                        guard lstat(path, &st) == 0 else {
+                            hardlinkCounter.add(1)
+                            continue
+                        }
+                        hardlinkCounter.add(1)
                         // Only interested in files with more than one hard link.
                         guard st.st_nlink > 1 else { continue }
                         let key = DevIno(dev: st.st_dev, ino: st.st_ino)
                         let fileSize = UInt64(bitPattern: Int64(st.st_size))
-                        // Store the path alongside the other fields so the final pass
-                        // can reuse it instead of calling pathFromSnapshot again.
                         results.append((key, nodeIndex, fileSize, path))
                     }
-                    return results
+                    return BatchResult(members: results)
                 }
             }
 
@@ -124,9 +139,12 @@ public struct HardlinkFinder {
             return all
         }
 
+        hardlinkTimer.stop()
+        await progress?(fileIndices.count, fileIndices.count)
+
         // Merge batch results into groups dict, using the stored path from each result.
         for batch in batchResults {
-            for (key, _, fileSize, path) in batch {
+            for (key, _, fileSize, path) in batch.members {
                 groups[key, default: []].append((path: path, fileSize: fileSize))
             }
         }
