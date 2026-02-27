@@ -1,5 +1,8 @@
 import Foundation
 import MetalKit
+import OSLog
+
+private let log = Logger(subsystem: "com.dirwiz", category: "CushionRenderer")
 
 // MARK: - MTKView Coordinator
 
@@ -88,13 +91,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         do {
             library = try device.makeLibrary(source: CushionShaderSource.source, options: nil)
         } catch {
-            print("CushionRenderer: Failed to compile Metal shaders: \(error)")
+            log.error("Failed to compile Metal shaders: \(error)")
             return
         }
 
         guard let vertexFunc = library.makeFunction(name: "cushionVertexShader"),
               let fragFunc = library.makeFunction(name: "cushionFragmentShader") else {
-            print("CushionRenderer: Failed to find shader functions.")
+            log.error("Failed to find shader functions.")
             return
         }
 
@@ -115,7 +118,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         do {
             pipelineState = try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
-            print("CushionRenderer: Failed to create pipeline state: \(error)")
+            log.error("Failed to create pipeline state: \(error)")
         }
     }
 

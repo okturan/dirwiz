@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.dirwiz", category: "AppState")
 
 extension AppState {
 
@@ -46,7 +49,7 @@ extension AppState {
                     return nil
                 } catch {
                     let msg = "Failed to save snapshot: \(error.localizedDescription)"
-                    print("TemporalSnapshot: \(msg)")
+                    log.error("TemporalSnapshot save failed: \(msg)")
                     return msg
                 }
             }()
