@@ -15,10 +15,10 @@ public struct TemporalDiffService {
     }
 
     private static func buildSnapshotSync(tree: FileTree) -> TemporalSnapshot {
-        let nodes = tree.nodesSnapshot()
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
         let caseSensitive = tree.isCaseSensitive
-        let rootPath = nodes.isEmpty ? "/" : tree.path(at: 0)
-        let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        let resolvedRootPath = nodes.isEmpty ? "/" : rootPath
+        let rootPrefix = resolvedRootPath.hasSuffix("/") ? resolvedRootPath : resolvedRootPath + "/"
 
         var byPath: [String: UInt64] = [:]
         byPath.reserveCapacity(max(nodes.count / 8, 16))
@@ -26,8 +26,10 @@ public struct TemporalDiffService {
         for i in 0..<nodes.count {
             let node = nodes[i]
             guard node.isDirectory else { continue }
-            let relPath = relativePath(tree: tree, index: UInt32(i),
+            let relPath = relativePath(index: UInt32(i),
                                        isRoot: i == 0, rootPrefix: rootPrefix,
+                                       nodes: nodes, stringPool: stringPool,
+                                       rootPath: resolvedRootPath,
                                        caseSensitive: caseSensitive)
             byPath[relPath] = node.fileSize
         }
@@ -35,7 +37,7 @@ public struct TemporalDiffService {
         let meta = TemporalSnapshotMeta(
             id: UUID(),
             createdAt: Date(),
-            rootPath: rootPath,
+            rootPath: resolvedRootPath,
             totalBytes: nodes.first?.fileSize ?? 0,
             dirCount: byPath.count,
             isCaseSensitive: caseSensitive
@@ -59,14 +61,13 @@ public struct TemporalDiffService {
         currentTree: FileTree,
         snapshot: TemporalSnapshot
     ) -> TemporalDiffResult {
-        let nodes = currentTree.nodesSnapshot()
+        let (nodes, stringPool, rootPath) = currentTree.pathBuildingSnapshot()
         guard !nodes.isEmpty else {
             return TemporalDiffResult(kinds: [], strengths: [], deletedByNode: [:])
         }
 
         // Use snapshot's case-sensitivity flag so that path keys match what was stored.
         let caseSensitive = snapshot.meta.isCaseSensitive
-        let rootPath = currentTree.path(at: 0)
         let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
         let totalBytes = Double(max(nodes.first?.fileSize ?? 0, 1))
 
@@ -82,8 +83,10 @@ public struct TemporalDiffService {
             let node = nodes[i]
             guard node.isDirectory else { continue }
 
-            let relPath = relativePath(tree: currentTree, index: UInt32(i),
+            let relPath = relativePath(index: UInt32(i),
                                        isRoot: i == 0, rootPrefix: rootPrefix,
+                                       nodes: nodes, stringPool: stringPool,
+                                       rootPath: rootPath,
                                        caseSensitive: caseSensitive)
             relPathToIndex[relPath] = UInt32(i)
 
@@ -153,11 +156,13 @@ public struct TemporalDiffService {
     /// snapshot keys match regardless of case. On case-sensitive volumes, original
     /// case is preserved to avoid merging directories like "Build" and "build".
     private static func relativePath(
-        tree: FileTree, index: UInt32, isRoot: Bool, rootPrefix: String,
+        index: UInt32, isRoot: Bool, rootPrefix: String,
+        nodes: [FileNode], stringPool: Data, rootPath: String,
         caseSensitive: Bool
     ) -> String {
         if isRoot { return "" }
-        let full = tree.path(at: index)
+        let full = FileTree.pathFromSnapshot(at: index, nodes: nodes,
+                                            stringPool: stringPool, rootPath: rootPath)
         let rel: String
         if full.hasPrefix(rootPrefix) {
             rel = String(full.dropFirst(rootPrefix.count))

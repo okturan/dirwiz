@@ -38,23 +38,23 @@ struct HardlinkFinderTests {
 
     // MARK: - Tests
 
-    @Test("HardlinkGroup wastedSpace calculation")
-    func wastedSpaceCalculation() {
+    @Test("HardlinkGroup extraLinkBytes calculation")
+    func extraLinkBytesCalculation() {
         let group = HardlinkGroup(inode: 42, device: 1, fileSize: 1000, paths: ["/a", "/b", "/c"])
         // 3 links, 1 "extra" = 2 * fileSize
-        #expect(group.wastedSpace == 2000)
+        #expect(group.extraLinkBytes == 2000)
     }
 
     @Test("HardlinkGroup with single path has zero wasted space")
     func singlePathZeroWastedSpace() {
         let group = HardlinkGroup(inode: 1, device: 1, fileSize: 500, paths: ["/only"])
-        #expect(group.wastedSpace == 0)
+        #expect(group.extraLinkBytes == 0)
     }
 
     @Test("HardlinkGroup two paths")
     func twoPathsWastedSpace() {
         let group = HardlinkGroup(inode: 7, device: 2, fileSize: 4096, paths: ["/a", "/b"])
-        #expect(group.wastedSpace == 4096)
+        #expect(group.extraLinkBytes == 4096)
     }
 
     @Test("findHardlinks detects groups with shared inodes")
@@ -79,7 +79,7 @@ struct HardlinkFinderTests {
         let group = try #require(groups.first)
         #expect(group.paths.count == 3, "Expected 3 paths sharing the same inode")
         #expect(group.fileSize == 1024, "Expected fileSize == 1024 bytes")
-        #expect(group.wastedSpace == 2048, "Expected wastedSpace == 2 * 1024")
+        #expect(group.extraLinkBytes == 2048, "Expected extraLinkBytes == 2 * 1024")
     }
 
     @Test("findHardlinks returns empty for tree with no hardlinks")
@@ -111,7 +111,7 @@ struct HardlinkFinderTests {
         #expect(groups.isEmpty)
     }
 
-    @Test("findHardlinks results are sorted by wastedSpace descending")
+    @Test("findHardlinks results are sorted by extraLinkBytes descending")
     func findHardlinksSortedByWastedSpace() async throws {
         // Create two sets of hardlinks: a large file with 2 links and a small file with 3 links.
         let tempDir = FileManager.default.temporaryDirectory
@@ -119,13 +119,13 @@ struct HardlinkFinderTests {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        // Large file: 8192 bytes, 2 hardlinks -> wastedSpace = 8192.
+        // Large file: 8192 bytes, 2 hardlinks -> extraLinkBytes = 8192.
         let large = tempDir.appendingPathComponent("large.bin")
         try Data(repeating: 0xFF, count: 8192).write(to: large)
         let largeLink = tempDir.appendingPathComponent("large_link.bin")
         try FileManager.default.linkItem(at: large, to: largeLink)
 
-        // Small file: 64 bytes, 3 hardlinks -> wastedSpace = 128.
+        // Small file: 64 bytes, 3 hardlinks -> extraLinkBytes = 128.
         let small = tempDir.appendingPathComponent("small.bin")
         try Data(repeating: 0x11, count: 64).write(to: small)
         let smallLink1 = tempDir.appendingPathComponent("small_link1.bin")
@@ -144,10 +144,10 @@ struct HardlinkFinderTests {
         #expect(groups.count == 2)
         if groups.count == 2 {
             // First group should have the largest wasted space.
-            #expect(groups[0].wastedSpace >= groups[1].wastedSpace,
-                    "Groups should be sorted descending by wastedSpace")
-            #expect(groups[0].wastedSpace == 8192, "Large file should be first (8192 wasted)")
-            #expect(groups[1].wastedSpace == 128, "Small file should be second (128 wasted)")
+            #expect(groups[0].extraLinkBytes >= groups[1].extraLinkBytes,
+                    "Groups should be sorted descending by extraLinkBytes")
+            #expect(groups[0].extraLinkBytes == 8192, "Large file should be first (8192 wasted)")
+            #expect(groups[1].extraLinkBytes == 128, "Small file should be second (128 wasted)")
         }
     }
 

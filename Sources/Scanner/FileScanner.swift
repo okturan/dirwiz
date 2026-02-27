@@ -55,6 +55,7 @@ private final class VisitedDirectories: Sendable {
 public final class FileScanner: @unchecked Sendable {
 
     private let cancelState = Mutex(false)
+    private let scanQueue = Mutex<OperationQueue?>(nil)
     let filesystem: FilesystemProvider
 
     public init(filesystem: FilesystemProvider = RealFilesystemProvider()) {
@@ -62,8 +63,10 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Cancel an in-progress scan. Safe to call from any thread.
+    /// Immediately drops queued-but-not-started operations.
     public func cancel() {
         cancelState.withLock { $0 = true }
+        scanQueue.withLock { $0?.cancelAllOperations() }
     }
 
     private var isCancelled: Bool {
@@ -161,6 +164,8 @@ public final class FileScanner: @unchecked Sendable {
         // Reduce concurrency for network/rotational media to avoid seek thrashing.
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = isNetworkFS ? 4 : 32
+        scanQueue.withLock { $0 = queue }
+        defer { scanQueue.withLock { $0 = nil } }
         queue.qualityOfService = .userInitiated
 
         // Throttle progress updates
@@ -178,10 +183,10 @@ public final class FileScanner: @unchecked Sendable {
             if shouldUpdate {
                 let elapsed = now - startTime
                 progress.updateCurrentPath(currentDir)
-                DispatchQueue.main.async {
+                Task { await MainActor.run {
                     progress.elapsedTime = elapsed
                     progress.publishCounters()
-                }
+                } }
             }
         }
 
@@ -219,10 +224,7 @@ public final class FileScanner: @unchecked Sendable {
             }
         }
 
-        // Cancel any remaining queued operations
-        if isCancelled {
-            queue.cancelAllOperations()
-        }
+        // queue is cleaned up via defer above
 
         // Propagate sizes bottom-up in a single O(n) pass.
         // During scanning, each node stores only its own direct size (files) or bundle size.

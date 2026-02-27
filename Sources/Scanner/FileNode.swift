@@ -1,6 +1,11 @@
 import Foundation
 import Synchronization
 
+private enum FileNodeFlags {
+    static let isDirectory: UInt8 = 1
+    static let isBundle: UInt8 = 2
+}
+
 /// Compact flat-array tree node for filesystem representation.
 /// Uses index-based parent/child references to avoid ARC overhead on millions of nodes.
 /// ~48 bytes per node. 1M files ≈ 48 MB.
@@ -19,17 +24,17 @@ public struct FileNode: Sendable {
     public static let invalid: UInt32 = UInt32.max
 
     public var isDirectory: Bool {
-        get { flags & 1 != 0 }
+        get { flags & FileNodeFlags.isDirectory != 0 }
         set {
-            if newValue { flags |= 1 } else { flags &= ~1 }
+            if newValue { flags |= FileNodeFlags.isDirectory } else { flags &= ~FileNodeFlags.isDirectory }
         }
     }
 
     // Bit 1: node is a bundle (.app, .framework, etc.) and treated as an opaque leaf.
     public var isBundle: Bool {
-        get { flags & 2 != 0 }
+        get { flags & FileNodeFlags.isBundle != 0 }
         set {
-            if newValue { flags |= 2 } else { flags &= ~2 }
+            if newValue { flags |= FileNodeFlags.isBundle } else { flags &= ~FileNodeFlags.isBundle }
         }
     }
 

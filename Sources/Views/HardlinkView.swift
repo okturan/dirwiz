@@ -49,7 +49,7 @@ public struct HardlinkView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                Text(SizeFormatter.shared.format(totalWastedSpace))
+                Text(SizeFormatter.shared.format(totalExtraLinkBytes))
                     .font(.system(.callout, design: .monospaced))
                     .foregroundStyle(.blue)
             }
@@ -114,8 +114,8 @@ public struct HardlinkView: View {
 
     // MARK: - Computed
 
-    private var totalWastedSpace: UInt64 {
-        appState.hardlinkGroups.reduce(0) { $0 + $1.wastedSpace }
+    private var totalExtraLinkBytes: UInt64 {
+        appState.hardlinkGroups.reduce(0) { $0 + $1.extraLinkBytes }
     }
 
     // MARK: - Actions
@@ -172,7 +172,7 @@ private struct HardlinkGroupRow: View {
                     Text(SizeFormatter.shared.format(group.fileSize) + " each")
                         .font(.system(size: 11, design: .monospaced))
 
-                    Text("Extra links: " + SizeFormatter.shared.format(group.wastedSpace))
+                    Text("Shared data size: " + SizeFormatter.shared.format(group.extraLinkBytes))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.blue)
                 }

@@ -10,10 +10,10 @@ public struct HardlinkGroup: Identifiable, Sendable {
     public let fileSize: UInt64
     public let paths: [String]
 
-    /// Disk space that would be recovered if all but one hardlink were removed.
-    /// Note: removing a hardlink only unlinks a directory entry — the data is freed
-    /// only when the last link is removed.
-    public var wastedSpace: UInt64 {
+    /// Sum of logical sizes of extra directory entries (paths.count - 1 links beyond the first).
+    /// This is NOT reclaimed disk space: hardlinks share blocks, so removing extra links does
+    /// not free on-disk data until the last link is removed.
+    public var extraLinkBytes: UInt64 {
         fileSize * UInt64(max(0, paths.count - 1))
     }
 
@@ -43,7 +43,7 @@ public struct HardlinkFinder {
     /// Find all hardlink groups in the given FileTree.
     ///
     /// - Parameter tree: The scanned file tree to inspect.
-    /// - Returns: Array of HardlinkGroup sorted by wastedSpace descending,
+    /// - Returns: Array of HardlinkGroup sorted by extraLinkBytes descending,
     ///            containing only groups with 2 or more paths.
     public func findHardlinks(in tree: FileTree) async -> [HardlinkGroup] {
         // Take a snapshot so we can walk all nodes lock-free.
@@ -70,14 +70,16 @@ public struct HardlinkFinder {
             let ino: UInt64
         }
 
-        // We'll collect: devino -> [(nodeIndex, fileSize)]
-        var groups: [DevIno: [(index: UInt32, fileSize: UInt64)]] = [:]
+        // We'll collect: devino -> [(path, fileSize)]
+        var groups: [DevIno: [(path: String, fileSize: UInt64)]] = [:]
         groups.reserveCapacity(fileIndices.count / 4)
 
         // Process in batches via TaskGroup to get parallelism on lstat calls,
         // which are cheap but benefit from concurrency on large trees.
         let batchSize = 512
-        typealias BatchResult = [(DevIno, UInt32, UInt64)] // (key, nodeIndex, fileSize)
+        // Include the path string so the final grouping pass can reuse it without
+        // calling pathFromSnapshot a second time.
+        typealias BatchResult = [(DevIno, UInt32, UInt64, String)] // (key, nodeIndex, fileSize, path)
 
         let batchResults: [BatchResult] = await withTaskGroup(
             of: BatchResult.self,
@@ -107,7 +109,9 @@ public struct HardlinkFinder {
                         guard st.st_nlink > 1 else { continue }
                         let key = DevIno(dev: st.st_dev, ino: st.st_ino)
                         let fileSize = UInt64(bitPattern: Int64(st.st_size))
-                        results.append((key, nodeIndex, fileSize))
+                        // Store the path alongside the other fields so the final pass
+                        // can reuse it instead of calling pathFromSnapshot again.
+                        results.append((key, nodeIndex, fileSize, path))
                     }
                     return results
                 }
@@ -120,10 +124,10 @@ public struct HardlinkFinder {
             return all
         }
 
-        // Merge batch results into groups dict.
+        // Merge batch results into groups dict, using the stored path from each result.
         for batch in batchResults {
-            for (key, nodeIndex, fileSize) in batch {
-                groups[key, default: []].append((index: nodeIndex, fileSize: fileSize))
+            for (key, _, fileSize, path) in batch {
+                groups[key, default: []].append((path: path, fileSize: fileSize))
             }
         }
 
@@ -131,14 +135,8 @@ public struct HardlinkFinder {
         var results: [HardlinkGroup] = []
         for (key, members) in groups {
             guard members.count >= 2 else { continue }
-            let paths = members.map { member in
-                FileTree.pathFromSnapshot(
-                    at: member.index,
-                    nodes: nodes,
-                    stringPool: stringPool,
-                    rootPath: rootPath
-                )
-            }.sorted()
+            // Reuse the paths already computed during the lstat batch pass.
+            let paths = members.map(\.path).sorted()
             let fileSize = members.first?.fileSize ?? 0
             let hardlinkGroup = HardlinkGroup(
                 inode: key.ino,
@@ -149,8 +147,8 @@ public struct HardlinkFinder {
             results.append(hardlinkGroup)
         }
 
-        // Sort by wasted space descending (most impactful first).
-        results.sort { $0.wastedSpace > $1.wastedSpace }
+        // Sort by extra link bytes descending (most impactful first).
+        results.sort { $0.extraLinkBytes > $1.extraLinkBytes }
         return results
     }
 }
