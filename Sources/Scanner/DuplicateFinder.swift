@@ -269,6 +269,21 @@ public final class DuplicateFinder {
         return hash
     }
 
+    /// Read exactly `count` bytes into `dst`, retrying on EINTR and short reads.
+    /// Returns true only if all `count` bytes were read; false on EOF-before-count or error.
+    private static func readExact(_ fd: Int32, _ dst: UnsafeMutableRawPointer, _ count: Int) -> Bool {
+        var ptr = dst
+        var remaining = count
+        while remaining > 0 {
+            let n = Darwin.read(fd, ptr, remaining)
+            if n == -1 && errno == EINTR { continue }
+            guard n > 0 else { return false }
+            ptr = ptr.advanced(by: n)
+            remaining -= n
+        }
+        return true
+    }
+
     /// Read first 4KB + last 4KB and compute a combined hash.
     /// For files <= 8KB, reads the entire file.
     private static func partialHash(cPath: UnsafePointer<CChar>, fileSize: UInt64, readSize: Int) -> UInt64? {
@@ -287,20 +302,17 @@ public final class DuplicateFinder {
         defer { buffer.deallocate() }
 
         if fileSize <= UInt64(readSize * 2) {
-            // Read entire small file
-            let bytesRead = read(fd, buffer, totalRead)
-            guard bytesRead == totalRead else { return nil }
+            // Read entire small file.
+            guard readExact(fd, buffer, totalRead) else { return nil }
         } else {
-            // Read first 4KB
-            let headRead = read(fd, buffer, readSize)
-            guard headRead == readSize else { return nil }
+            // Read first 4KB.
+            guard readExact(fd, buffer, readSize) else { return nil }
 
-            // Seek to last 4KB
+            // Seek to last 4KB.
             let seekPos = off_t(fileSize) - off_t(readSize)
             guard lseek(fd, seekPos, SEEK_SET) == seekPos else { return nil }
 
-            let tailRead = read(fd, buffer.advanced(by: readSize), readSize)
-            guard tailRead == readSize else { return nil }
+            guard readExact(fd, buffer.advanced(by: readSize), readSize) else { return nil }
         }
 
         let rawBuffer = UnsafeRawBufferPointer(start: buffer, count: totalRead)
@@ -337,11 +349,10 @@ public final class DuplicateFinder {
         var remaining = byteCount
         while remaining > 0 {
             let toRead = min(remaining, chunkSize)
-            let bytesRead = read(fd, buffer, toRead)
-            // Error or unexpected EOF (file truncated by another process).
-            guard bytesRead > 0 else { return nil }
-            hasher.update(UnsafeRawBufferPointer(start: buffer, count: bytesRead))
-            remaining -= bytesRead
+            // readExact retries EINTR and short reads; returns false on EOF or error.
+            guard readExact(fd, buffer, toRead) else { return nil }
+            hasher.update(UnsafeRawBufferPointer(start: buffer, count: toRead))
+            remaining -= toRead
         }
 
         return hasher.finalize()

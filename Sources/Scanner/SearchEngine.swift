@@ -49,7 +49,7 @@ public enum SearchEngine {
                                 elapsedTime: CFAbsoluteTimeGetCurrent() - start)
         }
 
-        let queryBytes = Array(query.lowercased().utf8)
+        let queryBytes = Array(query.precomposedStringWithCanonicalMapping.lowercased().utf8)
         let colorMap = filters.category != nil ? ExtensionColorMap.shared : nil
         let filterCategory = filters.category
         let scanAll = previousMatches == nil

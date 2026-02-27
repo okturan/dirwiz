@@ -91,6 +91,7 @@ public final class AppState {
     var recencyTask: Task<Void, Never>?
     var temporalDiffToken: UInt64 = 0
     var temporalDiffTask: Task<Void, Never>?
+    @ObservationIgnored var snapshotBuildTask: Task<Void, Never>?
 
     public init() {}
 
@@ -123,6 +124,8 @@ public final class AppState {
         temporalDiffTask?.cancel()
         temporalDiffTask = nil
         temporalDiffToken &+= 1
+        snapshotBuildTask?.cancel()
+        snapshotBuildTask = nil
         scanStartTime = 0
         scanDuration = 0
         // Create a fresh ScanProgress so old scanner finalizations write to the

@@ -9,9 +9,14 @@ public struct TemporalDiffService {
 
     /// Build a snapshot from the current file tree (directories only).
     public static func buildSnapshot(tree: FileTree) async -> TemporalSnapshot {
-        await Task.detached(priority: .utility) {
+        let inner = Task.detached(priority: .utility) {
             buildSnapshotSync(tree: tree)
-        }.value
+        }
+        return await withTaskCancellationHandler {
+            await inner.value
+        } onCancel: {
+            inner.cancel()
+        }
     }
 
     private static func buildSnapshotSync(tree: FileTree) -> TemporalSnapshot {
@@ -52,9 +57,14 @@ public struct TemporalDiffService {
         currentTree: FileTree,
         snapshot: TemporalSnapshot
     ) async -> TemporalDiffResult {
-        await Task.detached(priority: .utility) {
+        let inner = Task.detached(priority: .utility) {
             computeDiffSync(currentTree: currentTree, snapshot: snapshot)
-        }.value
+        }
+        return await withTaskCancellationHandler {
+            await inner.value
+        } onCancel: {
+            inner.cancel()
+        }
     }
 
     private static func computeDiffSync(

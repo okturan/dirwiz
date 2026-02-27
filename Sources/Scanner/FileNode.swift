@@ -297,13 +297,11 @@ public final class FileTree: @unchecked Sendable {
             n.nameOffset = UInt32(stringPool.count)
             n.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
             stringPool.append(contentsOf: utf8)
-            // Build the search-index entry. On case-insensitive volumes, use Unicode-aware
-            // lowercasing so that Ü→ü, É→é, etc. are searchable. On case-sensitive volumes,
-            // store the original name to avoid merging directories that differ only in case.
+            // Build the search-index entry: NFC-normalize then lowercase so that
+            // composed "Café" and decomposed "Cafe\u{301}" both index identically,
+            // and uppercase names are found by lowercase queries on any volume.
             let lcOffset = UInt32(lowercaseNamePool.count)
-            // Always lowercase: search is always case-insensitive from the user's
-            // perspective, regardless of whether the volume is case-sensitive.
-            let lcUTF8 = Array(name.lowercased().utf8)
+            let lcUTF8 = Array(name.precomposedStringWithCanonicalMapping.lowercased().utf8)
             lowercaseNamePool.append(contentsOf: lcUTF8)
             lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
             nodes.append(n)
@@ -334,7 +332,7 @@ public final class FileTree: @unchecked Sendable {
                 node.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
                 stringPool.append(contentsOf: utf8)
                 let lcOffset = UInt32(lowercaseNamePool.count)
-                let lcUTF8 = Array(childName.lowercased().utf8)
+                let lcUTF8 = Array(childName.precomposedStringWithCanonicalMapping.lowercased().utf8)
                 lowercaseNamePool.append(contentsOf: lcUTF8)
                 lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
                 nodes.append(node)

@@ -18,9 +18,14 @@ public struct RecencyQueryService {
     /// (same length as `tree.nodesSnapshot()`). Safe to call from any async context.
     /// Checks `Task.isCancelled` at key points to bail early on superseded scans.
     public func queryRecency(tree: FileTree) async -> [Float] {
-        await Task.detached(priority: .utility) {
+        let inner = Task.detached(priority: .utility) {
             Self.runFullQuery(tree: tree)
-        }.value
+        }
+        return await withTaskCancellationHandler {
+            await inner.value
+        } onCancel: {
+            inner.cancel()
+        }
     }
 
     // MARK: - Private

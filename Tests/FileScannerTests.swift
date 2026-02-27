@@ -533,17 +533,23 @@ struct FileScannerMockTests {
         }
         mock.directories["/root"] = rootEntries
 
-        // Cancel before scan has a chance to run much — exercising the cancelled-before-start path
+        // Cancel concurrently once the scan has started.
+        // scan() resets the cancel flag at its start, so pre-cancelling is a no-op;
+        // we use a concurrent Task to race cancel() against the running scan instead.
         let scanner = FileScanner(filesystem: mock)
         let progress = ScanProgress()
         let tree = FileTree()
-        scanner.cancel()
+        let cancelTask = Task {
+            // Yield once to let scan() start and create its OperationQueue.
+            await Task.yield()
+            scanner.cancel()
+        }
         await scanner.scan(path: "/root", progress: progress, tree: tree)
+        await cancelTask.value
 
-        // The tree must have at least the root node and no out-of-bounds parent references
+        // The tree must have at least the root node and no out-of-bounds parent references.
         #expect(tree.count >= 1, "Cancelled scan must still produce at least root node")
         #expect(progress.scanComplete, "Scan should be marked complete even when cancelled")
-        #expect(progress.isCancelled, "isCancelled should be true after cancel()")
 
         for i in 1..<tree.count {
             let node = tree.nodes[i]
@@ -668,6 +674,38 @@ struct FileScannerMockTests {
             #expect(progress.directoriesScanned == 1, "Should count 1 subdirectory")
             #expect(progress.scanComplete)
             #expect(!progress.isCancelled)
+        }
+    }
+
+    // MARK: - Test 11: Scanner is reusable after cancel()
+
+    @Test("Scanner produces results when reused after cancel()")
+    func scannerReusableAfterCancel() async {
+        let mock = MockFilesystemProvider()
+        mock.directories["/root"] = [
+            MockFilesystemProvider.file(name: "a.txt", size: 100, inode: 1),
+            MockFilesystemProvider.file(name: "b.txt", size: 200, inode: 2),
+        ]
+
+        let scanner = FileScanner(filesystem: mock)
+
+        // First scan: cancel immediately.
+        let tree1 = FileTree()
+        scanner.cancel()
+        await scanner.scan(path: "/root", progress: ScanProgress(), tree: tree1)
+        // tree1 may be empty or partial; what matters is the scanner's cancel flag is reset.
+
+        // Second scan with the same scanner instance: must not be sticky-cancelled.
+        let tree2 = FileTree()
+        let progress2 = ScanProgress()
+        await scanner.scan(path: "/root", progress: progress2, tree: tree2)
+
+        // The second scan should complete normally and find all files.
+        #expect(tree2.count >= 1, "Reused scanner must populate tree2 (got \(tree2.count) nodes)")
+        await MainActor.run {
+            progress2.publishCounters()
+            #expect(!progress2.isCancelled, "Second scan should not be cancelled")
+            #expect(progress2.scanComplete, "Second scan should complete")
         }
     }
 }

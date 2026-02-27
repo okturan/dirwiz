@@ -41,7 +41,7 @@ extension AppState {
         guard !temporalDiff.isSnapshotBuilding, let tree = fileTree else { return }
         temporalDiff.isSnapshotBuilding = true
         let token = scanToken
-        Task.detached(priority: .utility) {
+        snapshotBuildTask = Task {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
             let saveError: String? = {
                 do {

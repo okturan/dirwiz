@@ -373,4 +373,31 @@ struct SearchEngineTests {
         let result3 = search(tree: tree, query: "notes")
         #expect(result3.totalMatches == 2)
     }
+
+    @Test("Composed and decomposed Unicode filenames are found by either query form")
+    func unicodeNFCNormalization() {
+        // "Café" decomposed: "Cafe" + combining acute (U+0301) — NFD form.
+        // "Café" composed: single precomposed character (U+00E9) — NFC form.
+        let nfd = "Cafe\u{301}.txt"        // é as combining sequence
+        let nfc = "Caf\u{E9}.txt"          // é as single code point
+
+        let tree = makeTree(files: [
+            (name: nfd, size: 100, isDir: false),  // stored as NFD
+        ])
+
+        // Composed query should find the decomposed filename.
+        let result1 = search(tree: tree, query: "café")
+        #expect(result1.totalMatches == 1, "Composed query 'café' must find NFD filename")
+
+        // Decomposed query should also find it.
+        let result2 = search(tree: tree, query: "cafe\u{301}")
+        #expect(result2.totalMatches == 1, "Decomposed query must also find NFD filename")
+
+        // Sanity: NFC form indexed directly should also work.
+        let tree2 = makeTree(files: [
+            (name: nfc, size: 100, isDir: false),  // stored as NFC
+        ])
+        let result3 = search(tree: tree2, query: "café")
+        #expect(result3.totalMatches == 1, "Composed query must find NFC filename")
+    }
 }

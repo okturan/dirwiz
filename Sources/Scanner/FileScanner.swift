@@ -80,6 +80,9 @@ public final class FileScanner: @unchecked Sendable {
     /// this method if you want live updates.
     /// Pass the returned FileTree to the UI immediately; it's populated in-place during scan.
     public func scan(path: String, progress: ScanProgress, tree: FileTree) async {
+        // Reset cancellation so a scanner instance can be reused after cancel().
+        cancelState.withLock { $0 = false }
+
         // Estimate total items using inode counts (blocking I/O, done off main thread).
         var estimatedItems = 0
         if let sf = filesystem.volumeStats(forPath: path) {
