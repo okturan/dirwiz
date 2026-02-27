@@ -202,8 +202,10 @@ public final class FileScanner: @unchecked Sendable {
         func enqueueDirectory(dirPath: String, parentIndex: UInt32) {
             guard !self.isCancelled else { return }
             group.enter()
-            queue.addOperation {
-                defer { group.leave() }
+            // Use completionBlock (not closure defer) so DispatchGroup bookkeeping
+            // stays balanced even if OperationQueue cancels this operation before
+            // execution starts.
+            let op = BlockOperation {
                 guard !self.isCancelled else { return }
                 self.scanDirectory(
                     dirPath: dirPath,
@@ -215,6 +217,8 @@ public final class FileScanner: @unchecked Sendable {
                     maybeUpdateProgress: maybeUpdateProgress
                 )
             }
+            op.completionBlock = { group.leave() }
+            queue.addOperation(op)
         }
 
         enqueueDirectory(dirPath: path, parentIndex: 0)
