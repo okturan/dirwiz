@@ -132,8 +132,8 @@ struct FileScannerTests {
         let tree = FileTree()
         await scanner.scan(path: "/nonexistent_path_12345", progress: progress, tree: tree)
 
-        // Should still have the root node at minimum.
-        #expect(tree.count >= 1, "Should have at least a root node")
+        // Non-existent path produces exactly the root node.
+        #expect(tree.count == 1, "Should have exactly the root node")
         #expect(progress.scanComplete, "Scan should complete even for invalid paths")
     }
 }
@@ -729,5 +729,54 @@ struct FileScannerMockTests {
         // Must not trap with Fatal error: Not enough bits to represent the passed value.
         await scanner.scan(path: "/root", progress: ScanProgress(), tree: tree)
         #expect(tree.count >= 1)
+    }
+
+    @Test("subdirectory scan suppresses volume-wide progress estimate")
+    func subdirectoryScanSuppressesVolumeEstimate() async {
+        let mock = MockFilesystemProvider()
+        mock.directories["/root"] = [
+            MockFilesystemProvider.file(name: "a.txt", size: 100, inode: 1),
+        ]
+        mock.mockVolumeStats = StatfsResult(
+            totalFiles: 10_000,
+            freeFiles: 8_000,
+            filesystemType: "apfs",
+            mountPoint: "/"
+        )
+
+        let progress = ScanProgress()
+        let scanner = FileScanner(filesystem: mock)
+        let tree = FileTree()
+        await scanner.scan(path: "/root", progress: progress, tree: tree)
+
+        await MainActor.run {
+            #expect(progress.estimatedTotalItems == 0,
+                "Subdirectory scans should not publish a misleading whole-volume estimate")
+        }
+    }
+
+    @Test("mount-root scan keeps volume-wide progress estimate")
+    func mountRootScanKeepsVolumeEstimate() async {
+        let mock = MockFilesystemProvider()
+        mock.directories["/"] = [
+            MockFilesystemProvider.file(name: "a.txt", size: 100, inode: 1),
+        ]
+        mock.inodeMap["/"] = (device: 1, inode: 1)
+        mock.mockVolumeStats = StatfsResult(
+            totalFiles: 10_000,
+            freeFiles: 8_000,
+            filesystemType: "apfs",
+            mountPoint: "/"
+        )
+
+        let progress = ScanProgress()
+        let scanner = FileScanner(filesystem: mock)
+        let tree = FileTree()
+        await scanner.scan(path: "/", progress: progress, tree: tree)
+
+        await MainActor.run {
+            #expect(progress.estimatedTotalItems == 4_000,
+                "Root scans should include the Data volume inode estimate as well")
+        }
     }
 }

@@ -151,6 +151,39 @@ struct HardlinkFinderTests {
         }
     }
 
+    @MainActor
+    @Test("findHardlinks reports determinate progress")
+    func findHardlinksReportsProgress() async throws {
+        let (rootPath, cleanup) = try createHardlinkTree()
+        defer { cleanup() }
+
+        let tree = FileTree()
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        await scanner.scan(path: rootPath, progress: progress, tree: tree)
+
+        // Derive expected file count from the tree rather than hardcoding.
+        let expectedFileCount = (0..<tree.count).filter { !tree.nodes[$0].isDirectory }.count
+
+        var updates: [(processed: Int, total: Int)] = []
+        let finder = HardlinkFinder()
+        _ = await finder.findHardlinks(in: tree) { processed, total in
+            updates.append((processed, total))
+        }
+
+        let first = try #require(updates.first)
+        let last = try #require(updates.last)
+        #expect(first.processed == 0)
+        #expect(first.total == expectedFileCount)
+        #expect(last.processed == expectedFileCount)
+        #expect(last.total == expectedFileCount)
+        #expect(updates.allSatisfy { $0.total == expectedFileCount })
+
+        for index in 1..<updates.count {
+            #expect(updates[index].processed >= updates[index - 1].processed)
+        }
+    }
+
     @Test("HardlinkGroup has unique id per instance")
     func hardlinkGroupUniqueIds() {
         let g1 = HardlinkGroup(inode: 1, device: 1, fileSize: 100, paths: ["/a", "/b"])

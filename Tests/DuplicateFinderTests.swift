@@ -212,14 +212,24 @@ struct DuplicateFinderTests {
 
         var callbackFired = false
         var lastTotal = 0
-        let groups = await localFinder.findDuplicates(in: tree) { processed, total in
+        var sawGroupingPhase = false
+        var sawHashingPhase = false
+        var sawHashingPhaseStart = false
+        let groups = await localFinder.findDuplicates(in: tree) { update in
             callbackFired = true
-            lastTotal = total
-            _ = processed // avoid unused warning
+            lastTotal = update.total
+            if update.phase == .groupingBySize { sawGroupingPhase = true }
+            if update.phase == .partialHashing || update.phase == .fullHashing { sawHashingPhase = true }
+            if (update.phase == .partialHashing || update.phase == .fullHashing) && update.processed == 0 {
+                sawHashingPhaseStart = true
+            }
         }
 
         #expect(callbackFired, "Progress callback should have been called")
         #expect(lastTotal > 0, "Total candidates should be reported")
+        #expect(sawGroupingPhase, "Grouping phase should be reported before hashing starts")
+        #expect(sawHashingPhase, "A hashing phase should be reported for duplicate candidates")
+        #expect(sawHashingPhaseStart, "Hashing should emit an initial 0/N update before work completes")
         #expect(!groups.isEmpty, "Should have found duplicates")
     }
 
@@ -243,5 +253,104 @@ struct DuplicateFinderTests {
         #expect(groups[0].wastedSpace > groups[1].wastedSpace,
             "Largest wasted space should come first")
         #expect(groups[0].fileSize == UInt64(large.count))
+    }
+
+    // MARK: - Zero-byte exclusion
+
+    @Test("Zero-byte files are excluded from duplicate groups")
+    func zeroBytesExcluded() async throws {
+        let (url, cleanup) = try createTempFiles([
+            "empty1.txt": Data(),
+            "empty2.txt": Data(),
+            "empty3.txt": Data(),
+        ])
+        defer { cleanup() }
+
+        let tree = await scanDirectory(url.path)
+        let groups = await finder.findDuplicates(in: tree)
+        #expect(groups.isEmpty, "Zero-byte files should not form duplicate groups")
+    }
+
+    // MARK: - Cancellation
+
+    @Test("Pre-cancelled task returns empty results")
+    func preCancelledDuplicateScan() async throws {
+        let content = Data(repeating: 0x42, count: 4096)
+        let (url, cleanup) = try createTempFiles([
+            "a.bin": content,
+            "b.bin": content,
+            "c.bin": content,
+        ])
+        defer { cleanup() }
+
+        let tree = await scanDirectory(url.path)
+
+        // cancelAll() before addTask ensures the child task starts pre-cancelled,
+        // so Task.isCancelled is true from the first iteration of pass 1.
+        let groups = await withTaskGroup(of: [DuplicateGroup].self) { group in
+            group.cancelAll()
+            group.addTask {
+                await DuplicateFinder().findDuplicates(in: tree)
+            }
+            return await group.reduce(into: [DuplicateGroup]()) { $0 = $1 }
+        }
+
+        #expect(groups.isEmpty, "Scan in a cancelled task should return empty results")
+    }
+
+    // MARK: - Hardlink exclusion
+
+    @Test("Hardlinked files sharing an inode are excluded from duplicate groups")
+    func hardlinksExcluded() async throws {
+        // Create two files with identical content, then hardlink one to a third path.
+        // The hardlink (same inode as original) should be collapsed, leaving only
+        // the two distinct-inode files as a valid duplicate pair.
+        let content = Data(repeating: 0xDE, count: 8192)
+        let (url, cleanup) = try createTempFiles([
+            "original.bin": content,
+            "copy.bin": content,
+        ])
+        defer { cleanup() }
+
+        // Create a hardlink to original.bin
+        let originalPath = url.appendingPathComponent("original.bin").path
+        let linkPath = url.appendingPathComponent("link_to_original.bin").path
+        let rc = Darwin.link(originalPath, linkPath)
+        #expect(rc == 0, "link() should succeed, got errno \(errno)")
+
+        let tree = await scanDirectory(url.path)
+        let groups = await finder.findDuplicates(in: tree)
+
+        // There should still be one group (original + copy), but the hardlink
+        // should be collapsed with original, so exactly 2 paths, not 3.
+        #expect(groups.count == 1, "Should have one duplicate group")
+        #expect(groups[0].paths.count == 2,
+            "Hardlink should be collapsed: 2 unique inodes, not 3 paths")
+        #expect(groups[0].wastedSpace == UInt64(content.count),
+            "Wasted space should reflect 1 extra copy, not 2")
+    }
+
+    @Test("All-hardlink group is removed entirely")
+    func allHardlinksNoGroup() async throws {
+        // Two files that are hardlinks of each other — same inode, so no real duplication.
+        let content = Data(repeating: 0xAF, count: 4096)
+        let (url, cleanup) = try createTempFiles([
+            "file.bin": content,
+        ])
+        defer { cleanup() }
+
+        // Hardlink file.bin to another name — both point to the same inode.
+        let filePath = url.appendingPathComponent("file.bin").path
+        let linkPath = url.appendingPathComponent("hardlink.bin").path
+        let rc = Darwin.link(filePath, linkPath)
+        #expect(rc == 0, "link() should succeed")
+
+        let tree = await scanDirectory(url.path)
+        let groups = await finder.findDuplicates(in: tree)
+
+        // Both paths share the same inode, so after dedup the group has only 1 unique
+        // inode and should be dropped entirely.
+        #expect(groups.isEmpty,
+            "Hardlinks to the same inode should not form a duplicate group")
     }
 }
