@@ -187,9 +187,13 @@ public struct DuplicateFilesView: View {
         appState.duplicate.duplicateExpandedGroups.removeAll()
         appState.duplicate.duplicateProgress = (0, 0)
 
-        appState.duplicateTask = Task {
+        // Task.detached so findDuplicates runs on the cooperative pool, not the main actor.
+        // Without this, Pass 1 (building the size-group dictionary over 1M+ nodes) runs on
+        // the main thread and freezes the UI until it completes.
+        appState.duplicateTask = Task.detached(priority: .userInitiated) {
             let finder = DuplicateFinder()
             let groups = await finder.findDuplicates(in: tree) { [token] processed, total in
+                // Progress callback is @MainActor — hops to main thread automatically.
                 guard appState.duplicateToken == token else { return }
                 // Ensure progress only goes up (tasks complete out of order).
                 let clamped = max(appState.duplicate.duplicateProgress.processed, processed)
