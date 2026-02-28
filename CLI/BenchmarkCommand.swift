@@ -7,6 +7,7 @@ private struct BenchmarkIterationReport {
     let scanEstimate: ScanEstimateAccuracyReport
     let duplicateSeconds: Double
     let duplicateGroups: Int
+    let duplicateStats: DuplicateScanStats
     let duplicateProgress: DuplicateProgressReliabilityReport
     let hardlinkSeconds: Double
     let hardlinkGroups: Int
@@ -100,7 +101,7 @@ extension DirWizCLI {
         let duplicateRecorder = await MainActor.run { DuplicateProgressRecorder() }
         let duplicateFinder = DuplicateFinder()
         let duplicateStart = CFAbsoluteTimeGetCurrent()
-        let duplicateGroups = await duplicateFinder.findDuplicates(in: tree) { update in
+        let duplicateReport = await duplicateFinder.findDuplicatesWithStats(in: tree) { update in
             duplicateRecorder.record(update, startTime: duplicateStart)
         }
         let duplicateSeconds = CFAbsoluteTimeGetCurrent() - duplicateStart
@@ -131,7 +132,8 @@ extension DirWizCLI {
             scanSeconds: scanSeconds,
             scanEstimate: scanEstimate,
             duplicateSeconds: duplicateSeconds,
-            duplicateGroups: duplicateGroups.count,
+            duplicateGroups: duplicateReport.groups.count,
+            duplicateStats: duplicateReport.stats,
             duplicateProgress: duplicateProgress,
             hardlinkSeconds: hardlinkSeconds,
             hardlinkGroups: hardlinkGroups.count,
@@ -150,7 +152,6 @@ extension DirWizCLI {
             let p = phase.progress
             let firstNZ = p.firstNonZeroProcessedItems.map { "\($0)/\(p.total)" } ?? "n/a"
             let phaseStart = p.firstSampleSeconds.map { String(format: "%.3fs", $0) } ?? "n/a"
-            let firstNZTime = p.firstNonZeroSeconds.map { String(format: "%.3fs", $0) } ?? "n/a"
             let stuckDuration: String
             if let start = p.firstSampleSeconds, let nonZero = p.firstNonZeroSeconds {
                 stuckDuration = String(format: "%.3fs", nonZero - start)
@@ -159,7 +160,26 @@ extension DirWizCLI {
             }
             return "    \(phase.phase): first-nonzero \(firstNZ)  stuck-at-0 \(stuckDuration)  phase-start \(phaseStart)  samples \(p.sampleCount)"
         }.joined(separator: "\n")
-        print("  duplicates: \(formatSeconds(report.duplicateSeconds))  groups \(report.duplicateGroups)  monotonic \(yesNo(report.duplicateProgress.allPhasesMonotonic))  hashing-starts-zero \(yesNo(report.duplicateProgress.hashingPhasesStartedAtZero))")
+        print(
+            "  duplicates: \(formatSeconds(report.duplicateSeconds))" +
+            "  groups \(report.duplicateGroups)" +
+            "  size-qualified \(SizeFormatter.shared.formatCount(report.duplicateStats.sizeQualifiedFiles))" +
+            "  candidates \(SizeFormatter.shared.formatCount(report.duplicateStats.totalCandidates))" +
+            "  partial \(formatSeconds(report.duplicateStats.partialHashingSeconds))/" +
+            "\(SizeFormatter.shared.formatCount(report.duplicateStats.partialHashedFiles)) files/" +
+            "\(SizeFormatter.shared.format(report.duplicateStats.partialBytesRequested))" +
+            "  inline \(SizeFormatter.shared.formatCount(report.duplicateStats.partialInlineConfirmedFiles))/" +
+            "\(SizeFormatter.shared.format(report.duplicateStats.partialInlineConfirmedBytesRequested))" +
+            "  sampled \(SizeFormatter.shared.formatCount(report.duplicateStats.partialDefaultSampledFiles))/" +
+            "\(SizeFormatter.shared.format(report.duplicateStats.partialDefaultSampledBytesRequested))" +
+            "  lg-sampled \(SizeFormatter.shared.formatCount(report.duplicateStats.partialLargeGroupSampledFiles))/" +
+            "\(SizeFormatter.shared.format(report.duplicateStats.partialLargeGroupSampledBytesRequested))" +
+            "  full \(formatSeconds(report.duplicateStats.fullHashingSeconds))/" +
+            "\(SizeFormatter.shared.formatCount(report.duplicateStats.fullHashedFiles)) files/" +
+            "\(SizeFormatter.shared.format(report.duplicateStats.fullBytesRequested))" +
+            "  monotonic \(yesNo(report.duplicateProgress.allPhasesMonotonic))" +
+            "  hashing-starts-zero \(yesNo(report.duplicateProgress.hashingPhasesStartedAtZero))"
+        )
         print(dupPhaseDetails)
         print("  hardlinks:  \(formatSeconds(report.hardlinkSeconds))  groups \(report.hardlinkGroups)  monotonic \(yesNo(report.hardlinkProgress.monotonicProcessed))  completed \(yesNo(report.hardlinkProgress.completed))")
         print("  insights:   \(formatSeconds(report.analysisSeconds))  categories \(report.categoryCount)  age-buckets \(report.fileAgeBucketCount)  size-buckets \(report.sizeBucketCount)")
@@ -206,6 +226,26 @@ extension DirWizCLI {
                     "duplicates": [
                         "seconds": report.duplicateSeconds,
                         "groups": report.duplicateGroups,
+                        "groupingSeconds": report.duplicateStats.groupingSeconds,
+                        "partialHashingSeconds": report.duplicateStats.partialHashingSeconds,
+                        "fullHashingSeconds": report.duplicateStats.fullHashingSeconds,
+                        "finalizingSeconds": report.duplicateStats.finalizingSeconds,
+                        "sizeQualifiedFiles": report.duplicateStats.sizeQualifiedFiles,
+                        "sizeCollisionGroups": report.duplicateStats.sizeCollisionGroups,
+                        "totalCandidates": report.duplicateStats.totalCandidates,
+                        "partialHashedFiles": report.duplicateStats.partialHashedFiles,
+                        "partialBytesRequested": report.duplicateStats.partialBytesRequested,
+                        "partialInlineConfirmedFiles": report.duplicateStats.partialInlineConfirmedFiles,
+                        "partialInlineConfirmedBytesRequested": report.duplicateStats.partialInlineConfirmedBytesRequested,
+                        "partialDefaultSampledFiles": report.duplicateStats.partialDefaultSampledFiles,
+                        "partialDefaultSampledBytesRequested": report.duplicateStats.partialDefaultSampledBytesRequested,
+                        "partialLargeGroupSampledFiles": report.duplicateStats.partialLargeGroupSampledFiles,
+                        "partialLargeGroupSampledBytesRequested": report.duplicateStats.partialLargeGroupSampledBytesRequested,
+                        "partialMatchGroups": report.duplicateStats.partialMatchGroups,
+                        "totalFullCandidates": report.duplicateStats.totalFullCandidates,
+                        "fullHashedFiles": report.duplicateStats.fullHashedFiles,
+                        "fullBytesRequested": report.duplicateStats.fullBytesRequested,
+                        "confirmedGroups": report.duplicateStats.confirmedGroups,
                         "allPhasesMonotonic": report.duplicateProgress.allPhasesMonotonic,
                         "allPhaseTotalsStable": report.duplicateProgress.allPhaseTotalsStable,
                         "hashingPhasesStartedAtZero": report.duplicateProgress.hashingPhasesStartedAtZero,

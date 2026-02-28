@@ -103,6 +103,46 @@ struct HardlinkFinderTests {
         #expect(groups.isEmpty, "Expected no hardlink groups when no hardlinks exist")
     }
 
+    @Test("findHardlinks falls back to lstat when node identity metadata is missing")
+    func findHardlinksFallbackWithoutNodeMetadata() async throws {
+        let (rootPath, cleanup) = try createHardlinkTree()
+        defer { cleanup() }
+
+        let tree = FileTree()
+        tree.setRootPath(rootPath)
+
+        var root = FileNode()
+        root.isDirectory = true
+        _ = tree.addNode(root, name: URL(fileURLWithPath: rootPath).lastPathComponent)
+
+        var original = FileNode()
+        original.fileSize = 1024
+        var unique = FileNode()
+        unique.fileSize = 512
+        var subdir = FileNode()
+        subdir.isDirectory = true
+        _ = tree.addChildren([
+            (node: original, name: "original.txt"),
+            (node: unique, name: "unique.txt"),
+            (node: subdir, name: "sub"),
+        ], parentIndex: 0)
+
+        var link1 = FileNode()
+        link1.fileSize = 1024
+        var link2 = FileNode()
+        link2.fileSize = 1024
+        _ = tree.addChildren([
+            (node: link1, name: "hardlink.txt"),
+            (node: link2, name: "another_link.txt"),
+        ], parentIndex: 3)
+
+        let groups = await HardlinkFinder().findHardlinks(in: tree)
+
+        #expect(groups.count == 1)
+        #expect(groups.first?.paths.count == 3)
+        #expect(groups.first?.fileSize == 1024)
+    }
+
     @Test("findHardlinks on empty tree returns empty")
     func findHardlinksEmptyTree() async {
         let tree = FileTree()

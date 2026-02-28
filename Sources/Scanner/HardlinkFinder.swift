@@ -29,11 +29,11 @@ public struct HardlinkGroup: Identifiable, Sendable {
 // MARK: - HardlinkFinder
 
 /// Detects hardlinked file groups by walking all file nodes in a FileTree,
-/// reconstructing their paths, and calling lstat(2) to get (st_dev, st_ino) pairs.
+/// grouping by scan-time (device, inode) identity when available.
 ///
-/// Files sharing the same (device, inode) pair with link count ≥ 2 are grouped.
-/// This approach avoids modifying the packed FileNode struct — we do a post-scan
-/// pass using the existing path-building infrastructure.
+/// Files sharing the same (device, inode) pair are hardlinks to the same data.
+/// For scan results that don't carry identity metadata (for example, manually
+/// assembled trees in tests), the finder falls back to `lstat`.
 public struct HardlinkFinder {
     public typealias ProgressHandler = @MainActor @Sendable (_ processed: Int, _ total: Int) -> Void
 
@@ -66,24 +66,31 @@ public struct HardlinkFinder {
         guard !fileIndices.isEmpty else { return [] }
         await progress?(0, fileIndices.count)
 
-        // For each file, call lstat to get its (device, inode).
-        // Group by (dev, ino) — files sharing both fields are hardlinks to the same data.
-
         // Dictionary keyed by a hashable representation of (dev, ino).
         struct DevIno: Hashable {
             let dev: Int32
             let ino: UInt64
         }
 
-        // We'll collect: devino -> [(path, fileSize)]
-        var groups: [DevIno: [(path: String, fileSize: UInt64)]] = [:]
+        // We'll collect node indices first so we only materialize paths for real groups.
+        var groups: [DevIno: [(nodeIndex: UInt32, fileSize: UInt64)]] = [:]
         groups.reserveCapacity(fileIndices.count / 4)
 
-        // Process in batches via TaskGroup to get parallelism on lstat calls,
-        // which are cheap but benefit from concurrency on large trees.
+        func path(for nodeIndex: UInt32) -> String {
+            FileTree.pathFromSnapshot(
+                at: nodeIndex,
+                nodes: nodes,
+                stringPool: stringPool,
+                rootPath: rootPath
+            )
+        }
+
+        // Process in batches via TaskGroup. Most scanned trees already have device/inode
+        // metadata, so this becomes a pure in-memory grouping pass; the fallback path only
+        // touches the filesystem for nodes missing identity data.
         let batchSize = 512
         struct BatchResult {
-            let members: [(DevIno, UInt32, UInt64, String)] // (key, nodeIndex, fileSize, path)
+            let members: [(DevIno, UInt32, UInt64)]
         }
 
         // GCD timer for progress — immune to cooperative pool starvation.
@@ -106,27 +113,26 @@ public struct HardlinkFinder {
                     guard !Task.isCancelled else {
                         return BatchResult(members: [])
                     }
-                    var results: [(DevIno, UInt32, UInt64, String)] = []
+                    var results: [(DevIno, UInt32, UInt64)] = []
                     results.reserveCapacity(batch.count)
                     for nodeIndex in batch {
                         guard !Task.isCancelled else { break }
-                        let path = FileTree.pathFromSnapshot(
-                            at: nodeIndex,
-                            nodes: nodes,
-                            stringPool: stringPool,
-                            rootPath: rootPath
-                        )
-                        var st = Darwin.stat()
-                        guard lstat(path, &st) == 0 else {
-                            hardlinkCounter.add(1)
-                            continue
+                        let node = nodes[Int(nodeIndex)]
+                        if node.inode != 0 || node.device != 0 {
+                            let key = DevIno(dev: node.device, ino: node.inode)
+                            results.append((key, nodeIndex, node.fileSize))
+                        } else {
+                            let nodePath = path(for: nodeIndex)
+                            var st = Darwin.stat()
+                            guard lstat(nodePath, &st) == 0 else {
+                                hardlinkCounter.add(1)
+                                continue
+                            }
+                            let key = DevIno(dev: st.st_dev, ino: st.st_ino)
+                            let fileSize = UInt64(bitPattern: Int64(st.st_size))
+                            results.append((key, nodeIndex, fileSize))
                         }
                         hardlinkCounter.add(1)
-                        // Only interested in files with more than one hard link.
-                        guard st.st_nlink > 1 else { continue }
-                        let key = DevIno(dev: st.st_dev, ino: st.st_ino)
-                        let fileSize = UInt64(bitPattern: Int64(st.st_size))
-                        results.append((key, nodeIndex, fileSize, path))
                     }
                     return BatchResult(members: results)
                 }
@@ -142,10 +148,10 @@ public struct HardlinkFinder {
         hardlinkTimer.stop()
         await progress?(fileIndices.count, fileIndices.count)
 
-        // Merge batch results into groups dict, using the stored path from each result.
+        // Merge batch results into groups dict.
         for batch in batchResults {
-            for (key, _, fileSize, path) in batch.members {
-                groups[key, default: []].append((path: path, fileSize: fileSize))
+            for (key, nodeIndex, fileSize) in batch.members {
+                groups[key, default: []].append((nodeIndex: nodeIndex, fileSize: fileSize))
             }
         }
 
@@ -153,8 +159,7 @@ public struct HardlinkFinder {
         var results: [HardlinkGroup] = []
         for (key, members) in groups {
             guard members.count >= 2 else { continue }
-            // Reuse the paths already computed during the lstat batch pass.
-            let paths = members.map(\.path).sorted()
+            let paths = members.map { path(for: $0.nodeIndex) }.sorted()
             let fileSize = members.first?.fileSize ?? 0
             let hardlinkGroup = HardlinkGroup(
                 inode: key.ino,

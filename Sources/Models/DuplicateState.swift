@@ -24,6 +24,9 @@ public final class DuplicateState {
     /// Current phase of an active duplicate scan.
     public var duplicatePhase: DuplicateScanPhase = .groupingBySize
 
+    /// Minimum file size used by the most recently started duplicate scan.
+    public var lastDuplicateScanMinimumSize: UInt64 = 1_048_576
+
     public init() {}
 
     /// Reset duplicate state for a new scan.
@@ -34,5 +37,6 @@ public final class DuplicateState {
         duplicateProgress = (0, 0)
         isDuplicateScanRunning = false
         duplicatePhase = .groupingBySize
+        lastDuplicateScanMinimumSize = 1_048_576
     }
 }

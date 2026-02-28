@@ -4,13 +4,30 @@ import SwiftUI
 public struct DuplicateFilesView: View {
     @Bindable var appState: AppState
 
-    @State private var minimumSizeFilter: UInt64 = 1_048_576 // 1 MB default
+    @State private var scanMinimumSize: UInt64 = 1_048_576 // 1 MB default
+    @State private var resultMinimumSize: UInt64 = 1_048_576 // 1 MB default
     @State private var showTrashConfirmation: Bool = false
     @State private var trashErrorPaths: [String] = []
 
     public init(appState: AppState) {
         self.appState = appState
     }
+
+    private static let duplicateSizeOptions: [UInt64] = [
+        1_024,
+        102_400,
+        1_048_576,
+        10_485_760,
+        104_857_600,
+    ]
+
+    private static let duplicateSizeOptionLabels: [String] = [
+        "1K",
+        "100K",
+        "1M",
+        "10M",
+        "100M",
+    ]
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -43,11 +60,13 @@ public struct DuplicateFilesView: View {
             Divider()
                 .frame(height: 20)
 
+            scanThresholdControl
+
             HStack(spacing: 4) {
-                Text("Min size:")
+                Text("Show >")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Picker("", selection: $minimumSizeFilter) {
+                Picker("", selection: $resultMinimumSize) {
                     Text("1 KB").tag(UInt64(1_024))
                     Text("100 KB").tag(UInt64(102_400))
                     Text("1 MB").tag(UInt64(1_048_576))
@@ -124,6 +143,13 @@ public struct DuplicateFilesView: View {
                         .foregroundStyle(.orange)
                 }
             }
+
+            if !appState.duplicate.isDuplicateScanRunning,
+               resultMinimumSize < appState.duplicate.lastDuplicateScanMinimumSize {
+                Text("Last scan skipped files under \(SizeFormatter.shared.format(appState.duplicate.lastDuplicateScanMinimumSize))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -139,6 +165,9 @@ public struct DuplicateFilesView: View {
                 .controlSize(.large)
             Text(appState.duplicate.duplicatePhase.message)
                 .font(.headline)
+            Text("Scanning files \(scanThresholdDescription(appState.duplicate.lastDuplicateScanMinimumSize))")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             if appState.duplicate.duplicateProgress.total > 0 {
                 Text(
                     "\(SizeFormatter.shared.formatCount(appState.duplicate.duplicateProgress.processed)) / " +
@@ -168,9 +197,60 @@ public struct DuplicateFilesView: View {
             if appState.duplicate.duplicateGroups.isEmpty {
                 Text("Click \"Scan for Duplicates\" to search for duplicate files.")
             } else {
-                Text("No duplicate groups match the current minimum size filter.")
+                Text("No duplicate groups match the current result filter.")
             }
         }
+    }
+
+    private var scanThresholdControl: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text("Scan >")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(SizeFormatter.shared.format(scanMinimumSize))
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .frame(width: 64, alignment: .leading)
+            }
+
+            Slider(
+                value: Binding(
+                    get: { Double(scanThresholdIndex(for: scanMinimumSize)) },
+                    set: { newValue in
+                        scanMinimumSize = Self.duplicateSizeOptions[Int(newValue.rounded())]
+                    }
+                ),
+                in: 0...Double(Self.duplicateSizeOptions.count - 1),
+                step: 1
+            )
+            .frame(width: 130)
+            .help("Minimum file size included in the duplicate scan")
+
+            HStack(spacing: 0) {
+                ForEach(Array(Self.duplicateSizeOptionLabels.enumerated()), id: \.offset) { index, label in
+                    Text(label)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(index == scanThresholdIndex(for: scanMinimumSize) ? .primary : .tertiary)
+                        .frame(maxWidth: .infinity, alignment: alignment(for: index))
+                }
+            }
+            .frame(width: 130)
+        }
+    }
+
+    private func scanThresholdIndex(for value: UInt64) -> Int {
+        Self.duplicateSizeOptions.firstIndex(of: value) ?? 0
+    }
+
+    private func scanThresholdDescription(_ threshold: UInt64) -> String {
+        ">= \(SizeFormatter.shared.format(threshold))"
+    }
+
+    private func alignment(for index: Int) -> Alignment {
+        if index == 0 { return .leading }
+        if index == Self.duplicateSizeOptionLabels.count - 1 { return .trailing }
+        return .center
     }
 
     // MARK: - Duplicate List
@@ -202,7 +282,7 @@ public struct DuplicateFilesView: View {
     // MARK: - Computed
 
     private var filteredGroups: [DuplicateGroup] {
-        appState.duplicate.duplicateGroups.filter { $0.fileSize >= minimumSizeFilter }
+        appState.duplicate.duplicateGroups.filter { $0.fileSize >= resultMinimumSize }
     }
 
     private var cloneMap: [UUID: CloneCheckResult] {
@@ -238,12 +318,14 @@ public struct DuplicateFilesView: View {
         appState.duplicate.duplicateExpandedGroups.removeAll()
         appState.duplicate.duplicateProgress = (0, 0)
         appState.duplicate.duplicatePhase = .groupingBySize
+        appState.duplicate.lastDuplicateScanMinimumSize = scanMinimumSize
 
         // Task.detached so findDuplicates runs on the cooperative pool, not the main actor.
         // Without this, Pass 1 (building the size-group dictionary over 1M+ nodes) runs on
         // the main thread and freezes the UI until it completes.
+        let selectedScanMinimumSize = scanMinimumSize
         appState.duplicateTask = Task.detached(priority: .userInitiated) {
-            let finder = DuplicateFinder()
+            let finder = DuplicateFinder(minimumFileSize: selectedScanMinimumSize)
             let groups = await finder.findDuplicates(in: tree) { [token] update in
                 // Progress callback is @MainActor — hops to main thread automatically.
                 guard appState.duplicateToken == token else { return }

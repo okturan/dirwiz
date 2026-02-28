@@ -199,6 +199,35 @@ struct FileNodeTests {
         #expect(volumeTree.path(at: 0) == "/")
     }
 
+    @Test("FileTree snapshot C path matches regular path building")
+    func snapshotCPathBuilding() {
+        let tree = FileTree()
+        tree.setRootPath("/Users")
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "Users")
+
+        var child = FileNode()
+        child.isDirectory = true
+        tree.addChildren([(node: child, name: "Documents")], parentIndex: 0)
+
+        var leaf = FileNode()
+        leaf.fileSize = 100
+        tree.addChildren([(node: leaf, name: "readme.txt")], parentIndex: 1)
+
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+        let cPath = FileTree.withCPathFromSnapshot(
+            at: 2,
+            nodes: nodes,
+            stringPool: stringPool,
+            rootPath: rootPath
+        ) { ptr in
+            String(cString: ptr)
+        }
+
+        #expect(cPath == tree.path(at: 2))
+    }
+
     @Test("sortAllChildren preserves subtree integrity across directories")
     func sortAllChildrenSubtreeStability() {
         let tree = FileTree()
@@ -395,6 +424,8 @@ struct FileScannerMockTests {
         #expect(!fileNode.isDirectory)
         #expect(fileNode.fileSize == 4096)
         #expect(fileNode.allocatedSize == 8192)
+        #expect(fileNode.device == 1)
+        #expect(fileNode.inode == 1)
         #expect(tree.name(at: 1) == "data.bin")
     }
 

@@ -151,13 +151,17 @@ public final class FileScanner: @unchecked Sendable {
         let rootName = (path as NSString).lastPathComponent
         var rootNode = FileNode()
         rootNode.isDirectory = true
-        tree.addNode(rootNode, name: rootName.isEmpty ? path : rootName)
+        let rootIndex = tree.addNode(rootNode, name: rootName.isEmpty ? path : rootName)
 
         // Visited directory tracker (prevents firmlink/hardlink double-counting)
         let visited = VisitedDirectories()
 
         // Mark root as visited
         if let di = filesystem.deviceAndInode(forPath: path) {
+            tree.updateNode(at: rootIndex) { node in
+                node.device = di.device
+                node.inode = di.inode
+            }
             _ = visited.insert(dev: di.device, inode: di.inode)
         }
 
@@ -322,6 +326,8 @@ public final class FileScanner: @unchecked Sendable {
             node.fileSize = isDir ? 0 : dataLength
             node.allocatedSize = isDir ? 0 : allocSize
             node.modifiedDate = modDate
+            node.device = rawEntry.device
+            node.inode = rawEntry.inode
             if !isDir {
                 node.extensionHash = extensionHash(entryName)
             }

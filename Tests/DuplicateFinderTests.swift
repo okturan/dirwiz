@@ -194,6 +194,25 @@ struct DuplicateFinderTests {
             "Files with same head+tail but different middle should not be duplicates")
     }
 
+    @Test("Small duplicate files are confirmed without a second full-hash pass")
+    func smallDuplicatesSkipFullHashPass() async throws {
+        let content = Data(repeating: 0x5A, count: 4096)
+        let (url, cleanup) = try createTempFiles([
+            "a.bin": content,
+            "b.bin": content,
+        ])
+        defer { cleanup() }
+
+        let tree = await scanDirectory(url.path)
+        let report = await finder.findDuplicatesWithStats(in: tree)
+
+        #expect(report.groups.count == 1)
+        #expect(report.stats.totalCandidates == 2)
+        #expect(report.stats.totalFullCandidates == 0,
+            "Small files already fully read during the partial pass should not be reread")
+        #expect(report.stats.fullHashedFiles == 0)
+    }
+
     // MARK: - Progress callback
 
     @Test("Progress callback is invoked during scan")
@@ -271,6 +290,55 @@ struct DuplicateFinderTests {
         #expect(groups.isEmpty, "Zero-byte files should not form duplicate groups")
     }
 
+    @Test("Large same-size groups with different middles are filtered before full hashing")
+    func largeGroupMiddleSamplingAvoidsFullHashExplosion() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DupFinderLargeGroup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let base = Data(repeating: 0xAA, count: 65_536)
+        for i in 0..<70 {
+            var data = base
+            data[32_768] = UInt8(i)
+            try data.write(to: root.appendingPathComponent("file-\(i).bin"))
+        }
+
+        let tree = await scanDirectory(root.path)
+        let report = await finder.findDuplicatesWithStats(in: tree)
+
+        #expect(report.groups.isEmpty, "No files share the same full contents")
+        #expect(report.stats.totalCandidates == 70, "All files should enter the same size bucket")
+        #expect(report.stats.totalFullCandidates == 0,
+            "Large-group middle sampling should eliminate these before full hashing")
+    }
+
+    @Test("Minimum file size affects duplicate candidate counts")
+    func minimumFileSizeChangesCandidateTotals() async throws {
+        let small = Data(repeating: 0x11, count: 4 * 1024)
+        let medium = Data(repeating: 0x22, count: 2 * 1024 * 1024)
+        let large = Data(repeating: 0x33, count: 20 * 1024 * 1024)
+        let (url, cleanup) = try createTempFiles([
+            "small-a.bin": small,
+            "small-b.bin": small,
+            "medium-a.bin": medium,
+            "medium-b.bin": medium,
+            "large-a.bin": large,
+            "large-b.bin": large,
+        ])
+        defer { cleanup() }
+
+        let tree = await scanDirectory(url.path)
+
+        let oneKBReport = await DuplicateFinder(minimumFileSize: 1_024).findDuplicatesWithStats(in: tree)
+        let tenMBReport = await DuplicateFinder(minimumFileSize: 10 * 1_048_576).findDuplicatesWithStats(in: tree)
+
+        #expect(oneKBReport.stats.totalCandidates == 6)
+        #expect(tenMBReport.stats.totalCandidates == 2,
+            "Only the 20 MB pair should remain once the threshold is raised to 10 MB")
+        #expect(tenMBReport.groups.count == 1)
+    }
+
     // MARK: - Cancellation
 
     @Test("Pre-cancelled task returns empty results")
@@ -328,6 +396,46 @@ struct DuplicateFinderTests {
             "Hardlink should be collapsed: 2 unique inodes, not 3 paths")
         #expect(groups[0].wastedSpace == UInt64(content.count),
             "Wasted space should reflect 1 extra copy, not 2")
+    }
+
+    @Test("Duplicate finalization falls back when node identity metadata is missing")
+    func duplicateFallbackWithoutNodeMetadata() async throws {
+        let content = Data(repeating: 0xDE, count: 8192)
+        let (url, cleanup) = try createTempFiles([
+            "original.bin": content,
+            "copy.bin": content,
+        ])
+        defer { cleanup() }
+
+        let originalPath = url.appendingPathComponent("original.bin").path
+        let linkPath = url.appendingPathComponent("link_to_original.bin").path
+        let rc = Darwin.link(originalPath, linkPath)
+        #expect(rc == 0, "link() should succeed, got errno \(errno)")
+
+        let tree = FileTree()
+        tree.setRootPath(url.path)
+
+        var root = FileNode()
+        root.isDirectory = true
+        _ = tree.addNode(root, name: url.lastPathComponent)
+
+        var original = FileNode()
+        original.fileSize = UInt64(content.count)
+        var copy = FileNode()
+        copy.fileSize = UInt64(content.count)
+        var link = FileNode()
+        link.fileSize = UInt64(content.count)
+        _ = tree.addChildren([
+            (node: original, name: "original.bin"),
+            (node: copy, name: "copy.bin"),
+            (node: link, name: "link_to_original.bin"),
+        ], parentIndex: 0)
+
+        let groups = await finder.findDuplicates(in: tree)
+
+        #expect(groups.count == 1)
+        #expect(groups[0].paths.count == 2,
+            "Fallback lstat path should still collapse hardlinks when node metadata is missing")
     }
 
     @Test("All-hardlink group is removed entirely")

@@ -113,9 +113,9 @@ struct DirWizCLI {
         await scanner.scan(path: path, progress: progress, tree: tree)
         if !quiet { errPrint("Scanning for duplicates...") }
 
-        let finder = DuplicateFinder()
+        let finder = DuplicateFinder(minimumFileSize: minSize)
         let groups = await finder.findDuplicates(in: tree)
-        let filtered = groups.filter { $0.fileSize >= minSize }
+        let filtered = groups
 
         if !quiet {
             errPrint("\(filtered.count) duplicate groups found (min size: \(SizeFormatter.shared.format(minSize)))")

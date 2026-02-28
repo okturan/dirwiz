@@ -8,7 +8,7 @@ private enum FileNodeFlags {
 
 /// Compact flat-array tree node for filesystem representation.
 /// Uses index-based parent/child references to avoid ARC overhead on millions of nodes.
-/// ~48 bytes per node. 1M files ≈ 48 MB.
+/// Keeps lightweight metadata needed by multiple analysis passes in a single cache-friendly struct.
 public struct FileNode: Sendable {
     public var nameOffset: UInt32
     public var nameLength: UInt16
@@ -17,7 +17,9 @@ public struct FileNode: Sendable {
     public var childCount: UInt32
     public var fileSize: UInt64
     public var allocatedSize: UInt64
+    public var inode: UInt64
     public var extensionHash: UInt32
+    private var deviceID: UInt32
     public var flags: UInt8
     public var modifiedDate: UInt32
 
@@ -47,6 +49,11 @@ public struct FileNode: Sendable {
         }
     }
 
+    public var device: Int32 {
+        get { Int32(bitPattern: deviceID) }
+        set { deviceID = UInt32(bitPattern: newValue) }
+    }
+
     public init(
         nameOffset: UInt32 = 0,
         nameLength: UInt16 = 0,
@@ -55,7 +62,9 @@ public struct FileNode: Sendable {
         childCount: UInt32 = 0,
         fileSize: UInt64 = 0,
         allocatedSize: UInt64 = 0,
+        inode: UInt64 = 0,
         extensionHash: UInt32 = 0,
+        device: Int32 = 0,
         flags: UInt8 = 0,
         modifiedDate: UInt32 = 0
     ) {
@@ -66,7 +75,9 @@ public struct FileNode: Sendable {
         self.childCount = childCount
         self.fileSize = fileSize
         self.allocatedSize = allocatedSize
+        self.inode = inode
         self.extensionHash = extensionHash
+        self.deviceID = UInt32(bitPattern: device)
         self.flags = flags
         self.modifiedDate = modifiedDate
     }
@@ -181,6 +192,60 @@ public final class FileTree: @unchecked Sendable {
         return rootPath + "/" + suffix
     }
 
+    /// Build an absolute path as a null-terminated C string from a pre-snapshotted tree.
+    /// This avoids taking the tree lock in high-throughput callers that already have a snapshot.
+    public static func withCPathFromSnapshot<R>(
+        at index: UInt32,
+        nodes: [FileNode],
+        stringPool: Data,
+        rootPath: String,
+        _ body: (UnsafePointer<CChar>) -> R
+    ) -> R {
+        var segments: [(offset: Int, length: Int)] = []
+        var totalSegmentBytes = 0
+        var current = index
+        while current != FileNode.invalid {
+            let i = Int(current)
+            guard i < nodes.count else { break }
+            let node = nodes[i]
+            if node.parentIndex == FileNode.invalid { break }
+            let segment = (offset: Int(node.nameOffset), length: Int(node.nameLength))
+            segments.append(segment)
+            totalSegmentBytes += segment.length
+            current = node.parentIndex
+        }
+
+        let slash = CChar(bitPattern: UInt8(ascii: "/"))
+        var buf = ContiguousArray<CChar>()
+        buf.reserveCapacity(rootPath.utf8.count + totalSegmentBytes + segments.count + 1)
+
+        rootPath.withCString { cstr in
+            var p = cstr
+            while p.pointee != 0 {
+                buf.append(p.pointee)
+                p += 1
+            }
+        }
+
+        stringPool.withUnsafeBytes { pool in
+            let base = pool.baseAddress?.assumingMemoryBound(to: UInt8.self)
+            for seg in segments.reversed() {
+                if !buf.isEmpty, buf.last != slash {
+                    buf.append(slash)
+                }
+                guard let base else { continue }
+                for j in 0..<seg.length {
+                    buf.append(CChar(bitPattern: base[seg.offset + j]))
+                }
+            }
+        }
+
+        buf.append(0)
+        return buf.withUnsafeBufferPointer { ptr in
+            body(ptr.baseAddress!)
+        }
+    }
+
     /// Snapshot the lowercase name pool + entries for lock-free search.
     public func searchIndexSnapshot() -> (pool: Data, entries: [(offset: UInt32, length: UInt16)]) {
         lock.withLock { _ in (lowercaseNamePool, lowercaseNameEntries) }
@@ -232,52 +297,14 @@ public final class FileTree: @unchecked Sendable {
     /// (e.g., duplicate file hashing) where thousands of paths are opened in sequence.
     /// The closure receives a pointer valid only for its duration.
     public func withCPath<R>(at index: UInt32, _ body: (UnsafePointer<CChar>) -> R) -> R {
-        // Build path bytes under the lock, then call body outside the lock
-        // so that file I/O doesn't block tree access.
-        let buf: ContiguousArray<CChar> = lock.withLock { _ in
-            var segments: [(offset: Int, length: Int)] = []
-            var current = index
-            while current != FileNode.invalid {
-                let i = Int(current)
-                guard i < nodes.count else { break }
-                let node = nodes[i]
-                if node.parentIndex == FileNode.invalid { break }
-                segments.append((Int(node.nameOffset), Int(node.nameLength)))
-                current = node.parentIndex
-            }
-
-            // Use withCString on rootPath to safely convert to C bytes,
-            // avoiding manual UTF-8 iteration on potentially non-ASCII paths.
-            var buf = ContiguousArray<CChar>()
-            buf.reserveCapacity(256)
-            rootPath.withCString { cstr in
-                var p = cstr
-                while p.pointee != 0 {
-                    buf.append(p.pointee)
-                    p += 1
-                }
-            }
-            for seg in segments.reversed() {
-                if !buf.isEmpty, buf.last != CChar(bitPattern: UInt8(ascii: "/")) {
-                    buf.append(CChar(bitPattern: UInt8(ascii: "/")))
-                }
-                let start = seg.offset
-                let end = start + seg.length
-                if end <= stringPool.count {
-                    stringPool.withUnsafeBytes { pool in
-                        let src = pool.baseAddress!.advanced(by: start)
-                        for j in 0..<seg.length {
-                            buf.append(CChar(bitPattern: src.load(fromByteOffset: j, as: UInt8.self)))
-                        }
-                    }
-                }
-            }
-            buf.append(0) // null terminator
-            return buf
-        }
-        return buf.withUnsafeBufferPointer { ptr in
-            body(ptr.baseAddress!)
-        }
+        let snapshot = lock.withLock { _ in (nodes, stringPool, rootPath) }
+        return Self.withCPathFromSnapshot(
+            at: index,
+            nodes: snapshot.0,
+            stringPool: snapshot.1,
+            rootPath: snapshot.2,
+            body
+        )
     }
 
     // MARK: - Children
