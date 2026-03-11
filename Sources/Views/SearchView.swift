@@ -245,7 +245,7 @@ public struct SearchView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     let visibleSlice = appState.search.searchResults.prefix(showMoreCount)
-                    ForEach(Array(visibleSlice), id: \.self) { idx in
+                    ForEach(visibleSlice, id: \.self) { idx in
                         resultRowView(idx)
                             .id(idx)
                         Divider().padding(.leading, 8)
@@ -386,12 +386,13 @@ public struct SearchView: View {
     // MARK: - Keyboard Navigation
 
     private func moveResultSelection(by delta: Int, proxy: ScrollViewProxy) {
-        let results = Array(appState.search.searchResults.prefix(showMoreCount))
-        guard !results.isEmpty else { return }
+        let results = appState.search.searchResults.prefix(showMoreCount)
+        let count = results.count
+        guard count > 0 else { return }
         let currentIdx = results.firstIndex(where: { $0 == appState.selectedNodeIndex })
-        let fromIdx = currentIdx ?? (delta > 0 ? -1 : results.count)
-        let newIdx = max(0, min(results.count - 1, fromIdx + delta))
-        let selected = results[newIdx]
+        let fromIdx = currentIdx ?? (delta > 0 ? -1 : count)
+        let newIdx = max(0, min(count - 1, fromIdx + delta))
+        let selected = results[results.index(results.startIndex, offsetBy: newIdx)]
         appState.selectedNodeIndex = selected
         proxy.scrollTo(selected)
     }
