@@ -22,14 +22,18 @@ public func checkFullDiskAccess() -> Bool {
 // MARK: - Bundle Extension Set
 
 private let kBundleExtensions: Set<String> = [
-    ".app", ".framework", ".xcarchive", ".xcodeproj", ".xcworkspace",
-    ".kext", ".plugin", ".bundle", ".docset", ".xpc",
-    ".qlgenerator", ".mdimporter", ".prefpane", ".driver"
+    "app", "framework", "xcarchive", "xcodeproj", "xcworkspace",
+    "kext", "plugin", "bundle", "docset", "xpc",
+    "qlgenerator", "mdimporter", "prefpane", "driver"
 ]
 
 private func isBundleName(_ name: String) -> Bool {
-    let lower = name.lowercased()
-    return kBundleExtensions.contains(where: { lower.hasSuffix($0) })
+    guard let dotIndex = name.lastIndex(of: "."),
+          dotIndex < name.index(before: name.endIndex) else {
+        return false
+    }
+    let extStart = name.index(after: dotIndex)
+    return kBundleExtensions.contains(name[extStart...].lowercased())
 }
 
 // MARK: - Inode Key

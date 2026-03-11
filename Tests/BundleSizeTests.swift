@@ -212,4 +212,36 @@ struct BundleSizeTests {
             #expect(node.fileSize > 0, "\(name) should have accumulated size")
         }
     }
+
+    @Test("Bundle extension matching is case-insensitive")
+    func bundleExtensionCaseInsensitive() async throws {
+        let (path, cleanup) = try createTempTree([
+            "Caps.APP/Contents/MacOS/binary": 4096,
+            "Mixed.Framework/lib": 8192,
+            "NotABundle.zip/file.txt": 4096,
+        ])
+        defer { cleanup() }
+
+        let (tree, _) = await scanTree(at: path)
+
+        guard let (_, capsApp) = findChild(named: "Caps.APP", under: 0, in: tree) else {
+            Issue.record("Caps.APP node not found")
+            return
+        }
+        #expect(capsApp.isBundle, "Caps.APP should be recognized as a bundle")
+        #expect(capsApp.childCount == 0)
+
+        guard let (_, mixedFramework) = findChild(named: "Mixed.Framework", under: 0, in: tree) else {
+            Issue.record("Mixed.Framework node not found")
+            return
+        }
+        #expect(mixedFramework.isBundle, "Mixed.Framework should be recognized as a bundle")
+        #expect(mixedFramework.childCount == 0)
+
+        guard let (_, zipDir) = findChild(named: "NotABundle.zip", under: 0, in: tree) else {
+            Issue.record("NotABundle.zip node not found")
+            return
+        }
+        #expect(!zipDir.isBundle, "Unknown extensions should not be treated as bundles")
+    }
 }

@@ -2,39 +2,44 @@ import Foundation
 
 extension AppState {
 
+    private struct ExtensionAccumulator {
+        var totalSize: UInt64 = 0
+        var fileCount: Int = 0
+    }
+
     // MARK: - Statistics Computation
 
     /// Build extension statistics from the file tree.
     public func computeExtensionStats() {
         guard let tree = fileTree else { return }
-        var sizeByExt: [String: UInt64] = [:]
-        var countByExt: [String: Int] = [:]
+        var statsByExt: [String: ExtensionAccumulator] = [:]
         let colorMap = ExtensionColorMap.shared
 
         let snapshot = tree.nodesSnapshot()
+        let stringPool = tree.stringPoolSnapshot()
         let totalSize = snapshot.first?.displaySize ?? 0
 
         for i in 0..<snapshot.count {
             let node = snapshot[i]
             guard !node.isDirectory else { continue }
 
-            let name = tree.name(at: UInt32(i))
-            let ext = Self.extractExtension(from: name)
-            sizeByExt[ext, default: 0] += node.displaySize
-            countByExt[ext, default: 0] += 1
+            let ext = Self.extractExtension(from: node, stringPool: stringPool)
+            var stats = statsByExt[ext, default: ExtensionAccumulator()]
+            stats.totalSize += node.displaySize
+            stats.fileCount += 1
+            statsByExt[ext] = stats
         }
 
         // Per-extension-name stats keyed by string (collision-safe).
-        fileTypeStats = sizeByExt.map { ext, size in
+        fileTypeStats = statsByExt.map { ext, stats in
             let hash = ext.isEmpty ? UInt32(0) : extensionHash(".\(ext)")
-            let count = countByExt[ext] ?? 0
             return FileTypeStat(
                 extensionName: ext,
                 extensionHash: hash,
                 category: colorMap.category(forHash: hash),
-                totalSize: size,
-                fileCount: count,
-                percentage: totalSize > 0 ? Double(size) / Double(totalSize) : 0
+                totalSize: stats.totalSize,
+                fileCount: stats.fileCount,
+                percentage: totalSize > 0 ? Double(stats.totalSize) / Double(totalSize) : 0
             )
         }
         .sorted { $0.totalSize > $1.totalSize }
@@ -44,9 +49,14 @@ extension AppState {
         loadSnapshotIfAvailable()
     }
 
-    private static func extractExtension(from name: String) -> String {
-        guard let dotIndex = name.lastIndex(of: ".") else { return "" }
-        let ext = String(name[name.index(after: dotIndex)...]).lowercased()
-        return ext
+    private static func extractExtension(from node: FileNode, stringPool: Data) -> String {
+        let start = Int(node.nameOffset)
+        let end = start + Int(node.nameLength)
+        guard end <= stringPool.count else { return "" }
+        let nameBytes = stringPool[start..<end]
+        guard let dotIndex = nameBytes.lastIndex(of: UInt8(ascii: ".")) else { return "" }
+        let extStart = nameBytes.index(after: dotIndex)
+        let extData = Data(nameBytes[extStart..<nameBytes.endIndex])
+        return (String(data: extData, encoding: .utf8) ?? "").lowercased()
     }
 }
