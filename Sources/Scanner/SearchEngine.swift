@@ -53,7 +53,13 @@ public enum SearchEngine {
                                 elapsedTime: CFAbsoluteTimeGetCurrent() - start)
         }
 
-        let queryBytes = Array(query.precomposedStringWithCanonicalMapping.lowercased().utf8)
+        let queryBytes: [UInt8]
+        if query.isEmpty {
+            queryBytes = []
+        } else {
+            queryBytes = Array(query.precomposedStringWithCanonicalMapping.lowercased().utf8)
+        }
+        let hasQuery = !queryBytes.isEmpty
         let colorMap = filters.category != nil ? ExtensionColorMap.shared : nil
         let filterCategory = filters.category
         let scanAll = previousMatches == nil
@@ -67,12 +73,19 @@ public enum SearchEngine {
             nodes.withUnsafeBufferPointer { nodesBuf in
                 searchEntries.withUnsafeBufferPointer { entriesBuf in
                     searchPool.withUnsafeBytes { poolPtr in
-                        guard let poolBase = poolPtr.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                              let needleBase = needleBuf.baseAddress else { return }
+                        guard let poolBase = poolPtr.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
                         let poolCount = poolPtr.count
                         let nodeCount = nodesBuf.count
                         let entryCount = entriesBuf.count
-                        let needleLen = needleBuf.count
+                        let needleLen = hasQuery ? needleBuf.count : 0
+                        let needleBase: UnsafePointer<UInt8>
+                        if hasQuery {
+                            guard let base = needleBuf.baseAddress else { return }
+                            needleBase = base
+                        } else {
+                            // Unused when hasQuery is false; any valid pointer is fine.
+                            needleBase = poolBase
+                        }
 
                         if scanAll {
                             let limit = min(nodeCount, entryCount)
@@ -80,7 +93,7 @@ public enum SearchEngine {
                                 if matchNode(
                                     i: i, nodesBuf: nodesBuf, entriesBuf: entriesBuf,
                                     poolBase: poolBase, poolCount: poolCount,
-                                    needleBase: needleBase, needleLen: needleLen,
+                                    hasQuery: hasQuery, needleBase: needleBase, needleLen: needleLen,
                                     filters: filters, filterCategory: filterCategory, colorMap: colorMap
                                 ) {
                                     totalMatches += 1
@@ -97,7 +110,7 @@ public enum SearchEngine {
                                     if matchNode(
                                         i: i, nodesBuf: nodesBuf, entriesBuf: entriesBuf,
                                         poolBase: poolBase, poolCount: poolCount,
-                                        needleBase: needleBase, needleLen: needleLen,
+                                        hasQuery: hasQuery, needleBase: needleBase, needleLen: needleLen,
                                         filters: filters, filterCategory: filterCategory, colorMap: colorMap
                                     ) {
                                         totalMatches += 1
@@ -125,6 +138,7 @@ public enum SearchEngine {
         entriesBuf: UnsafeBufferPointer<(offset: UInt32, length: UInt16)>,
         poolBase: UnsafePointer<UInt8>,
         poolCount: Int,
+        hasQuery: Bool,
         needleBase: UnsafePointer<UInt8>,
         needleLen: Int,
         filters: SearchFilters,
@@ -143,6 +157,7 @@ public enum SearchEngine {
             if map.category(forHash: node.extensionHash) != cat { return false }
         }
         if let extHash = filters.extensionHash, node.extensionHash != extHash { return false }
+        if !hasQuery { return true }
 
         let entry = entriesBuf[i]
         let nameStart = Int(entry.offset)

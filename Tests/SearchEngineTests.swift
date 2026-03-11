@@ -151,6 +151,25 @@ struct SearchEngineTests {
         #expect(name == "photo.jpg")
     }
 
+
+    @Test("Filter: extension hash with empty query returns extension matches")
+    func extensionFilterEmptyQuery() {
+        let tree = makeTree(files: [
+            (name: "image1.png", size: 100, isDir: false),
+            (name: "image2.png", size: 200, isDir: false),
+            (name: "notes.txt", size: 300, isDir: false),
+        ])
+        var filters = SearchFilters()
+        filters.extensionHash = extensionHash("sample.png")
+
+        let result = search(tree: tree, query: "", filters: filters)
+        #expect(result.totalMatches == 2)
+        let names = result.matchingIndices.map { tree.name(at: $0) }
+        #expect(names.contains("image1.png"))
+        #expect(names.contains("image2.png"))
+        #expect(!names.contains("notes.txt"))
+    }
+
     @Test("Result cap is respected")
     func resultCap() {
         var files: [(name: String, size: UInt64, isDir: Bool)] = []
