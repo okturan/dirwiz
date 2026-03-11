@@ -67,6 +67,8 @@ public enum SearchEngine {
 
         var matches: [UInt32] = []
         var totalMatches = 0
+        let expectedScanCount = scanAll ? min(nodes.count, searchEntries.count) : scanIndices.count
+        matches.reserveCapacity(min(resultCap, expectedScanCount))
 
         // All array access via UnsafeBufferPointer — no bounds checks in debug mode.
         queryBytes.withUnsafeBufferPointer { needleBuf in

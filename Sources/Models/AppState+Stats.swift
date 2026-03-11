@@ -18,6 +18,7 @@ extension AppState {
         let snapshot = tree.nodesSnapshot()
         let stringPool = tree.stringPoolSnapshot()
         let totalSize = snapshot.first?.displaySize ?? 0
+        statsByExt.reserveCapacity(min(snapshot.count, 512))
 
         for i in 0..<snapshot.count {
             let node = snapshot[i]
@@ -51,12 +52,31 @@ extension AppState {
 
     private static func extractExtension(from node: FileNode, stringPool: Data) -> String {
         let start = Int(node.nameOffset)
-        let end = start + Int(node.nameLength)
-        guard end <= stringPool.count else { return "" }
-        let nameBytes = stringPool[start..<end]
-        guard let dotIndex = nameBytes.lastIndex(of: UInt8(ascii: ".")) else { return "" }
-        let extStart = nameBytes.index(after: dotIndex)
-        let extData = Data(nameBytes[extStart..<nameBytes.endIndex])
-        return (String(data: extData, encoding: .utf8) ?? "").lowercased()
+        let nameLength = Int(node.nameLength)
+        let end = start + nameLength
+        guard start >= 0, nameLength > 0, end <= stringPool.count else { return "" }
+
+        return stringPool.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return ""
+            }
+
+            let nameBase = base + start
+            var dotOffset = -1
+            var i = nameLength - 1
+            while i >= 0 {
+                if nameBase[i] == UInt8(ascii: ".") {
+                    dotOffset = i
+                    break
+                }
+                i -= 1
+            }
+
+            guard dotOffset >= 0, dotOffset < nameLength - 1 else { return "" }
+            let extStart = dotOffset + 1
+            let extCount = nameLength - extStart
+            let extBuffer = UnsafeBufferPointer(start: nameBase + extStart, count: extCount)
+            return (String(bytes: extBuffer, encoding: .utf8) ?? "").lowercased()
+        }
     }
 }
