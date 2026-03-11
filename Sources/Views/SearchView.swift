@@ -536,19 +536,27 @@ public struct SearchView: View {
         case .name:
             // Pre-extract names once, then sort with Finder-style natural ordering
             // (e.g., "file2" before "file10") via localizedStandardCompare.
-            let names: [String] = indices.map { idx in
+            var paired: [(index: UInt32, name: String)] = []
+            paired.reserveCapacity(indices.count)
+            for idx in indices {
                 let node = nodes[Int(idx)]
                 let start = Int(node.nameOffset)
                 let end = start + Int(node.nameLength)
-                guard end <= pool.count else { return "" }
-                return String(data: pool[start..<end], encoding: .utf8) ?? ""
+                let name: String
+                if end <= pool.count {
+                    name = String(data: pool[start..<end], encoding: .utf8) ?? ""
+                } else {
+                    name = ""
+                }
+                paired.append((index: idx, name: name))
             }
-            var paired = Array(zip(indices, names))
             paired.sort { a, b in
-                let cmp = a.1.localizedStandardCompare(b.1)
+                let cmp = a.name.localizedStandardCompare(b.name)
                 return ascending ? cmp == .orderedAscending : cmp == .orderedDescending
             }
-            indices = paired.map { $0.0 }
+            for i in paired.indices {
+                indices[i] = paired[i].index
+            }
         }
     }
 
