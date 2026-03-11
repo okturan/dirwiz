@@ -63,19 +63,53 @@ struct TreeNodeItem: Identifiable, Equatable {
     /// Sorted children — only call when actually expanding.
     var children: [TreeNodeItem] {
         let range = tree.children(of: id)
-        let sorted: [UInt32]
+        guard !range.isEmpty else { return [] }
+
+        var sorted: [UInt32]
         switch sortKey {
         case .size, .percentage:
             // FileTree.sortAllChildren() pre-sorted children by size descending — reuse it.
-            let forward = range.map { UInt32($0) }
-            sorted = sortAscending ? Array(forward.reversed()) : forward
+            sorted = []
+            sorted.reserveCapacity(range.count)
+            if sortAscending {
+                for idx in range.reversed() { sorted.append(UInt32(idx)) }
+            } else {
+                for idx in range { sorted.append(UInt32(idx)) }
+            }
+        case .name:
+            // Resolve names once per expansion to avoid repeated lock acquisitions
+            // inside a sort comparator.
+            var pairs: [(id: UInt32, name: String)] = []
+            pairs.reserveCapacity(range.count)
+            for idx in range {
+                let childID = UInt32(idx)
+                pairs.append((id: childID, name: tree.name(at: childID)))
+            }
+            pairs.sort { a, b in
+                let order = a.name.localizedCaseInsensitiveCompare(b.name)
+                if order != .orderedSame {
+                    return sortAscending ? order == .orderedAscending : order == .orderedDescending
+                }
+                return a.id < b.id
+            }
+            sorted = pairs.map(\.id)
         default:
             sorted = range.map { UInt32($0) }.sorted(by: compare)
         }
-        return sorted.map {
-            TreeNodeItem(id: $0, tree: tree, nodes: nodes, depth: depth + 1,
-                         sortKey: sortKey, sortAscending: sortAscending)
+
+        var result: [TreeNodeItem] = []
+        result.reserveCapacity(sorted.count)
+        for childID in sorted {
+            result.append(TreeNodeItem(
+                id: childID,
+                tree: tree,
+                nodes: nodes,
+                depth: depth + 1,
+                sortKey: sortKey,
+                sortAscending: sortAscending
+            ))
         }
+        return result
     }
 
     // MARK: - Sort Comparator
