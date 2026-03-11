@@ -94,22 +94,17 @@ public struct TemporalSnapshot: Sendable {
 
     // MARK: Persistence
 
+    private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
+
     /// URL where the snapshot for a given root path is persisted.
     /// Uses a hash suffix to avoid collisions between paths that differ only in
     /// whitespace or separators (e.g., "/Volumes/A B" vs "/Volumes/A_B").
     public static func snapshotURL(for rootPath: String) -> URL {
-        let dir = snapshotDirectoryURL()
-        // Readable prefix + FNV-1a hash suffix to guarantee uniqueness.
-        let safe = rootPath
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: " ", with: "-")
-            .trimmingCharacters(in: .init(charactersIn: "_"))
-        let prefix = safe.isEmpty ? "root" : String(safe.prefix(40))
-        return dir.appendingPathComponent("\(prefix)-\(String(fnv1a64(rootPath), radix: 16)).tdiff")
+        snapshotDirectoryURL().appendingPathComponent(snapshotFilename(for: rootPath))
     }
 
     private static func snapshotDirectoryURL() -> URL {
-        if let override = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"], !override.isEmpty {
+        if let override = ProcessInfo.processInfo.environment[appSupportOverrideEnv], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
                 .appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
         }
@@ -118,6 +113,16 @@ public struct TemporalSnapshot: Sendable {
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
         return support.appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
+    }
+
+    private static func snapshotFilename(for rootPath: String) -> String {
+        // Readable prefix + FNV-1a hash suffix to guarantee uniqueness.
+        let safe = rootPath
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "-")
+            .trimmingCharacters(in: .init(charactersIn: "_"))
+        let prefix = safe.isEmpty ? "root" : String(safe.prefix(40))
+        return "\(prefix)-\(String(fnv1a64(rootPath), radix: 16)).tdiff"
     }
 
     private static func fnv1a64(_ value: String) -> UInt64 {

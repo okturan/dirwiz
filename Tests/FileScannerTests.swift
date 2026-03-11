@@ -231,46 +231,59 @@ struct FileNodeTests {
     @Test("Search index stays aligned with nodes after bulk insertion")
     func searchIndexAlignedAfterBulkInsertion() {
         let tree = FileTree()
-        tree.setRootPath("/")
+        tree.setRootPath("/test")
 
         var root = FileNode()
         root.isDirectory = true
-        tree.addNode(root, name: "/")
+        _ = tree.addNode(root, name: "test")
 
         var children: [(node: FileNode, name: String)] = []
-        for name in ["README.MD", "Cafe\u{301}.txt", "photos", "image.PNG", "notes.md"] {
+        let batchSize = 400
+        children.reserveCapacity(batchSize)
+        for i in 0..<batchSize {
             var node = FileNode()
-            node.isDirectory = !name.contains(".")
-            node.fileSize = 100
+            node.fileSize = UInt64(i + 1)
+            let name = i.isMultiple(of: 2)
+                ? "Item-\(i)-Caf\u{E9}.txt"
+                : "Item-\(i)-Cafe\u{301}.txt"
             children.append((node: node, name: name))
         }
         tree.addChildren(children, parentIndex: 0)
 
         let nodes = tree.nodesSnapshot()
+        let namePool = tree.stringPoolSnapshot()
         let (searchPool, searchEntries) = tree.searchIndexSnapshot()
         #expect(searchEntries.count == nodes.count)
 
         for i in 0..<nodes.count {
+            let node = nodes[i]
+            let nameStart = Int(node.nameOffset)
+            let nameEnd = nameStart + Int(node.nameLength)
+            guard nameEnd <= namePool.count,
+                  let original = String(data: namePool[nameStart..<nameEnd], encoding: .utf8) else {
+                Issue.record("Invalid name bytes at node \(i)")
+                continue
+            }
+            let expected = original.precomposedStringWithCanonicalMapping.lowercased()
+
             let entry = searchEntries[i]
             let start = Int(entry.offset)
             let end = start + Int(entry.length)
-            #expect(end <= searchPool.count)
-
-            let indexed = String(data: searchPool[start..<end], encoding: .utf8) ?? ""
-            let expected = tree.name(at: UInt32(i)).precomposedStringWithCanonicalMapping.lowercased()
+            guard end <= searchPool.count,
+                  let indexed = String(data: searchPool[start..<end], encoding: .utf8) else {
+                Issue.record("Invalid search bytes at node \(i)")
+                continue
+            }
             #expect(indexed == expected)
         }
 
         let result = SearchEngine.search(
-            query: ".md",
+            query: "caf\u{E9}",
             nodes: nodes,
             searchPool: searchPool,
             searchEntries: searchEntries
         )
-        let resultNames = result.matchingIndices.map { tree.name(at: $0) }
-        #expect(result.totalMatches == 2)
-        #expect(resultNames.contains("README.MD"))
-        #expect(resultNames.contains("notes.md"))
+        #expect(result.totalMatches == batchSize)
     }
 
     @Test("sortAllChildren preserves subtree integrity across directories")
