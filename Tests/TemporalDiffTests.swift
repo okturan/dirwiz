@@ -330,6 +330,20 @@ struct TemporalDiffTests {
 
     @Test("Snapshot save and load preserves meta and byPath")
     func snapshotSaveLoadRoundTrip() async throws {
+        let tempSupportRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DirWizAppSupport_\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempSupportRoot, withIntermediateDirectories: true)
+        let previousOverride = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"]
+        setenv("DIRWIZ_APP_SUPPORT_DIR", tempSupportRoot.path, 1)
+        defer {
+            if let previousOverride {
+                setenv("DIRWIZ_APP_SUPPORT_DIR", previousOverride, 1)
+            } else {
+                unsetenv("DIRWIZ_APP_SUPPORT_DIR")
+            }
+            try? FileManager.default.removeItem(at: tempSupportRoot)
+        }
+
         let tree = makeTree(
             rootPath: "/tmp/DirWizTest_\(UUID().uuidString)",
             dirs: [("Alpha", 1_000_000), ("Beta", 2_000_000)]

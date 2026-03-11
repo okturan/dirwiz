@@ -324,22 +324,28 @@ public final class FileTree: @unchecked Sendable {
 
     // MARK: - Thread-safe Mutation (used during scanning)
 
+    private func appendNameAndSearchIndex(for name: String, to node: inout FileNode) {
+        node.nameOffset = UInt32(stringPool.count)
+        let nameLength = min(name.utf8.count, Int(UInt16.max))
+        node.nameLength = UInt16(nameLength)
+        stringPool.append(contentsOf: name.utf8)
+
+        // Build the search-index entry: NFC-normalize then lowercase so that
+        // composed "Café" and decomposed "Cafe\u{301}" both index identically,
+        // and uppercase names are found by lowercase queries on any volume.
+        let searchName = name.precomposedStringWithCanonicalMapping.lowercased()
+        let lcOffset = UInt32(lowercaseNamePool.count)
+        let lcLength = min(searchName.utf8.count, Int(UInt16.max))
+        lowercaseNamePool.append(contentsOf: searchName.utf8)
+        lowercaseNameEntries.append((offset: lcOffset, length: UInt16(lcLength)))
+    }
+
     @discardableResult
     public func addNode(_ node: FileNode, name: String) -> UInt32 {
         lock.withLock { _ in
             let index = UInt32(nodes.count)
             var n = node
-            let utf8 = Array(name.utf8)
-            n.nameOffset = UInt32(stringPool.count)
-            n.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
-            stringPool.append(contentsOf: utf8)
-            // Build the search-index entry: NFC-normalize then lowercase so that
-            // composed "Café" and decomposed "Cafe\u{301}" both index identically,
-            // and uppercase names are found by lowercase queries on any volume.
-            let lcOffset = UInt32(lowercaseNamePool.count)
-            let lcUTF8 = Array(name.precomposedStringWithCanonicalMapping.lowercased().utf8)
-            lowercaseNamePool.append(contentsOf: lcUTF8)
-            lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
+            appendNameAndSearchIndex(for: name, to: &n)
             nodes.append(n)
             return index
         }
@@ -361,16 +367,11 @@ public final class FileTree: @unchecked Sendable {
             let p = Int(parentIndex)
             guard p >= 0, p < nodes.count else { return UInt32(nodes.count) }
             let firstIndex = UInt32(nodes.count)
+            nodes.reserveCapacity(nodes.count + children.count)
+            lowercaseNameEntries.reserveCapacity(lowercaseNameEntries.count + children.count)
             for case (var node, let childName) in children {
                 node.parentIndex = parentIndex
-                let utf8 = Array(childName.utf8)
-                node.nameOffset = UInt32(stringPool.count)
-                node.nameLength = UInt16(min(utf8.count, Int(UInt16.max)))
-                stringPool.append(contentsOf: utf8)
-                let lcOffset = UInt32(lowercaseNamePool.count)
-                let lcUTF8 = Array(childName.precomposedStringWithCanonicalMapping.lowercased().utf8)
-                lowercaseNamePool.append(contentsOf: lcUTF8)
-                lowercaseNameEntries.append((offset: lcOffset, length: UInt16(min(lcUTF8.count, Int(UInt16.max)))))
+                appendNameAndSearchIndex(for: childName, to: &node)
                 nodes.append(node)
             }
             nodes[p].firstChildIndex = firstIndex

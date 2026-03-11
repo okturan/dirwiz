@@ -228,6 +228,51 @@ struct FileNodeTests {
         #expect(cPath == tree.path(at: 2))
     }
 
+    @Test("Search index stays aligned with nodes after bulk insertion")
+    func searchIndexAlignedAfterBulkInsertion() {
+        let tree = FileTree()
+        tree.setRootPath("/")
+
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "/")
+
+        var children: [(node: FileNode, name: String)] = []
+        for name in ["README.MD", "Cafe\u{301}.txt", "photos", "image.PNG", "notes.md"] {
+            var node = FileNode()
+            node.isDirectory = !name.contains(".")
+            node.fileSize = 100
+            children.append((node: node, name: name))
+        }
+        tree.addChildren(children, parentIndex: 0)
+
+        let nodes = tree.nodesSnapshot()
+        let (searchPool, searchEntries) = tree.searchIndexSnapshot()
+        #expect(searchEntries.count == nodes.count)
+
+        for i in 0..<nodes.count {
+            let entry = searchEntries[i]
+            let start = Int(entry.offset)
+            let end = start + Int(entry.length)
+            #expect(end <= searchPool.count)
+
+            let indexed = String(data: searchPool[start..<end], encoding: .utf8) ?? ""
+            let expected = tree.name(at: UInt32(i)).precomposedStringWithCanonicalMapping.lowercased()
+            #expect(indexed == expected)
+        }
+
+        let result = SearchEngine.search(
+            query: ".md",
+            nodes: nodes,
+            searchPool: searchPool,
+            searchEntries: searchEntries
+        )
+        let resultNames = result.matchingIndices.map { tree.name(at: $0) }
+        #expect(result.totalMatches == 2)
+        #expect(resultNames.contains("README.MD"))
+        #expect(resultNames.contains("notes.md"))
+    }
+
     @Test("sortAllChildren preserves subtree integrity across directories")
     func sortAllChildrenSubtreeStability() {
         let tree = FileTree()

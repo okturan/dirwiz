@@ -98,27 +98,43 @@ public struct TemporalSnapshot: Sendable {
     /// Uses a hash suffix to avoid collisions between paths that differ only in
     /// whitespace or separators (e.g., "/Volumes/A B" vs "/Volumes/A_B").
     public static func snapshotURL(for rootPath: String) -> URL {
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        let dir = support.appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = snapshotDirectoryURL()
         // Readable prefix + FNV-1a hash suffix to guarantee uniqueness.
         let safe = rootPath
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: " ", with: "-")
             .trimmingCharacters(in: .init(charactersIn: "_"))
         let prefix = safe.isEmpty ? "root" : String(safe.prefix(40))
+        return dir.appendingPathComponent("\(prefix)-\(String(fnv1a64(rootPath), radix: 16)).tdiff")
+    }
+
+    private static func snapshotDirectoryURL() -> URL {
+        if let override = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+                .appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
+        }
+
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
+        return support.appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
+    }
+
+    private static func fnv1a64(_ value: String) -> UInt64 {
         var hash: UInt64 = 0xcbf29ce484222325
-        for byte in rootPath.utf8 {
+        for byte in value.utf8 {
             hash ^= UInt64(byte)
             hash &*= 0x100000001b3
         }
-        return dir.appendingPathComponent("\(prefix)-\(String(hash, radix: 16)).tdiff")
+        return hash
     }
 
     public func save() throws {
         let url = TemporalSnapshot.snapshotURL(for: meta.rootPath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         // Sort by path for deterministic output (Dictionary iteration order is unstable).
         let entries = byPath
             .map { SnapshotEntry(path: $0.key, size: $0.value) }
@@ -141,8 +157,8 @@ public struct TemporalSnapshot: Sendable {
     }
 
     private func binaryData(entries: [SnapshotEntry]) throws -> Data {
-        let rootPathBytes = Array(meta.rootPath.utf8)
-        guard rootPathBytes.count <= Int(UInt16.max) else {
+        let rootPathLength = meta.rootPath.utf8.count
+        guard rootPathLength <= Int(UInt16.max) else {
             throw TemporalSnapshotFormatError.invalidBinaryHeader
         }
         guard meta.dirCount >= 0 && meta.dirCount <= Int(UInt32.max) else {
@@ -150,7 +166,7 @@ public struct TemporalSnapshot: Sendable {
         }
 
         var data = Data()
-        data.reserveCapacity(64 + rootPathBytes.count + (entries.count * 16))
+        data.reserveCapacity(64 + rootPathLength + (entries.count * 16))
 
         data.append(TemporalSnapshotBinary.magic)
         data.appendLE(TemporalSnapshotBinary.version)
@@ -161,18 +177,18 @@ public struct TemporalSnapshot: Sendable {
         data.appendLE(meta.createdAt.timeIntervalSince1970)
         data.appendLE(meta.totalBytes)
         data.appendLE(UInt32(meta.dirCount))
-        data.appendLE(UInt16(rootPathBytes.count))
-        data.append(contentsOf: rootPathBytes)
+        data.appendLE(UInt16(rootPathLength))
+        data.append(contentsOf: meta.rootPath.utf8)
         // v2: case-sensitivity flag
         data.append(meta.isCaseSensitive ? 1 : 0)
 
         for entry in entries {
-            let pathBytes = Array(entry.path.utf8)
-            guard pathBytes.count <= Int(UInt16.max) else {
+            let pathLength = entry.path.utf8.count
+            guard pathLength <= Int(UInt16.max) else {
                 throw TemporalSnapshotFormatError.invalidBinaryHeader
             }
-            data.appendLE(UInt16(pathBytes.count))
-            data.append(contentsOf: pathBytes)
+            data.appendLE(UInt16(pathLength))
+            data.append(contentsOf: entry.path.utf8)
             data.appendLE(entry.size)
         }
         return data
