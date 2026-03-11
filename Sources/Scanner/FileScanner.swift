@@ -298,6 +298,12 @@ public final class FileScanner: @unchecked Sendable {
         var children: [(node: FileNode, name: String)] = []
         var subdirs: [(name: String, childIndex: Int, dev: Int32, inode: UInt64)] = []
         var bundleDirs: [(name: String, childIndex: Int)] = []
+        if !rawEntries.isEmpty {
+            // Hot path: pre-size per-directory buffers to reduce repeated growth.
+            children.reserveCapacity(rawEntries.count)
+            subdirs.reserveCapacity(rawEntries.count / 2)
+            bundleDirs.reserveCapacity(rawEntries.count / 8)
+        }
 
         var totalFileSize: UInt64 = 0
         var totalAllocatedSize: UInt64 = 0
