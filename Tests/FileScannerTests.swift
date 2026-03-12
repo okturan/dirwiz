@@ -452,6 +452,47 @@ struct FileNodeTests {
         #expect(nodes[first + 2].fileSize == 10, "Expected 10 (A) third, got \(nodes[first + 2].fileSize)")
     }
 
+    @Test("sortAllChildren skips already strictly-descending slices")
+    func sortAllChildrenSkipsAlreadyStrictlyDescendingSlices() {
+        let tree = FileTree()
+        tree.setRootPath("/test")
+        var root = FileNode(); root.isDirectory = true
+        tree.addNode(root, name: "test")
+
+        var large = FileNode(); large.fileSize = 90
+        var medium = FileNode(); medium.fileSize = 40
+        var small = FileNode(); small.fileSize = 10
+        tree.addChildren([
+            (node: large, name: "large.bin"),
+            (node: medium, name: "medium.bin"),
+            (node: small, name: "small.bin"),
+        ], parentIndex: 0)
+
+        let beforeNodes = tree.nodesSnapshot()
+        let beforeSearchEntries = tree.searchIndexSnapshot().entries
+        let rootFirstBefore = beforeNodes[0].firstChildIndex
+        let namesBefore = (Int(rootFirstBefore)..<Int(rootFirstBefore) + 3).map {
+            tree.name(at: UInt32($0))
+        }
+
+        tree.sortAllChildren()
+
+        let afterNodes = tree.nodesSnapshot()
+        let afterSearchEntries = tree.searchIndexSnapshot().entries
+        let rootFirstAfter = afterNodes[0].firstChildIndex
+        let namesAfter = (Int(rootFirstAfter)..<Int(rootFirstAfter) + 3).map {
+            tree.name(at: UInt32($0))
+        }
+
+        #expect(rootFirstAfter == rootFirstBefore)
+        #expect(namesAfter == namesBefore)
+        #expect(afterSearchEntries.count == beforeSearchEntries.count)
+        for i in 0..<min(afterSearchEntries.count, beforeSearchEntries.count) {
+            #expect(afterSearchEntries[i].offset == beforeSearchEntries[i].offset)
+            #expect(afterSearchEntries[i].length == beforeSearchEntries[i].length)
+        }
+    }
+
     @Test("FileTree size accumulation works")
     func sizeAccumulation() {
         let tree = FileTree()

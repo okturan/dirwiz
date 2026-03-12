@@ -590,6 +590,22 @@ public final class FileTree: @unchecked Sendable {
                 let end = start + Int(nodes[i].childCount)
                 guard end <= nodes.count, end <= lowercaseNameEntries.count else { continue }
 
+                // Common-case fast path: skip permutation work for slices that are
+                // already strictly descending by size.
+                var isStrictlyDescending = true
+                var previousSize = nodes[start].fileSize
+                for j in (start + 1)..<end {
+                    let currentSize = nodes[j].fileSize
+                    if previousSize <= currentSize {
+                        isStrictlyDescending = false
+                        break
+                    }
+                    previousSize = currentSize
+                }
+                if isStrictlyDescending {
+                    continue
+                }
+
                 // Sort by size descending via index permutation, then apply in-place
                 // using cycle-following on the src→dst mapping.
                 //
