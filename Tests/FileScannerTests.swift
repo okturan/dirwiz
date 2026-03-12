@@ -164,6 +164,18 @@ struct FileNodeTests {
         #expect(hash == 0, "Files without extension should have hash 0")
     }
 
+    @Test("Extension hash is ASCII case-insensitive")
+    func extensionHashASCIICaseInsensitive() {
+        #expect(extensionHash("photo.JPG") == extensionHash("photo.jpg"))
+        #expect(extensionHash("archive.TAR.GZ") == extensionHash("archive.tar.gz"))
+    }
+
+    @Test("Extension hash matches legacy Unicode lowercasing behavior")
+    func extensionHashUnicodeMatchesLegacy() {
+        let name = "report.ÇAĞRI"
+        #expect(extensionHash(name) == legacyExtensionHash(name))
+    }
+
     @Test("FileTree path building works")
     func pathBuilding() {
         let tree = FileTree()
@@ -424,6 +436,17 @@ struct FileNodeTests {
         #expect(tree.nodes[0].fileSize == 100, "Root should accumulate child's file size")
         #expect(tree.nodes[0].allocatedSize == 128, "Root should accumulate child's allocated size")
     }
+}
+
+private func legacyExtensionHash(_ name: String) -> UInt32 {
+    guard let dotIndex = name.lastIndex(of: ".") else { return 0 }
+    let ext = name[name.index(after: dotIndex)...].lowercased()
+    guard !ext.isEmpty else { return 0 }
+    var hash: UInt32 = 5381
+    for byte in ext.utf8 {
+        hash = ((hash &<< 5) &+ hash) &+ UInt32(byte)
+    }
+    return hash
 }
 @Suite("FileScanner Mock Tests")
 struct FileScannerMockTests {

@@ -620,6 +620,29 @@ public final class FileTree: @unchecked Sendable {
 // MARK: - Extension Hash
 
 public func extensionHash(_ name: String) -> UInt32 {
+    let bytes = name.utf8
+    guard let dot = bytes.lastIndex(of: UInt8(ascii: ".")),
+          dot < bytes.index(before: bytes.endIndex) else { return 0 }
+
+    // Fast path: common ASCII extensions hash directly from UTF-8 bytes, avoiding
+    // substring/lowercased allocations in scan hot paths.
+    var hash: UInt32 = 5381
+    var i = bytes.index(after: dot)
+    while i < bytes.endIndex {
+        let byte = bytes[i]
+        if byte & 0x80 != 0 {
+            // Preserve exact Unicode lowercasing semantics for non-ASCII extensions.
+            return extensionHashUnicodeFallback(name)
+        }
+        let lowered = (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z")) ? (byte &+ 32) : byte
+        hash = ((hash &<< 5) &+ hash) &+ UInt32(lowered)
+        i = bytes.index(after: i)
+    }
+    return hash
+}
+
+@inline(__always)
+private func extensionHashUnicodeFallback(_ name: String) -> UInt32 {
     guard let dotIndex = name.lastIndex(of: ".") else { return 0 }
     let ext = name[name.index(after: dotIndex)...].lowercased()
     guard !ext.isEmpty else { return 0 }
