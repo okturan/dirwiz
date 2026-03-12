@@ -203,15 +203,21 @@ public final class FileTree: @unchecked Sendable {
     ) -> R {
         var segments: [(offset: Int, length: Int)] = []
         var totalSegmentBytes = 0
+        let poolCount = stringPool.count
         var current = index
         while current != FileNode.invalid {
             let i = Int(current)
             guard i < nodes.count else { break }
             let node = nodes[i]
             if node.parentIndex == FileNode.invalid { break }
-            let segment = (offset: Int(node.nameOffset), length: Int(node.nameLength))
-            segments.append(segment)
-            totalSegmentBytes += segment.length
+            let offset = Int(node.nameOffset)
+            let length = Int(node.nameLength)
+            let end = offset + length
+            if offset <= poolCount, end <= poolCount {
+                let segment = (offset: offset, length: length)
+                segments.append(segment)
+                totalSegmentBytes += segment.length
+            }
             current = node.parentIndex
         }
 
@@ -242,7 +248,13 @@ public final class FileTree: @unchecked Sendable {
 
         buf.append(0)
         return buf.withUnsafeBufferPointer { ptr in
-            body(ptr.baseAddress!)
+            guard let baseAddress = ptr.baseAddress else {
+                var terminator = CChar(0)
+                return withUnsafePointer(to: &terminator) { zeroPointer in
+                    body(zeroPointer)
+                }
+            }
+            return body(baseAddress)
         }
     }
 

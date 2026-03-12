@@ -240,6 +240,39 @@ struct FileNodeTests {
         #expect(cPath == tree.path(at: 2))
     }
 
+    @Test("FileTree snapshot C path skips malformed name segment safely")
+    func snapshotCPathSkipsMalformedSegment() {
+        let tree = FileTree()
+        tree.setRootPath("/Users")
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "Users")
+
+        var child = FileNode()
+        child.isDirectory = true
+        tree.addChildren([(node: child, name: "Documents")], parentIndex: 0)
+
+        var leaf = FileNode()
+        leaf.fileSize = 100
+        tree.addChildren([(node: leaf, name: "readme.txt")], parentIndex: 1)
+
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+        var malformedNodes = nodes
+        malformedNodes[2].nameOffset = UInt32(stringPool.count + 8)
+        malformedNodes[2].nameLength = 32
+
+        let cPath = FileTree.withCPathFromSnapshot(
+            at: 2,
+            nodes: malformedNodes,
+            stringPool: stringPool,
+            rootPath: rootPath
+        ) { ptr in
+            String(cString: ptr)
+        }
+
+        #expect(cPath == "/Users/Documents")
+    }
+
     @Test("Search index stays aligned with nodes after bulk insertion")
     func searchIndexAlignedAfterBulkInsertion() {
         let tree = FileTree()
