@@ -648,25 +648,35 @@ public final class FileTree: @unchecked Sendable {
 // MARK: - Extension Hash
 
 public func extensionHash(_ name: String) -> UInt32 {
-    let bytes = name.utf8
-    guard let dot = bytes.lastIndex(of: UInt8(ascii: ".")),
-          dot < bytes.index(before: bytes.endIndex) else { return 0 }
-
-    // Fast path: common ASCII extensions hash directly from UTF-8 bytes, avoiding
-    // substring/lowercased allocations in scan hot paths.
-    var hash: UInt32 = 5381
-    var i = bytes.index(after: dot)
-    while i < bytes.endIndex {
-        let byte = bytes[i]
-        if byte & 0x80 != 0 {
-            // Preserve exact Unicode lowercasing semantics for non-ASCII extensions.
-            return extensionHashUnicodeFallback(name)
+    var fastResult: UInt32?
+    let usedFastPath = name.utf8.withContiguousStorageIfAvailable { bytes in
+        guard let dot = bytes.lastIndex(of: UInt8(ascii: ".")), dot + 1 < bytes.count else {
+            fastResult = 0
+            return
         }
-        let lowered = (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z")) ? (byte &+ 32) : byte
-        hash = ((hash &<< 5) &+ hash) &+ UInt32(lowered)
-        i = bytes.index(after: i)
+
+        // Fast path: common ASCII extensions hash directly from UTF-8 bytes, avoiding
+        // substring/lowercased allocations in scan hot paths.
+        var hash: UInt32 = 5381
+        var i = dot + 1
+        while i < bytes.count {
+            let byte = bytes[i]
+            if byte & 0x80 != 0 {
+                // Preserve exact Unicode lowercasing semantics for non-ASCII extensions.
+                fastResult = nil
+                return
+            }
+            let lowered = (byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z")) ? (byte &+ 32) : byte
+            hash = ((hash &<< 5) &+ hash) &+ UInt32(lowered)
+            i += 1
+        }
+        fastResult = hash
+    } != nil
+
+    if usedFastPath, let result = fastResult {
+        return result
     }
-    return hash
+    return extensionHashUnicodeFallback(name)
 }
 
 @inline(__always)

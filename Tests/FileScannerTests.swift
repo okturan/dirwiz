@@ -176,6 +176,19 @@ struct FileNodeTests {
         #expect(extensionHash(name) == legacyExtensionHash(name))
     }
 
+    @Test("Extension hash trailing dot produces zero")
+    func extensionHashTrailingDot() {
+        #expect(extensionHash("archive.") == 0)
+    }
+
+    @Test("Extension hash ASCII fast path matches legacy")
+    func extensionHashASCIIFastPathMatchesLegacy() {
+        let names = ["photo.JPG", "archive.tar.gz", ".gitignore", "README.MD"]
+        for name in names {
+            #expect(extensionHash(name) == legacyExtensionHash(name))
+        }
+    }
+
     @Test("FileTree path building works")
     func pathBuilding() {
         let tree = FileTree()
