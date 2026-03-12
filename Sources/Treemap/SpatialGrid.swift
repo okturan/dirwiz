@@ -3,6 +3,13 @@ import Foundation
 /// A flat 2D grid that maps viewport regions to overlapping TreemapRect indices.
 /// Enables O(1) cell lookup + small linear scan instead of O(n) over all rects.
 struct SpatialGrid {
+    private struct CellSpan {
+        let minCol: Int
+        let maxCol: Int
+        let minRow: Int
+        let maxRow: Int
+    }
+
     private let cols: Int
     private let rows: Int
     private let cellWidth: Float
@@ -29,17 +36,21 @@ struct SpatialGrid {
 
         // Pass 1: Count entries per cell.
         var counts = Array(repeating: 0, count: totalCells)
+        var validSpans: [(rectIndex: Int, span: CellSpan)] = []
+        validSpans.reserveCapacity(rects.count)
         for i in 0..<rects.count {
-            let r = rects[i]
-            guard r.width > 0, r.height > 0 else { continue }
-            let minCol = max(0, Int(r.x / cellWidth))
-            let maxCol = min(size - 1, Int((r.x + r.width - Float.ulpOfOne) / cellWidth))
-            let minRow = max(0, Int(r.y / cellHeight))
-            let maxRow = min(size - 1, Int((r.y + r.height - Float.ulpOfOne) / cellHeight))
-            guard minCol <= maxCol, minRow <= maxRow else { continue }
-            for row in minRow...maxRow {
+            guard let span = Self.cellSpan(
+                for: rects[i],
+                cols: size,
+                rows: size,
+                cellWidth: cellWidth,
+                cellHeight: cellHeight
+            ) else { continue }
+            validSpans.append((rectIndex: i, span: span))
+
+            for row in span.minRow...span.maxRow {
                 let rowOffset = row * size
-                for col in minCol...maxCol {
+                for col in span.minCol...span.maxCol {
                     counts[rowOffset + col] += 1
                 }
             }
@@ -54,19 +65,12 @@ struct SpatialGrid {
         // Pass 2: Fill indices.
         var indices = Array(repeating: 0, count: offsets[totalCells])
         var writePos = offsets
-        for i in 0..<rects.count {
-            let r = rects[i]
-            guard r.width > 0, r.height > 0 else { continue }
-            let minCol = max(0, Int(r.x / cellWidth))
-            let maxCol = min(size - 1, Int((r.x + r.width - Float.ulpOfOne) / cellWidth))
-            let minRow = max(0, Int(r.y / cellHeight))
-            let maxRow = min(size - 1, Int((r.y + r.height - Float.ulpOfOne) / cellHeight))
-            guard minCol <= maxCol, minRow <= maxRow else { continue }
-            for row in minRow...maxRow {
+        for (rectIndex, span) in validSpans {
+            for row in span.minRow...span.maxRow {
                 let rowOffset = row * size
-                for col in minCol...maxCol {
+                for col in span.minCol...span.maxCol {
                     let cell = rowOffset + col
-                    indices[writePos[cell]] = i
+                    indices[writePos[cell]] = rectIndex
                     writePos[cell] += 1
                 }
             }
@@ -97,5 +101,21 @@ struct SpatialGrid {
             }
         }
         return nil
+    }
+
+    private static func cellSpan(
+        for rect: TreemapRect,
+        cols: Int,
+        rows: Int,
+        cellWidth: Float,
+        cellHeight: Float
+    ) -> CellSpan? {
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        let minCol = max(0, Int(rect.x / cellWidth))
+        let maxCol = min(cols - 1, Int((rect.x + rect.width - Float.ulpOfOne) / cellWidth))
+        let minRow = max(0, Int(rect.y / cellHeight))
+        let maxRow = min(rows - 1, Int((rect.y + rect.height - Float.ulpOfOne) / cellHeight))
+        guard minCol <= maxCol, minRow <= maxRow else { return nil }
+        return CellSpan(minCol: minCol, maxCol: maxCol, minRow: minRow, maxRow: maxRow)
     }
 }
