@@ -1,5 +1,6 @@
 import Testing
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("Analysis Coordination Tests")
 struct AnalysisCoordinationTests {
@@ -15,6 +16,7 @@ struct AnalysisCoordinationTests {
         #expect(state.canStartHeavyTask(.iCloudAnalysis))
         #expect(state.canStartHeavyTask(.apfsQuery))
         #expect(state.canStartHeavyTask(.cloneCheck))
+        #expect(state.canStartHeavyTask(.bundleSizing))
 
         state.isHardlinkScanRunning = true
         #expect(!state.canStartHeavyTask(.hardlinkScan))
@@ -23,6 +25,7 @@ struct AnalysisCoordinationTests {
         #expect(!state.canStartHeavyTask(.iCloudAnalysis))
         #expect(!state.canStartHeavyTask(.apfsQuery))
         #expect(!state.canStartHeavyTask(.cloneCheck))
+        #expect(!state.canStartHeavyTask(.bundleSizing))
 
         state.isHardlinkScanRunning = false
         state.isAPFSQueryRunning = true
@@ -31,6 +34,7 @@ struct AnalysisCoordinationTests {
         #expect(!state.canStartHeavyTask(.spaceAnalysis))
         #expect(!state.canStartHeavyTask(.iCloudAnalysis))
         #expect(!state.canStartHeavyTask(.cloneCheck))
+        #expect(!state.canStartHeavyTask(.bundleSizing))
     }
 
     @MainActor
@@ -60,6 +64,7 @@ struct AnalysisCoordinationTests {
         state.isICloudAnalysisRunning = true
         state.isAPFSQueryRunning = true
         state.isCloneCheckRunning = true
+        state.isBundleSizingRunning = true
 
         state.resetForNewScan()
 
@@ -75,6 +80,7 @@ struct AnalysisCoordinationTests {
         #expect(!state.isICloudAnalysisRunning)
         #expect(!state.isAPFSQueryRunning)
         #expect(!state.isCloneCheckRunning)
+        #expect(!state.isBundleSizingRunning)
         #expect(state.activeHeavyTask == nil)
     }
 }

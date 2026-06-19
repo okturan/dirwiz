@@ -1,7 +1,8 @@
 import Testing
 import Foundation
 import CoreGraphics
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("Cushion Math Tests")
 struct CushionMathTests {

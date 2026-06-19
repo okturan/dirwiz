@@ -1,5 +1,6 @@
 import Foundation
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 /// Build a temporary directory tree for testing. Returns (rootPath, cleanup).
 /// Example: createTempTree(["docs/readme.txt": 100, "images/photo.jpg": 500, "empty_dir/": 0])

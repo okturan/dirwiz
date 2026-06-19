@@ -1,5 +1,6 @@
 import Testing
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("Spatial Grid Tests")
 struct SpatialGridTests {

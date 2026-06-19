@@ -1,11 +1,16 @@
 .build/
 .swiftpm/
+DirWiz.app/
 *.xcodeproj/
 xcuserdata/
 DerivedData/
 .DS_Store
 scorecard.png
 .desloppify/
-docs/
+dist/
+docs/*
+!docs/assets/
+docs/assets/*
+!docs/assets/*.png
 .claude/worktrees/
 repomix-output*

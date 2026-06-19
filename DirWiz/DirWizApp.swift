@@ -1,5 +1,6 @@
 import SwiftUI
-import DirWizLib
+import DirWizCore
+import DirWizUI
 
 @main
 struct DirWizApp: App {

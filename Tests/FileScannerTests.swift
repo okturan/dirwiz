@@ -1,6 +1,7 @@
 import Testing
 import Foundation
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("FileScanner Tests")
 struct FileScannerTests {
@@ -54,7 +55,7 @@ struct FileScannerTests {
         let (path, cleanup) = try createTempTree(Self.standardLayout)
         defer { cleanup() }
 
-        let scanner = FileScanner()
+        let scanner = FileScanner(deferTreeMaterialization: true)
         let progress = ScanProgress()
         let tree = FileTree()
         await scanner.scan(path: path, progress: progress, tree: tree)
@@ -977,5 +978,62 @@ struct FileScannerMockTests {
             #expect(progress.estimatedTotalItems == 4_000,
                 "Root scans should include the Data volume inode estimate as well")
         }
+    }
+
+    @Test("Real filesystem deferred scan preserves tree structure")
+    func realFilesystemDeferredScanPreservesTreeStructure() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dirwiz-deferred-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("alpha/beta", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Sample.app/Contents", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data("one".utf8).write(to: root.appendingPathComponent("alpha/a.txt"))
+        try Data("two".utf8).write(to: root.appendingPathComponent("alpha/beta/b.txt"))
+        try Data("bundle".utf8).write(to: root.appendingPathComponent("Sample.app/Contents/info.txt"))
+
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        let tree = FileTree()
+        await scanner.scan(path: root.path, progress: progress, tree: tree)
+
+        #expect(progress.scanComplete)
+        #expect(tree.count >= 5)
+
+        var paths: [String: FileNode] = [:]
+        for i in 0..<tree.count {
+            let index = UInt32(i)
+            paths[tree.path(at: index)] = tree.nodes[i]
+            let node = tree.nodes[i]
+            if node.parentIndex != FileNode.invalid {
+                #expect(Int(node.parentIndex) < tree.count)
+            }
+            if node.firstChildIndex != FileNode.invalid {
+                let start = Int(node.firstChildIndex)
+                let end = start + Int(node.childCount)
+                #expect(start >= 0)
+                #expect(end <= tree.count)
+                for childIndex in start..<end {
+                    #expect(tree.nodes[childIndex].parentIndex == index)
+                }
+            }
+        }
+
+        let alphaPath = root.appendingPathComponent("alpha").path
+        let betaPath = root.appendingPathComponent("alpha/beta").path
+        let filePath = root.appendingPathComponent("alpha/beta/b.txt").path
+        let bundlePath = root.appendingPathComponent("Sample.app").path
+
+        #expect(paths[alphaPath]?.isDirectory == true)
+        #expect(paths[betaPath]?.isDirectory == true)
+        #expect(paths[filePath]?.isDirectory == false)
+        #expect(paths[bundlePath]?.isBundle == true)
+        #expect((paths[bundlePath]?.displaySize ?? 0) > 0)
     }
 }

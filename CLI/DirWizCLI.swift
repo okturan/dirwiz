@@ -1,7 +1,7 @@
 import Foundation
-import DirWizLib
+import DirWizCore
 
-/// DirWiz CLI — command-line disk analysis using DirWizLib.
+/// DirWiz CLI — command-line disk analysis using DirWizCore.
 ///
 /// Usage:
 ///   dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>]

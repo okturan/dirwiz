@@ -1,6 +1,7 @@
 import Testing
 import CoreGraphics
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("Squarify Layout Tests")
 struct SquarifyLayoutTests {

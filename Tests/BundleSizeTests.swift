@@ -1,6 +1,7 @@
 import Testing
 import Foundation
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 // NOTE: File sizes use 4096-byte multiples to match APFS block size,
 // ensuring logical size == allocated size for deterministic assertions.
@@ -17,6 +18,17 @@ struct BundleSizeTests {
         let tree = FileTree()
         await scanner.scan(path: path, progress: progress, tree: tree)
         return (tree, progress)
+    }
+
+    private func scanMockTree(
+        mock: MockFilesystemProvider,
+        computeBundleSizes: Bool
+    ) async -> (scanner: FileScanner, tree: FileTree, progress: ScanProgress) {
+        let scanner = FileScanner(filesystem: mock, computeBundleSizes: computeBundleSizes)
+        let progress = ScanProgress()
+        let tree = FileTree()
+        await scanner.scan(path: "/root", progress: progress, tree: tree)
+        return (scanner, tree, progress)
     }
 
     /// Find a child node by name under a given parent index.
@@ -187,6 +199,83 @@ struct BundleSizeTests {
         let expected: UInt64 = 8192 + 4096
         #expect(root.fileSize == expected,
             "Root should accumulate bundle + loose file: expected \(expected), got \(root.fileSize)")
+    }
+
+    @Test("Deferred bundle sizing updates bundle leaf and parent totals")
+    func deferredBundleSizingUpdatesTree() async throws {
+        let mock = MockFilesystemProvider()
+        mock.inodeMap["/root"] = (device: 1, inode: 1)
+        mock.directories["/root"] = [
+            MockFilesystemProvider.dir(name: "Deferred.app", inode: 2),
+            MockFilesystemProvider.file(name: "loose.bin", size: 4096, allocatedSize: 4096, inode: 3),
+        ]
+        mock.directories["/root/Deferred.app"] = [
+            MockFilesystemProvider.dir(name: "Contents", inode: 4),
+        ]
+        mock.directories["/root/Deferred.app/Contents"] = [
+            MockFilesystemProvider.file(name: "payload.dat", size: 8192, allocatedSize: 8192, inode: 5),
+        ]
+
+        let (scanner, tree, _) = await scanMockTree(mock: mock, computeBundleSizes: false)
+
+        guard let (bundleIndex, bundleBefore) = findChild(named: "Deferred.app", under: 0, in: tree) else {
+            Issue.record("Deferred.app node not found")
+            return
+        }
+        #expect(bundleBefore.isBundle)
+        #expect(bundleBefore.fileSize == 0)
+        #expect(tree.nodesSnapshot()[0].fileSize == 4096)
+
+        let report = await scanner.resolveDeferredBundleSizes(in: tree)
+        let bundleAfter = tree.node(at: bundleIndex)
+        let rootAfter = tree.node(at: 0)
+
+        #expect(report.bundlesFound == 1)
+        #expect(report.bundlesResolved == 1)
+        #expect(bundleAfter?.fileSize == 8192)
+        #expect(bundleAfter?.allocatedSize == 8192)
+        #expect(rootAfter?.fileSize == 12_288)
+        #expect(rootAfter?.allocatedSize == 12_288)
+    }
+
+    @Test("Deferred bundle size update validates node identity")
+    func deferredBundleSizeUpdateValidatesNodeIdentity() {
+        let tree = FileTree()
+        tree.setRootPath("/root")
+
+        var root = FileNode()
+        root.isDirectory = true
+        _ = tree.addNode(root, name: "root")
+
+        var bundle = FileNode()
+        bundle.isDirectory = true
+        bundle.isBundle = true
+        bundle.device = 7
+        bundle.inode = 42
+        _ = tree.addChildren([(node: bundle, name: "Guarded.app")], parentIndex: 0)
+        tree.propagateSizes()
+
+        let rejected = tree.setNodeSizeAndPropagate(
+            at: 1,
+            fileSize: 8192,
+            allocatedSize: 8192,
+            expectedDevice: 7,
+            expectedInode: 99
+        )
+        #expect(!rejected)
+        #expect(tree.node(at: 1)?.fileSize == 0)
+        #expect(tree.node(at: 0)?.fileSize == 0)
+
+        let accepted = tree.setNodeSizeAndPropagate(
+            at: 1,
+            fileSize: 8192,
+            allocatedSize: 8192,
+            expectedDevice: 7,
+            expectedInode: 42
+        )
+        #expect(accepted)
+        #expect(tree.node(at: 1)?.fileSize == 8192)
+        #expect(tree.node(at: 0)?.fileSize == 8192)
     }
 
     @Test("Multiple bundle extensions are recognized")

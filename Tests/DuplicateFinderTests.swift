@@ -1,6 +1,7 @@
 import Testing
 import Foundation
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 // MARK: - Helpers
 
@@ -102,6 +103,77 @@ struct DuplicateFinderTests {
         let tree = await scanDirectory(url.path)
         let groups = await finder.findDuplicates(in: tree)
         #expect(groups.isEmpty, "Same size but different content should not be duplicates")
+    }
+
+    @Test("Byte verifier groups only exact matches")
+    func byteVerifierGroupsOnlyExactMatches() async throws {
+        let a = Data(repeating: 0x01, count: 8192)
+        let b = a
+        let c = Data(repeating: 0x02, count: 8192)
+        let (url, cleanup) = try createTempFiles([
+            "a.bin": a,
+            "b.bin": b,
+            "c.bin": c,
+        ])
+        defer { cleanup() }
+
+        let groups = DuplicateContentVerifier.exactGroups(
+            paths: [
+                url.appendingPathComponent("a.bin").path,
+                url.appendingPathComponent("b.bin").path,
+                url.appendingPathComponent("c.bin").path,
+            ],
+            expectedSize: UInt64(a.count)
+        )
+
+        #expect(groups.count == 1)
+        #expect(Set(groups[0].map { URL(fileURLWithPath: $0).lastPathComponent }) == ["a.bin", "b.bin"])
+    }
+
+    @Test("Trash safety requires an unselected byte-identical copy")
+    func trashSafetyRequiresUnselectedExactCopy() async throws {
+        let content = Data(repeating: 0xAB, count: 8192)
+        let (url, cleanup) = try createTempFiles([
+            "keep.bin": content,
+            "remove.bin": content,
+        ])
+        defer { cleanup() }
+
+        let keepPath = url.appendingPathComponent("keep.bin").path
+        let removePath = url.appendingPathComponent("remove.bin").path
+        let group = DuplicateGroup(fileSize: UInt64(content.count), hash: 1, paths: [keepPath, removePath])
+
+        let safety = DuplicateContentVerifier.trashSafety(for: group, selectedPaths: [removePath])
+
+        #expect(safety.safePaths == [removePath])
+        #expect(safety.unsafePaths.isEmpty)
+    }
+
+    @Test("Trash safety rejects files whose unselected copy changed after scan")
+    func trashSafetyRejectsChangedUnselectedCopy() async throws {
+        let content = Data(repeating: 0xAB, count: 8192)
+        var changed = content
+        changed[1024] = 0xCD
+        let (url, cleanup) = try createTempFiles([
+            "keep.bin": content,
+            "remove.bin": content,
+        ])
+        defer { cleanup() }
+
+        let keepURL = url.appendingPathComponent("keep.bin")
+        let removePath = url.appendingPathComponent("remove.bin").path
+        let group = DuplicateGroup(
+            fileSize: UInt64(content.count),
+            hash: 1,
+            paths: [keepURL.path, removePath]
+        )
+
+        try changed.write(to: keepURL, options: .atomic)
+
+        let safety = DuplicateContentVerifier.trashSafety(for: group, selectedPaths: [removePath])
+
+        #expect(safety.safePaths.isEmpty)
+        #expect(safety.unsafePaths == [removePath])
     }
 
     @Test("Two files with different sizes are not duplicates")

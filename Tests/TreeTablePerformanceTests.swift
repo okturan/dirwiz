@@ -1,6 +1,7 @@
 import Testing
 import Foundation
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("TreeTable Performance Tests")
 struct TreeTablePerformanceTests {
@@ -26,7 +27,7 @@ struct TreeTablePerformanceTests {
     func revealScrollDelayIsAdequate() throws {
         let testDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let repoRoot = testDir.deletingLastPathComponent()
-        let sourcePath = repoRoot.appendingPathComponent("Sources/Views/TreeTableView.swift").path
+        let sourcePath = repoRoot.appendingPathComponent("Sources/DirWizUI/Views/TreeTableView.swift").path
         let source = try String(contentsOfFile: sourcePath, encoding: .utf8)
         let pattern = #"\.now\(\)\s*\+\s*([0-9]*\.?[0-9]+)"#
         let regex = try NSRegularExpression(pattern: pattern)

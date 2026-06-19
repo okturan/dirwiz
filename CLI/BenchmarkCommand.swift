@@ -1,5 +1,5 @@
 import Foundation
-import DirWizLib
+import DirWizCore
 
 private struct BenchmarkIterationReport {
     let iteration: Int

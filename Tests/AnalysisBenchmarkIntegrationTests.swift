@@ -1,6 +1,7 @@
 import Testing
 import Foundation
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @Suite("Analysis Benchmark Integration Tests")
 struct AnalysisBenchmarkIntegrationTests {

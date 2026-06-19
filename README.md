@@ -1,54 +1,102 @@
 # DirWiz
 
-A macOS disk usage analyzer with a Metal-rendered cushion treemap, duplicate finder, and hardlink deduplication — inspired by WinDirStat.
+macOS disk usage analyzer with a Metal cushion treemap, fast filesystem scans, duplicate detection, hardlink analysis, and a scriptable CLI.
 
-![macOS](https://img.shields.io/badge/macOS-14%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
+<p align="center">
+  <img src="docs/assets/dirwiz-logo.png" width="140" alt="DirWiz logo">
+</p>
+
+![macOS](https://img.shields.io/badge/macOS-15%2B-blue)
+![Swift](https://img.shields.io/badge/Swift-6-orange)
+
+## What It Does
+
+DirWiz scans a volume or folder and builds a compact file tree using on-disk sizes, not just logical file lengths. The app is built for large local volumes where Finder size calculation is too slow or too shallow.
+
+The main UI combines a WinDirStat-style treemap, a sortable file tree, extension breakdowns, search, duplicate groups, hardlink groups, and space insights. Full Disk Access is detected at launch, with clear guidance when macOS privacy permissions will hide files.
 
 ## Features
 
-- **Cushion Treemap** — Metal-rendered, WinDirStat-style visualization with per-extension vivid colors
-- **File Scanner** — Fast recursive scan with real-time progress, allocated (on-disk) size display
-- **Duplicate Finder** — Content-hash-based duplicate detection across directories
-- **Hardlink Deduplication** — Identify and deduplicate hardlinked files
-- **Extension Drill-down** — Filter and explore by file extension
-- **FDA Banner** — Full Disk Access guidance for restricted directories
-- **CLI** — `DirWizCLI` for scripted scanning and benchmarking
-
-## Tech Stack
-
-Swift, SwiftUI, Metal, Accelerate, GCD — no third-party dependencies.
+- **Fast scanner**: Uses bulk filesystem metadata reads, bounded worker pools, compact node storage, and deferred tree materialization for large scans.
+- **Deferred bundle sizing**: App bundles stay as opaque leaves during the first scan so the UI becomes usable sooner. Bundle sizes are resolved in the background and propagated into parent totals.
+- **Metal cushion treemap**: Shows disk usage visually with extension-based color mapping, zoom, selection, and hover details.
+- **Sortable tree table**: Browse folders and files by on-disk size, logical size, item count, modified date, and parent percentage.
+- **Duplicate finder**: Groups candidate files by size and hashes, then verifies byte-for-byte before any cleanup action.
+- **Hardlink analysis**: Finds files that share inode identity and reports extra linked bytes for analysis. These bytes are not the same as reclaimable duplicate space.
+- **Space insights**: Breaks usage into categories, file ages, size distributions, iCloud status, APFS clone checks, and local snapshot information.
+- **Quick Look and Finder actions**: Preview files, reveal them in Finder, copy paths, or move selected items to Trash.
+- **CLI**: `dirwiz-cli` supports scripted scans, JSON export, duplicate checks, volume info, and benchmark runs.
 
 ## Build
 
 ```bash
-# Xcode
 open Package.swift
-
-# CLI
 swift build -c release
-.build/release/DirWizCLI <path>
-
-# Tests
 swift test
 ```
 
+Build a release app bundle:
+
+```bash
+./scripts/package-release.sh
+open dist/DirWiz.app
+```
+
+The package script creates `dist/DirWiz.app` and `dist/DirWiz-1.0.0-macos.zip`.
+
+Run the CLI:
+
+```bash
+.build/release/dirwiz-cli scan /path/to/scan
+.build/release/dirwiz-cli scan /path/to/scan --json --max-depth 3
+.build/release/dirwiz-cli duplicates /path/to/scan --min-size 1048576
+.build/release/dirwiz-cli benchmark /path/to/scan --iterations 3
+```
+
+## Full Disk Access
+
+macOS restricts many user and system folders unless the app has Full Disk Access.
+
+For complete scans:
+
+1. Build the app with `./scripts/package-release.sh`.
+2. Move `dist/DirWiz.app` to `/Applications/DirWiz.app`.
+3. Open System Settings.
+4. Go to Privacy & Security, then Full Disk Access.
+5. Add or enable DirWiz from `/Applications`.
+
+Use the same installed app bundle after granting permission. Do not grant Full Disk Access to `.build/release/DirWiz`; SwiftPM rebuilds are raw executables and macOS may treat each rebuilt binary as a different app.
+
+This Mac release script signs with a local Apple signing identity when one is available. If none is installed, it falls back to ad hoc signing. Ad hoc builds can lose Full Disk Access after rebuilds because macOS ties privacy grants to code identity.
+
 ## Architecture
 
-```
+```text
 Sources/
-├── Models/       AppState, FileNode, DuplicateState, FileCategory, ExtensionPalette
-├── Scanner/      FileScanner, DuplicateFinder, HardlinkFinder
-├── Treemap/      CushionRenderer (Metal), CushionTreemapView, TreemapInteraction
-├── Views/        ContentView, ExtensionLegend, ExtensionListView, TreeTableView, DuplicateFilesView
-└── CLI/          DirWizCLI, BenchmarkCommand
-Tests/            FileScannerTests, DuplicateFinderTests, HardlinkFinderTests
+├── DirWizCore/   Scanner, FileTree, duplicate detection, hardlinks, diff, export, analysis
+├── DirWizUI/     AppState, SwiftUI views, Metal treemap, Quick Look, navigation
+DirWiz/           macOS app target
+CLI/              dirwiz-cli target
+Tests/            Scanner, tree, duplicate, hardlink, treemap, analysis, and UI-state tests
 ```
 
-## Feature Branches
+## Scanner Notes
 
-| Branch | Description |
-|--------|-------------|
-| `feature/bundle` | App bundle analysis |
-| `feature/quicklook` | QuickLook preview integration |
-| `feature/trash` | Move to Trash support |
-| `feature/footer` | Status bar / footer improvements |
+DirWiz stores scan results in a flat array tree with a shared string pool. This keeps parent and child references stable by index and avoids per-node object overhead on large scans.
+
+The app path favors quick first results. It skips inline recursive sizing for bundles, renders the tree, then computes bundle sizes as a bounded background task. The CLI defaults to exact inline bundle sizing unless `DIRWIZ_SKIP_BUNDLE_SIZES=1` is set.
+
+Useful scan toggles:
+
+```bash
+DIRWIZ_SCAN_WORKERS=6
+DIRWIZ_DEFER_TREE=0
+DIRWIZ_SKIP_BUNDLE_SIZES=1
+DIRWIZ_BUNDLE_WORKERS=4
+```
+
+## Requirements
+
+- macOS 15 or newer
+- Swift 6 toolchain
+- Xcode command line tools

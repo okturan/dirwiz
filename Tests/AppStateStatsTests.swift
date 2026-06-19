@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import DirWizLib
+@testable import DirWizCore
+@testable import DirWizUI
 
 @MainActor
 @Suite("AppState Statistics Tests")

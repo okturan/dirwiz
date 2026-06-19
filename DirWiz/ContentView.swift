@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
-import DirWizLib
+import DirWizCore
+import DirWizUI
 
 /// Root view with NavigationSplitView layout.
 struct ContentView: View {
@@ -187,7 +188,7 @@ struct ContentView: View {
                 } else {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                    Text("Scan Complete")
+                    Text(appState.isBundleSizingRunning ? "Sizing Bundles" : "Scan Complete")
                         .font(.callout.bold())
                 }
             }
@@ -435,39 +436,11 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func startScan() {
-        guard let volumeURL = appState.selectedVolume else { return }
-        // Cancel any existing scan (user may rescan without waiting).
-        appState.activeScanner?.cancel()
-        let scanner = FileScanner()
-        appState.activeScanner = scanner
-        let path = volumeURL.path
-
-        // Create tree upfront so the UI can observe it growing during scan.
-        let tree = FileTree()
-        appState.fileTree = tree
-        appState.resetForNewScan()
-        appState.activeTab = .treeView
-        appState.scanStartTime = CFAbsoluteTimeGetCurrent()
-
-        let token = appState.scanToken
-        Task {
-            await scanner.scan(path: path, progress: appState.scanProgress, tree: tree)
-            await MainActor.run {
-                // Discard completion if a newer scan was started while we ran.
-                guard appState.scanToken == token else { return }
-                appState.scanDuration = CFAbsoluteTimeGetCurrent() - appState.scanStartTime
-                appState.activeScanner = nil
-                appState.setTreemapRoot(0, recordHistory: false)
-                appState.computeExtensionStats()
-                Task {
-                    await appState.runPostScanAnalyses(tree: tree, volumePath: path, token: token)
-                }
-            }
-        }
+        appState.startSelectedVolumeScan()
     }
 
     private func cancelScan() {
-        appState.activeScanner?.cancel()
+        appState.cancelScan()
     }
 
     // MARK: - Export Report
@@ -504,7 +477,7 @@ struct ContentView: View {
 
         struct StackEntry { var index: UInt32; var depth: Int }
         var stack: [StackEntry] = [StackEntry(index: rootIndex, depth: 0)]
-        var lines: [String] = ["Path,Type,Size (bytes),Size (human),Extension,Depth"]
+        var lines: [String] = ["Path,Type,On Disk (bytes),On Disk (human),Logical Size (bytes),Extension,Depth"]
         lines.reserveCapacity(502)
 
         while !stack.isEmpty && lines.count <= 500 {
@@ -534,8 +507,9 @@ struct ContentView: View {
             lines.append([
                 csvQuote(path),
                 node.isDirectory ? "directory" : "file",
+                "\(node.displaySize)",
+                csvQuote(SizeFormatter.shared.format(node.displaySize)),
                 "\(node.fileSize)",
-                csvQuote(SizeFormatter.shared.format(node.fileSize)),
                 csvQuote(ext),
                 "\(entry.depth)",
             ].joined(separator: ","))

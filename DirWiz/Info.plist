@@ -8,12 +8,18 @@
     <string>DirWiz</string>
     <key>CFBundleDisplayName</key>
     <string>DirWiz</string>
+    <key>CFBundleExecutable</key>
+    <string>DirWiz</string>
+    <key>CFBundleIconFile</key>
+    <string>DirWiz.icns</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>1.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>NSFullDiskAccessUsageDescription</key>

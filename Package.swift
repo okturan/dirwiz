@@ -6,14 +6,21 @@ let package = Package(
     platforms: [
         .macOS(.v15)
     ],
+    products: [
+        .executable(name: "DirWiz", targets: ["DirWiz"]),
+        .executable(name: "dirwiz-cli", targets: ["dirwiz-cli"]),
+        .library(name: "DirWizCore", targets: ["DirWizCore"]),
+        .library(name: "DirWizUI", targets: ["DirWizUI"]),
+    ],
     targets: [
         .executableTarget(
             name: "DirWiz",
-            dependencies: ["DirWizLib"],
+            dependencies: ["DirWizCore", "DirWizUI"],
             path: "DirWiz",
             exclude: [
                 "Info.plist",
                 "DirWiz.entitlements",
+                "Resources",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
@@ -21,21 +28,28 @@ let package = Package(
         ),
         .executableTarget(
             name: "dirwiz-cli",
-            dependencies: ["DirWizLib"],
+            dependencies: ["DirWizCore"],
             path: "CLI",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
         ),
         .target(
-            name: "DirWizLib",
-            path: "Sources",
-            exclude: [],
+            name: "DirWizCore",
+            path: "Sources/DirWizCore",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
-                // Library must be optimized even in debug builds for instant search
-                // (debug -Onone makes the 2M-node scan ~12x slower).
-                .unsafeFlags(["-O"], .when(configuration: .debug)),
+            ],
+            linkerSettings: [
+                .linkedFramework("CoreServices"),
+            ]
+        ),
+        .target(
+            name: "DirWizUI",
+            dependencies: ["DirWizCore"],
+            path: "Sources/DirWizUI",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
             ],
             linkerSettings: [
                 .linkedFramework("Metal"),
@@ -46,7 +60,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DirWizTests",
-            dependencies: ["DirWizLib"],
+            dependencies: ["DirWizCore", "DirWizUI"],
             path: "Tests"
         ),
     ]
