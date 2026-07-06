@@ -270,6 +270,129 @@ struct AnalyzerWalkTests {
         #expect(result.cloudOnlySize == 0)
     }
 
+    // MARK: - iCloudAnalyzer container derivation (post-refactor: Step 3)
+
+    @Test("iCloudAnalyzer.relativeComponents handles root at /, exact-match ancestor, root-inside-container, and non-boundary false positives")
+    func iCloudRelativeComponentsHandlesRootVariants() throws {
+        // Root "/" — every absolute path is "inside" it; components are the full path split.
+        #expect(
+            iCloudAnalyzer.relativeComponents(of: "/Users/alice/Library/Mobile Documents/", from: "/")
+                == ["Users", "alice", "Library", "Mobile Documents"]
+        )
+
+        // ancestor == child exactly.
+        #expect(iCloudAnalyzer.relativeComponents(of: "/Users/alice", from: "/Users/alice") == [])
+
+        // Root strictly inside a container.
+        #expect(
+            iCloudAnalyzer.relativeComponents(
+                of: "/Users/alice/Library/Mobile Documents/com~apple~CloudDocs",
+                from: "/Users/alice/Library/Mobile Documents/"
+            ) == ["com~apple~CloudDocs"]
+        )
+
+        // Root unrelated to any container.
+        #expect(
+            iCloudAnalyzer.relativeComponents(of: "/Applications", from: "/Users/alice/Library/Mobile Documents/")
+                == nil
+        )
+
+        // Textual-but-not-path-boundary prefix must not match (e.g. "al" vs "alice").
+        #expect(iCloudAnalyzer.relativeComponents(of: "/Users/alicexyz", from: "/Users/alice") == nil)
+    }
+
+    @Test("iCloudAnalyzer.containerSubtreeRoots resolves root-is-ancestor, root-inside-container, and unrelated-root cases")
+    func iCloudContainerSubtreeRootsResolvesAllCases() throws {
+        // iCloudPrefixes is derived from the real current-user home directory, so these
+        // fixtures must be rooted there too.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+        // Root is an ancestor of a container that exists in the tree: locate its node.
+        let treeA = makeTree(rootPath: home, [
+            dir("Library", [
+                dir("Mobile Documents", [file("doc.txt", size: 10)]),
+            ]),
+        ])
+        let snapshotA = treeA.pathBuildingSnapshot()
+        let rootsA = iCloudAnalyzer.containerSubtreeRoots(
+            nodes: snapshotA.nodes, stringPool: snapshotA.stringPool, rootPath: snapshotA.rootPath
+        )
+        #expect(rootsA.count == 1)
+        if let onlyRoot = rootsA.first {
+            #expect(treeA.path(at: onlyRoot) == home + "/Library/Mobile Documents")
+        }
+
+        // Root is itself inside a container: whole tree (root index 0) is in scope.
+        let treeB = makeTree(rootPath: home + "/Library/Mobile Documents/com~apple~CloudDocs", [
+            file("doc.txt", size: 10),
+        ])
+        let snapshotB = treeB.pathBuildingSnapshot()
+        let rootsB = iCloudAnalyzer.containerSubtreeRoots(
+            nodes: snapshotB.nodes, stringPool: snapshotB.stringPool, rootPath: snapshotB.rootPath
+        )
+        #expect(rootsB == [0])
+
+        // Root unrelated to any container: nothing to scope to.
+        let treeC = makeTree(rootPath: "/Applications", [file("placeholder", size: 10)])
+        let snapshotC = treeC.pathBuildingSnapshot()
+        let rootsC = iCloudAnalyzer.containerSubtreeRoots(
+            nodes: snapshotC.nodes, stringPool: snapshotC.stringPool, rootPath: snapshotC.rootPath
+        )
+        #expect(rootsC.isEmpty)
+
+        // Neither container exists on disk under this root: derivation finds the ancestor
+        // relationship but descendPath comes up empty, so no subtree roots either.
+        let treeD = makeTree(rootPath: home, [dir("Documents", [file("note.txt", size: 5)])])
+        let snapshotD = treeD.pathBuildingSnapshot()
+        let rootsD = iCloudAnalyzer.containerSubtreeRoots(
+            nodes: snapshotD.nodes, stringPool: snapshotD.stringPool, rootPath: snapshotD.rootPath
+        )
+        #expect(rootsD.isEmpty)
+    }
+
+    @Test("iCloudAnalyzer walks only the container subtree when the scan root is broader")
+    func iCloudAnalyzeScopesToContainerSubtree() async throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let tree = makeTree(rootPath: home, [
+            dir("Documents", [file("plain.txt", size: 999)]),
+            dir("Library", [
+                dir("Mobile Documents", [
+                    nestedDir("com~apple~CloudDocs", [file("synced.pages", size: 4_096)]),
+                ]),
+            ]),
+        ])
+
+        let result = await iCloudAnalyzer().analyze(tree: tree)
+
+        // The synthetic path doesn't exist on disk, so queryStatus can't classify it as
+        // downloaded/cloud-only/downloading — but it must still be found and counted, which
+        // is what this test is actually checking (the walk reaches the right subtree and
+        // nowhere else). Plain Documents content must never be considered.
+        let totalCount = result.groups.reduce(0) { $0 + $1.fileCount }
+        let totalSize = result.groups.reduce(0) { $0 + $1.totalSize }
+        #expect(totalCount == 1)
+        #expect(totalSize == 4_096)
+        #expect(result.groups.allSatisfy { !$0.paths.contains { $0.contains("plain.txt") } })
+    }
+
+    @Test("iCloudAnalyzer returns an empty result when the task is already cancelled")
+    func iCloudReturnsEmptyWhenCancelled() async throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let tree = makeTree(rootPath: home, [
+            nestedDir("Library/Mobile Documents/com~apple~CloudDocs", [file("synced.pages", size: 4_096)]),
+        ])
+
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await iCloudAnalyzer().analyze(tree: tree)
+        }
+        let result = await task.value
+        #expect(result.groups.isEmpty)
+        #expect(result.totalLocalSize == 0)
+        #expect(result.evictableSize == 0)
+        #expect(result.cloudOnlySize == 0)
+    }
+
     // MARK: - SpaceAnalyzer characterization (pins pre-refactor behavior)
     //
     // SpaceAnalyzer's outer walk visits nodes in array-index order, which — for any tree a
