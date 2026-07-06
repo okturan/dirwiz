@@ -218,6 +218,65 @@ public final class FileTree: @unchecked Sendable {
         return rootPath + "/" + suffix
     }
 
+    /// Iterate non-directory nodes of a snapshot with a uniform cancellation cadence.
+    /// Returns false if cancelled (caller should treat this as "produced nothing usable").
+    /// This is the single blessed walk for post-scan analyzers (file age, size distribution,
+    /// etc.) — new analyzers that need to visit every file should use this instead of a
+    /// fresh hand-rolled loop.
+    public static func forEachFileInSnapshot(
+        _ nodes: [FileNode],
+        cancelEvery: Int = 0x10000,
+        _ body: (Int, FileNode) -> Void
+    ) -> Bool {
+        let cadence = max(cancelEvery, 1)
+        for i in 0..<nodes.count {
+            if i % cadence == 0, Task.isCancelled { return false }
+            let node = nodes[i]
+            if node.isDirectory { continue }
+            body(i, node)
+        }
+        return true
+    }
+
+    /// Locate a node by descending named path components from the root of a snapshot,
+    /// matching one component per tree level against child names (no path strings built).
+    /// Returns nil as soon as a component has no matching child. An empty `components`
+    /// array returns the root (index 0).
+    ///
+    /// Adapted from the technique in `TreeActions.findNodeIndex`, decoupled from stripping
+    /// an absolute path's `rootPath` prefix — callers that start from an absolute path derive
+    /// the relative components themselves.
+    public static func descendPath(
+        _ components: [String],
+        nodes: [FileNode],
+        stringPool: Data
+    ) -> UInt32? {
+        guard !nodes.isEmpty else { return nil }
+        var currentIndex: UInt32 = 0
+
+        for component in components {
+            let node = nodes[Int(currentIndex)]
+            guard node.firstChildIndex != FileNode.invalid else { return nil }
+            let childStart = Int(node.firstChildIndex)
+            let childEnd = min(childStart + Int(node.childCount), nodes.count)
+            var found = false
+            for ci in childStart..<childEnd {
+                let child = nodes[ci]
+                let start = Int(child.nameOffset)
+                let end = start + Int(child.nameLength)
+                guard end <= stringPool.count else { continue }
+                let name = String(data: stringPool[start..<end], encoding: .utf8) ?? ""
+                if name == component {
+                    currentIndex = UInt32(ci)
+                    found = true
+                    break
+                }
+            }
+            if !found { return nil }
+        }
+        return currentIndex
+    }
+
     /// Build an absolute path as a null-terminated C string from a pre-snapshotted tree.
     /// This avoids taking the tree lock in high-throughput callers that already have a snapshot.
     public static func withCPathFromSnapshot<R>(
