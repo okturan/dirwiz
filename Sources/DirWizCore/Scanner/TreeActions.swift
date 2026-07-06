@@ -104,7 +104,15 @@ public struct TreeActions: Sendable {
     }
 
     /// Apply cleanup preset to a duplicate group.
-    /// Returns paths to trash (all except the one to keep).
+    ///
+    /// Returns paths to trash (all except the one to keep). Returns an empty array
+    /// when no unambiguous keep-file can be determined; callers must treat `[]` as
+    /// "do nothing". This function fails closed: it never guesses a keep-file to
+    /// nominate the rest for deletion. Fail-closed cases are (1) any group member
+    /// that no longer resolves to a node in the current tree — stale paths mean the
+    /// scan no longer reflects reality — (2) `.keepOldest` when no member has a known
+    /// (non-zero) modified date, and (3) `.keepInDirectory` when `preferredDirectory`
+    /// is nil or no member's path has that prefix.
     public func applyPreset(
         _ preset: CleanupPreset,
         to group: DuplicateGroup,
@@ -139,24 +147,31 @@ public struct TreeActions: Sendable {
             return PathInfo(path: path, nodeIndex: idx, modifiedDate: date, allocatedSize: size)
         }
 
-        let keepIndex: Int
+        // A path that no longer resolves means the scan is stale — fail closed rather
+        // than nominate anything for deletion from an out-of-date view of the tree.
+        guard infos.allSatisfy({ $0.nodeIndex != nil }) else { return [] }
+
+        let keepIndex: Int?
         switch preset {
         case .keepNewest:
-            keepIndex = infos.indices.max(by: { infos[$0].modifiedDate < infos[$1].modifiedDate }) ?? 0
+            keepIndex = infos.indices.max(by: { infos[$0].modifiedDate < infos[$1].modifiedDate })
         case .keepOldest:
-            let minDate = infos.filter { $0.modifiedDate > 0 }.min(by: { $0.modifiedDate < $1.modifiedDate })?.modifiedDate ?? 0
-            keepIndex = minDate > 0
-                ? infos.firstIndex(where: { $0.modifiedDate == minDate }) ?? 0
-                : 0
+            if let minDate = infos.filter({ $0.modifiedDate > 0 }).min(by: { $0.modifiedDate < $1.modifiedDate })?.modifiedDate {
+                keepIndex = infos.firstIndex(where: { $0.modifiedDate == minDate })
+            } else {
+                keepIndex = nil
+            }
         case .keepLargest:
-            keepIndex = infos.indices.max(by: { infos[$0].allocatedSize < infos[$1].allocatedSize }) ?? 0
+            keepIndex = infos.indices.max(by: { infos[$0].allocatedSize < infos[$1].allocatedSize })
         case .keepInDirectory:
             if let dir = preferredDirectory {
-                keepIndex = infos.firstIndex(where: { $0.path.hasPrefix(dir) }) ?? 0
+                keepIndex = infos.firstIndex(where: { $0.path.hasPrefix(dir) })
             } else {
-                keepIndex = 0
+                keepIndex = nil
             }
         }
+
+        guard let keepIndex else { return [] }
 
         return infos.enumerated().compactMap { i, info in
             i == keepIndex ? nil : info.path

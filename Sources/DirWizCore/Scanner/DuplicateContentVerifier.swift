@@ -88,11 +88,11 @@ public enum DuplicateContentVerifier {
         if lhsPath == rhsPath { return true }
         if expectedSize == 0 { return true }
 
-        let lhsFD = lhsPath.withCString { open($0, O_RDONLY) }
+        let lhsFD = lhsPath.withCString { open($0, O_RDONLY | O_NOFOLLOW) }
         guard lhsFD >= 0 else { return false }
         defer { close(lhsFD) }
 
-        let rhsFD = rhsPath.withCString { open($0, O_RDONLY) }
+        let rhsFD = rhsPath.withCString { open($0, O_RDONLY | O_NOFOLLOW) }
         guard rhsFD >= 0 else { return false }
         defer { close(rhsFD) }
 
@@ -120,7 +120,7 @@ public enum DuplicateContentVerifier {
     }
 
     private static func fileSizeMatches(_ path: String, expectedSize: UInt64) -> Bool {
-        let fd = path.withCString { open($0, O_RDONLY) }
+        let fd = path.withCString { open($0, O_RDONLY | O_NOFOLLOW) }
         guard fd >= 0 else { return false }
         defer { close(fd) }
 

@@ -704,24 +704,29 @@ public final class FileTree: @unchecked Sendable {
 
     /// Zero a node's sizes and subtract the freed amount from all ancestors.
     /// Used after trashing a file to keep the tree consistent without a full re-scan.
+    /// Subtracts `fileSize` and `allocatedSize` independently (matching
+    /// `setNodeSizeAndPropagate`) since the two can diverge under APFS compression,
+    /// sparse files, or block rounding — subtracting one value from both would corrupt
+    /// whichever aggregate doesn't match.
     public func zeroNodeSize(at index: UInt32) {
         lock.withLock { _ in
             let i = Int(index)
             guard i < nodes.count else { return }
-            let oldSize = nodes[i].displaySize
+            let oldFileSize = nodes[i].fileSize
+            let oldAllocatedSize = nodes[i].allocatedSize
             nodes[i].fileSize = 0
             nodes[i].allocatedSize = 0
             var current = nodes[i].parentIndex
             while current != FileNode.invalid {
                 let ci = Int(current)
                 guard ci < nodes.count else { break }
-                if nodes[ci].fileSize >= oldSize {
-                    nodes[ci].fileSize -= oldSize
+                if nodes[ci].fileSize >= oldFileSize {
+                    nodes[ci].fileSize -= oldFileSize
                 } else {
                     nodes[ci].fileSize = 0
                 }
-                if nodes[ci].allocatedSize >= oldSize {
-                    nodes[ci].allocatedSize -= oldSize
+                if nodes[ci].allocatedSize >= oldAllocatedSize {
+                    nodes[ci].allocatedSize -= oldAllocatedSize
                 } else {
                     nodes[ci].allocatedSize = 0
                 }
