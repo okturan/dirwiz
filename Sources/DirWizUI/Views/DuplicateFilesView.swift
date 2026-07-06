@@ -123,23 +123,27 @@ public struct DuplicateFilesView: View {
             }
 
             if !appState.duplicate.duplicateGroups.isEmpty {
-                Text("\(filteredGroups.count) groups")
+                let groups = filteredGroups
+                let clones = cloneMap
+                let total = totalWastedSpace(for: groups)
+
+                Text("\(groups.count) groups")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                let realWasted = realWastedSpace
-                if realWasted < totalWastedSpace && !appState.cloneResults.isEmpty {
+                let realWasted = realWastedSpace(for: groups, clones: clones)
+                if realWasted < total && !appState.cloneResults.isEmpty {
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(SizeFormatter.shared.format(realWasted) + " real waste")
                             .font(.system(.callout, design: .monospaced))
                             .foregroundStyle(.orange)
-                        Text(SizeFormatter.shared.format(totalWastedSpace) + " naive")
+                        Text(SizeFormatter.shared.format(total) + " naive")
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .strikethrough()
                     }
                 } else {
-                    Text(SizeFormatter.shared.format(totalWastedSpace))
+                    Text(SizeFormatter.shared.format(total))
                         .font(.system(.callout, design: .monospaced))
                         .foregroundStyle(.orange)
                 }
@@ -257,12 +261,14 @@ public struct DuplicateFilesView: View {
     // MARK: - Duplicate List
 
     private var duplicateList: some View {
-        ScrollView {
+        let groups = filteredGroups // one filter pass
+        let clones = cloneMap // one dictionary build
+        return ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(filteredGroups) { group in
+                ForEach(groups) { group in
                     DuplicateGroupRow(
                         group: group,
-                        cloneResult: cloneMap[group.id],
+                        cloneResult: clones[group.id],
                         isExpanded: appState.duplicate.duplicateExpandedGroups.contains(group.id),
                         checkedPaths: $appState.duplicate.duplicateCheckedPaths,
                         onToggleExpand: {
@@ -290,16 +296,15 @@ public struct DuplicateFilesView: View {
         Dictionary(uniqueKeysWithValues: appState.cloneResults.map { ($0.group.id, $0) })
     }
 
-    private var totalWastedSpace: UInt64 {
-        filteredGroups.reduce(0) { $0 + $1.wastedSpace }
+    private func totalWastedSpace(for groups: [DuplicateGroup]) -> UInt64 {
+        groups.reduce(0) { $0 + $1.wastedSpace }
     }
 
     /// Wasted space accounting for APFS clones (if clone check has been run).
-    private var realWastedSpace: UInt64 {
-        guard !appState.cloneResults.isEmpty else { return totalWastedSpace }
-        let map = cloneMap
-        return filteredGroups.reduce(UInt64(0)) { total, group in
-            if let check = map[group.id] {
+    private func realWastedSpace(for groups: [DuplicateGroup], clones: [UUID: CloneCheckResult]) -> UInt64 {
+        guard !appState.cloneResults.isEmpty else { return totalWastedSpace(for: groups) }
+        return groups.reduce(UInt64(0)) { total, group in
+            if let check = clones[group.id] {
                 return total + check.realWastedSpace
             }
             return total + group.wastedSpace
