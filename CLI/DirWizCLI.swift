@@ -46,15 +46,16 @@ struct DirWizCLI {
     // MARK: - Scan Command
 
     static func handleScan(args: [String]) async {
-        guard let path = args.first(where: { !$0.hasPrefix("-") }) else {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
             errPrint("Error: scan requires a path argument")
             exit(1)
         }
 
-        let outputJSON = args.contains("--json")
-        let minSize = parseUInt64Flag("--min-size", from: args) ?? 0
-        let maxDepth = parseInt("--max-depth", from: args)
-        let quiet = args.contains("--quiet") || args.contains("-q")
+        let outputJSON = parsed.has("--json")
+        let minSize = parsed.uint64("--min-size") ?? 0
+        let maxDepth = parsed.int("--max-depth")
+        let quiet = parsed.has("--quiet") || parsed.has("-q")
 
         let tree = FileTree()
         let scanner = FileScanner()
@@ -96,14 +97,15 @@ struct DirWizCLI {
     // MARK: - Duplicates Command
 
     static func handleDuplicates(args: [String]) async {
-        guard let path = args.first(where: { !$0.hasPrefix("-") }) else {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
             errPrint("Error: duplicates requires a path argument")
             exit(1)
         }
 
-        let outputJSON = args.contains("--json")
-        let minSize = parseUInt64Flag("--min-size", from: args) ?? 1_048_576
-        let quiet = args.contains("--quiet") || args.contains("-q")
+        let outputJSON = parsed.has("--json")
+        let minSize = parsed.uint64("--min-size") ?? 1_048_576
+        let quiet = parsed.has("--quiet") || parsed.has("-q")
 
         let tree = FileTree()
         let scanner = FileScanner()
@@ -148,7 +150,7 @@ struct DirWizCLI {
                 totalWasted += group.wastedSpace
                 print("\(SizeFormatter.shared.format(group.fileSize)) x\(group.paths.count) (wasted: \(SizeFormatter.shared.format(group.wastedSpace)))")
                 for path in group.paths {
-                    print("  \(path)")
+                    print("  \(sanitizeForTerminal(path))")
                 }
                 print()
             }
@@ -159,12 +161,13 @@ struct DirWizCLI {
     // MARK: - Info Command
 
     static func handleInfo(args: [String]) async {
-        guard let path = args.first(where: { !$0.hasPrefix("-") }) else {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
             errPrint("Error: info requires a path argument")
             exit(1)
         }
 
-        let quiet = args.contains("--quiet") || args.contains("-q")
+        let quiet = parsed.has("--quiet") || parsed.has("-q")
 
         let tree = FileTree()
         let scanner = FileScanner()
@@ -266,7 +269,7 @@ struct DirWizCLI {
 
             for (ci, _) in children.prefix(50) {
                 let node = nodes[ci]
-                let name = tree.name(at: UInt32(ci))
+                let name = sanitizeForTerminal(tree.name(at: UInt32(ci)))
                 let typeChar = node.isDirectory ? "/" : ""
                 let sizeStr = SizeFormatter.shared.format(node.displaySize)
                 let countStr = node.isDirectory ? SizeFormatter.shared.formatCount(Int(node.childCount)) : ""
@@ -299,16 +302,6 @@ struct DirWizCLI {
           -q, --quiet  Suppress progress messages on stderr
           -h, --help   Show this help
         """)
-    }
-
-    static func parseUInt64Flag(_ flag: String, from args: [String]) -> UInt64? {
-        guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
-        return UInt64(args[idx + 1])
-    }
-
-    static func parseInt(_ flag: String, from args: [String]) -> Int? {
-        guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
-        return Int(args[idx + 1])
     }
 
     static func errPrint(_ message: String) {

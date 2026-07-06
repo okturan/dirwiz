@@ -53,14 +53,15 @@ private final class DeterminateProgressRecorder {
 
 extension DirWizCLI {
     static func handleBenchmark(args: [String]) async {
-        guard let path = args.first(where: { !$0.hasPrefix("-") }) else {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
             errPrint("Error: benchmark requires a path argument")
             exit(1)
         }
 
-        let iterations = max(parseInt("--iterations", from: args) ?? 3, 1)
-        let outputJSON = args.contains("--json")
-        let quiet = args.contains("--quiet") || args.contains("-q")
+        let iterations = max(parsed.int("--iterations") ?? 3, 1)
+        let outputJSON = parsed.has("--json")
+        let quiet = parsed.has("--quiet") || parsed.has("-q")
 
         var reports: [BenchmarkIterationReport] = []
         reports.reserveCapacity(iterations)
