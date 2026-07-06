@@ -212,17 +212,35 @@ extension AppState {
         }
         let result = await TreeActions().trash(nodeIndex: index, tree: tree)
         if result.success {
-            selectedNodeIndex = nil
-            navigation.reset()
-            // removeSubtree renumbered all node indices — anything index-keyed is stale.
-            search.reset()
-            temporalDiff.reset()
-            recencyFactors = []
-            recencyGeneration &+= 1
-            isRecencyOverlayEnabled = false
-            scanProgress.publishCounters(forceLayoutRevision: true)
+            invalidateAfterTreeMutation()
         }
         return result
+    }
+
+    /// Batch-trash by path with ONE invalidation pass at the end.
+    public func batchTrashPaths(_ paths: [String]) async -> BatchTrashResult {
+        guard let tree = fileTree else { return BatchTrashResult(results: []) }
+        let result = await TreeActions().batchTrash(paths: paths, tree: tree)
+        if result.successCount > 0 {
+            invalidateAfterTreeMutation()
+        }
+        return result
+    }
+
+    /// Reset all index-keyed overlay state and bump the layout revision after a
+    /// tree mutation. `removeSubtree` renumbers every node index, so anything
+    /// index-keyed (search results, recency factors, temporal diff arrays) is stale
+    /// and must be cleared. Shared by every tree-mutating action so the reset list
+    /// can't drift between callers.
+    private func invalidateAfterTreeMutation() {
+        selectedNodeIndex = nil
+        navigation.reset()
+        search.reset()
+        temporalDiff.reset()
+        recencyFactors = []
+        recencyGeneration &+= 1
+        isRecencyOverlayEnabled = false
+        scanProgress.publishCounters(forceLayoutRevision: true)
     }
 
     // MARK: - JSON Export

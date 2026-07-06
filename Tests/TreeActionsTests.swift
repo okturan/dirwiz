@@ -289,4 +289,123 @@ struct TreeActionsTests {
         )
         #expect(!symlinkVerifies, "A path that has become a symlink must fail verification (O_NOFOLLOW), not be compared via its followed target")
     }
+
+    // MARK: - batchTrash(paths:tree:)
+
+    @Test("Batch trash of files in different directories removes both from disk and updates root size")
+    func batchTrashRemovesMultipleFilesAndUpdatesRootSize() async throws {
+        let (root, cleanup) = try createTempTree(["dirA/f1.bin": 1000, "dirB/f2.bin": 2000, "dirC/keep.bin": 500])
+        defer { cleanup() }
+
+        let path1 = URL(fileURLWithPath: root).appendingPathComponent("dirA/f1.bin").path
+        let path2 = URL(fileURLWithPath: root).appendingPathComponent("dirB/f2.bin").path
+
+        let tree = await scanDirectory(root)
+        guard let rootNodeBefore = tree.node(at: 0) else {
+            Issue.record("Expected root node")
+            return
+        }
+        let rootSizeBefore = rootNodeBefore.displaySize
+
+        // Resolve-before-each-trash is the core regression this pins: with stale-index
+        // resolution (pre-resolving both paths up front), the second trash would operate
+        // on a renumbered index and either fail or remove the wrong node.
+        let batch = await actions.batchTrash(paths: [path1, path2], tree: tree)
+
+        #expect(batch.successCount == 2)
+        #expect(batch.failureCount == 0)
+        #expect(!FileManager.default.fileExists(atPath: path1))
+        #expect(!FileManager.default.fileExists(atPath: path2))
+
+        guard let rootNodeAfter = tree.node(at: 0) else {
+            Issue.record("Expected root node after batch trash")
+            return
+        }
+        #expect(rootNodeAfter.displaySize == rootSizeBefore - batch.totalFreed)
+    }
+
+    @Test("Batch trash distinguishes resolved-but-gone failures from never-in-tree failures, while other paths still succeed")
+    func batchTrashDistinguishesFailureModes() async throws {
+        let (root, cleanup) = try createTempTree(["good.bin": 100, "goneFromDisk.bin": 100])
+        defer { cleanup() }
+
+        let goodPath = URL(fileURLWithPath: root).appendingPathComponent("good.bin").path
+        let goneFromDiskPath = URL(fileURLWithPath: root).appendingPathComponent("goneFromDisk.bin").path
+        let neverInTreePath = URL(fileURLWithPath: root).appendingPathComponent("ghost.bin").path
+
+        let tree = await scanDirectory(root)
+
+        // Delete AFTER scanning: it still resolves inside the tree, but the filesystem
+        // trash call itself fails — distinct from a path that never resolves at all.
+        try FileManager.default.removeItem(atPath: goneFromDiskPath)
+
+        let batch = await actions.batchTrash(paths: [goodPath, goneFromDiskPath, neverInTreePath], tree: tree)
+
+        #expect(batch.successCount == 1)
+        #expect(batch.failureCount == 2)
+
+        guard let goodResult = batch.results.first(where: { $0.originalPath == goodPath }),
+              let goneResult = batch.results.first(where: { $0.originalPath == goneFromDiskPath }),
+              let neverResult = batch.results.first(where: { $0.originalPath == neverInTreePath }) else {
+            Issue.record("Expected a result for each of the three paths")
+            return
+        }
+
+        #expect(goodResult.success)
+        #expect(!goneResult.success)
+        #expect(
+            goneResult.error != "Path not found in tree",
+            "Resolves-but-gone must fail via the filesystem trash error, not the tree-resolution guard"
+        )
+        #expect(!neverResult.success)
+        #expect(neverResult.error == "Path not found in tree")
+    }
+
+    @Test("Batch-trashing one file leaves its sibling resolvable by path with its original size intact")
+    func batchTrashPreservesSiblingAfterRenumbering() async throws {
+        let (root, cleanup) = try createTempTree(["dir/a.bin": 1000, "dir/b.bin": 2000])
+        defer { cleanup() }
+
+        let pathA = URL(fileURLWithPath: root).appendingPathComponent("dir/a.bin").path
+        let pathB = URL(fileURLWithPath: root).appendingPathComponent("dir/b.bin").path
+
+        let tree = await scanDirectory(root)
+        guard let dirIndexBefore = findChild(named: "dir", under: 0, in: tree)?.index,
+              let (_, nodeBBefore) = findChild(named: "b.bin", under: dirIndexBefore, in: tree) else {
+            Issue.record("Expected to find dir/b.bin before trash")
+            return
+        }
+        let bSizeBefore = nodeBBefore.displaySize
+
+        let batch = await actions.batchTrash(paths: [pathA], tree: tree)
+        #expect(batch.successCount == 1)
+
+        guard let dirIndexAfter = findChild(named: "dir", under: 0, in: tree)?.index,
+              let (_, nodeBAfter) = findChild(named: "b.bin", under: dirIndexAfter, in: tree) else {
+            Issue.record("Expected dir/b.bin to still resolve by path after its sibling was trashed")
+            return
+        }
+        #expect(nodeBAfter.displaySize == bSizeBefore)
+        #expect(FileManager.default.fileExists(atPath: pathB))
+    }
+
+    @Test("Empty batch returns an empty result without mutating the tree")
+    func batchTrashEmptyPathsIsNoOp() async throws {
+        let (root, cleanup) = try createTempTree(["a.bin": 100])
+        defer { cleanup() }
+
+        let tree = await scanDirectory(root)
+        guard let rootBefore = tree.node(at: 0) else {
+            Issue.record("Expected root node")
+            return
+        }
+        let sizeBefore = rootBefore.displaySize
+
+        let batch = await actions.batchTrash(paths: [], tree: tree)
+
+        #expect(batch.results.isEmpty)
+        #expect(batch.successCount == 0)
+        #expect(batch.failureCount == 0)
+        #expect(tree.node(at: 0)?.displaySize == sizeBefore)
+    }
 }

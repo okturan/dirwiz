@@ -91,4 +91,57 @@ struct TrashInvalidationTests {
         #expect(state.recencyGeneration == generationBefore)
         #expect(state.isRecencyOverlayEnabled)
     }
+
+    @Test("batchTrashPaths performs exactly one invalidation pass for a successful batch, and none when every path fails to resolve")
+    func batchTrashPathsInvalidatesOnce() async throws {
+        // Successful batch: exactly one invalidation pass at the end, not one per file.
+        do {
+            let (cleanup, state) = try await makeScannedFixture()
+            defer { cleanup() }
+            guard let tree = state.fileTree else {
+                Issue.record("Expected a scanned tree")
+                return
+            }
+            let nodes = tree.nodesSnapshot()
+            let leafPaths = nodes.indices.filter { !nodes[$0].isDirectory }.prefix(2).map { tree.path(at: UInt32($0)) }
+            try #require(leafPaths.count == 2, "Fixture must contain at least two files")
+
+            let revisionBefore = state.scanProgress.treeLayoutRevision
+            state.search.searchResults = [0]
+            state.recencyFactors = [0.5, 0.5, 0.5, 0.5, 0.5]
+            let generationBefore = state.recencyGeneration
+            state.isRecencyOverlayEnabled = true
+
+            let batch = await state.batchTrashPaths(leafPaths)
+
+            #expect(batch.successCount == 2, "Both real files should trash successfully: \(batch.results.map(\.error))")
+            #expect(state.scanProgress.treeLayoutRevision > revisionBefore)
+            #expect(state.search.searchResults.isEmpty)
+            #expect(state.recencyFactors.isEmpty)
+            #expect(state.recencyGeneration > generationBefore)
+            #expect(!state.isRecencyOverlayEnabled)
+        }
+
+        // All-failing batch (paths never in the tree): no invalidation, seeded state intact.
+        do {
+            let (cleanup, state) = try await makeScannedFixture()
+            defer { cleanup() }
+
+            let revisionBefore = state.scanProgress.treeLayoutRevision
+            state.search.searchResults = [7]
+            state.recencyFactors = [0.5, 0.5]
+            let generationBefore = state.recencyGeneration
+            state.isRecencyOverlayEnabled = true
+
+            let batch = await state.batchTrashPaths(["/no/such/path/a.bin", "/no/such/path/b.bin"])
+
+            #expect(batch.successCount == 0)
+            #expect(batch.failureCount == 2)
+            #expect(state.scanProgress.treeLayoutRevision == revisionBefore)
+            #expect(state.search.searchResults == [7])
+            #expect(state.recencyFactors == [0.5, 0.5])
+            #expect(state.recencyGeneration == generationBefore)
+            #expect(state.isRecencyOverlayEnabled)
+        }
+    }
 }

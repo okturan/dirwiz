@@ -365,32 +365,33 @@ public struct DuplicateFilesView: View {
             failed.subtract(safety.safePaths)
         }
 
-        var trashed: Set<String> = []
-        for path in safeToTrash.sorted() {
-            let url = URL(fileURLWithPath: path)
-            if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
-                trashed.insert(path)
-            } else {
-                failed.insert(path)
+        Task { @MainActor in
+            let batch = await appState.batchTrashPaths(safeToTrash.sorted())
+            var trashed: Set<String> = []
+            for result in batch.results {
+                if result.success {
+                    trashed.insert(result.originalPath)
+                } else {
+                    failed.insert(result.originalPath)
+                }
             }
+
+            if !failed.isEmpty {
+                trashErrorPaths = failed.sorted()
+            }
+            guard !trashed.isEmpty else { return }
+            // Remove only successfully trashed paths from the duplicate groups.
+            appState.duplicate.duplicateGroups = appState.duplicate.duplicateGroups.compactMap { group in
+                let remaining = group.paths.filter { !trashed.contains($0) }
+                guard remaining.count >= 2 else { return nil }
+                return DuplicateGroup(
+                    fileSize: group.fileSize,
+                    hash: group.hash,
+                    paths: remaining
+                )
+            }
+            appState.duplicate.duplicateCheckedPaths.subtract(trashed)
         }
-        if !failed.isEmpty {
-            trashErrorPaths = failed.sorted()
-        }
-        guard !trashed.isEmpty else { return }
-        // Remove only successfully trashed paths from the duplicate groups.
-        appState.duplicate.duplicateGroups = appState.duplicate.duplicateGroups.compactMap { group in
-            let remaining = group.paths.filter { !trashed.contains($0) }
-            guard remaining.count >= 2 else { return nil }
-            return DuplicateGroup(
-                fileSize: group.fileSize,
-                hash: group.hash,
-                paths: remaining
-            )
-        }
-        appState.duplicate.duplicateCheckedPaths.subtract(trashed)
-        // Rescan to keep tree/treemap data consistent with filesystem.
-        appState.rescanVolume()
     }
 }
 

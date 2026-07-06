@@ -93,12 +93,37 @@ public struct TreeActions: Sendable {
     }
 
     /// Batch trash multiple nodes.
+    ///
+    /// Only safe for a single index: `removeSubtree` renumbers indices, so multiple
+    /// pre-resolved indices are invalid after the first removal. Prefer
+    /// `batchTrash(paths:tree:)`.
     public func batchTrash(nodeIndices: [UInt32], tree: FileTree) async -> BatchTrashResult {
         var results: [TrashResult] = []
         results.reserveCapacity(nodeIndices.count)
         for idx in nodeIndices {
             let result = await trash(nodeIndex: idx, tree: tree)
             results.append(result)
+        }
+        return BatchTrashResult(results: results)
+    }
+
+    /// Trash files by absolute path, resolving each path against the tree's
+    /// CURRENT state immediately before trashing it (removeSubtree renumbers
+    /// indices, so pre-resolved indices are invalid after the first removal).
+    /// Paths that no longer resolve are reported as failures, not trashed blindly.
+    public func batchTrash(paths: [String], tree: FileTree) async -> BatchTrashResult {
+        var results: [TrashResult] = []
+        results.reserveCapacity(paths.count)
+        for path in paths {
+            let snapshot = tree.pathBuildingSnapshot()
+            guard let idx = Self.findNodeIndex(for: path, nodes: snapshot.nodes,
+                                               stringPool: snapshot.stringPool,
+                                               rootPath: snapshot.rootPath) else {
+                results.append(TrashResult(originalPath: path, trashedURL: nil, nodeIndex: 0,
+                                           freedSize: 0, success: false, error: "Path not found in tree"))
+                continue
+            }
+            results.append(await trash(nodeIndex: idx, tree: tree))
         }
         return BatchTrashResult(results: results)
     }
