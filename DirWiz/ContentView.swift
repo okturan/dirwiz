@@ -470,8 +470,8 @@ struct ContentView: View {
         showExportAlert = true
     }
 
-    /// Walk the tree depth-first from `rootIndex`, collecting the top 500 rows sorted
-    /// largest-first (children already pre-sorted by sortAllChildren()).
+    /// Walk the tree depth-first from `rootIndex`, visiting each directory's children
+    /// largest-first (by on-disk size), capped at 500 rows.
     private func buildCSV(tree: FileTree, rootIndex: UInt32) -> String {
         let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
 
@@ -519,8 +519,9 @@ struct ContentView: View {
             let start = Int(node.firstChildIndex)
             let end = min(start + Int(node.childCount), nodes.count)
             guard start < end else { continue }
-            // Push in reverse so largest (first child) comes off stack first.
-            for ci in stride(from: end - 1, through: start, by: -1) {
+            // Push smallest-first so the largest child pops first (LIFO).
+            let childIndices = (start..<end).sorted { nodes[$0].displaySize < nodes[$1].displaySize }
+            for ci in childIndices {
                 stack.append(StackEntry(index: UInt32(ci), depth: entry.depth + 1))
             }
         }
