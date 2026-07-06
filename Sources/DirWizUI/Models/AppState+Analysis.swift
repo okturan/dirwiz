@@ -214,6 +214,13 @@ extension AppState {
         if result.success {
             selectedNodeIndex = nil
             navigation.reset()
+            // removeSubtree renumbered all node indices — anything index-keyed is stale.
+            search.reset()
+            temporalDiff.reset()
+            recencyFactors = []
+            recencyGeneration &+= 1
+            isRecencyOverlayEnabled = false
+            scanProgress.publishCounters(forceLayoutRevision: true)
         }
         return result
     }

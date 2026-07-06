@@ -61,14 +61,9 @@ public struct TreeActions: Sendable {
         let path = tree.path(at: nodeIndex)
         let size = node.displaySize
 
-        var trashedURL: NSURL?
+        let trashedURL: URL?
         do {
-            try withUnsafeMutablePointer(to: &trashedURL) { ptr in
-                try FileManager.default.trashItem(
-                    at: URL(fileURLWithPath: path),
-                    resultingItemURL: AutoreleasingUnsafeMutablePointer(ptr)
-                )
-            }
+            trashedURL = try performTrash(path: path)
         } catch {
             return TrashResult(
                 originalPath: path, trashedURL: nil, nodeIndex: nodeIndex,
@@ -79,9 +74,22 @@ public struct TreeActions: Sendable {
         tree.removeSubtree(at: nodeIndex)
 
         return TrashResult(
-            originalPath: path, trashedURL: trashedURL as URL?,
+            originalPath: path, trashedURL: trashedURL,
             nodeIndex: nodeIndex, freedSize: size, success: true, error: nil
         )
+    }
+
+    /// Move a single filesystem item to Trash. Uses compiler-managed writeback
+    /// for the `resultingItemURL` out-param rather than a hand-built
+    /// AutoreleasingUnsafeMutablePointer — the manual pointer construction
+    /// over-released at autorelease-pool pop when called from an async context.
+    private func performTrash(path: String) throws -> URL? {
+        var trashedURL: NSURL?
+        try FileManager.default.trashItem(
+            at: URL(fileURLWithPath: path),
+            resultingItemURL: &trashedURL
+        )
+        return trashedURL as URL?
     }
 
     /// Batch trash multiple nodes.
