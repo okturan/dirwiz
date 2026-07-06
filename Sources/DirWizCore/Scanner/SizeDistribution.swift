@@ -35,11 +35,10 @@ public struct SizeDistributionAnalyzer: Sendable {
         var fileSizes: [UInt64] = []
         fileSizes.reserveCapacity(nodes.count)
 
-        for (i, node) in nodes.enumerated() {
-            if i & 0xFFFF == 0, Task.isCancelled { return emptyResult() }
-            if node.isDirectory { continue }
+        let completed = FileTree.forEachFileInSnapshot(nodes) { _, node in
             fileSizes.append(node.displaySize)
         }
+        guard completed else { return emptyResult() }
 
         if Task.isCancelled { return emptyResult() }
 

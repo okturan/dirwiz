@@ -34,12 +34,7 @@ public struct FileAgeAnalyzer: Sendable {
         var oldest: UInt32 = UInt32.max
         var newest: UInt32 = 0
 
-        for (i, node) in nodes.enumerated() {
-            if i & 0xFFFF == 0, Task.isCancelled { return emptyResult() }
-
-            // Skip directories
-            if node.isDirectory { continue }
-
+        let completed = FileTree.forEachFileInSnapshot(nodes) { _, node in
             let size = node.displaySize
             let mod = node.modifiedDate
 
@@ -70,6 +65,7 @@ public struct FileAgeAnalyzer: Sendable {
             totalFiles += 1
             totalSize += size
         }
+        guard completed else { return emptyResult() }
 
         let defs: [(id: String, label: String, minDays: Int, maxDays: Int?)] = [
             ("recent_30d",  "< 30 days",    0,    30),
