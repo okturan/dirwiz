@@ -488,3 +488,130 @@ struct TemporalDiffTests {
             "File nodes should stay .none (not classified)")
     }
 }
+
+// MARK: - TemporalDiffSummary Tests
+
+@Suite("TemporalDiffSummary Tests")
+struct TemporalDiffSummaryTests {
+
+    // MARK: 1. Counts and Ordering
+
+    @Test("One new and one grown dir produce matching counts and size-descending order")
+    func countsAndOrdering() {
+        let tree = makeTree(
+            rootPath: "/TestRoot",
+            dirs: [("Small", 5_000_000), ("Big", 50_000_000)]
+        )
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+
+        // Index 0 = root (.none), 1 = Small (.new), 2 = Big (.grown).
+        let result = TemporalDiffResult(
+            kinds: [TemporalDiffKind.none.rawValue, TemporalDiffKind.new.rawValue, TemporalDiffKind.grown.rawValue],
+            strengths: [0, 0.4, 0.6],
+            deletedByNode: [:]
+        )
+
+        let summary = TemporalDiffSummary.summarize(result: result, nodes: nodes, stringPool: stringPool, rootPath: rootPath)
+
+        #expect(summary.newCount == 1)
+        #expect(summary.grownCount == 1)
+        #expect(summary.shrunkCount == 0)
+        #expect(summary.lostDescendantsCount == 0)
+        #expect(summary.topChanged.count == 2)
+
+        // Largest current size sorts first regardless of kind.
+        #expect(summary.topChanged[0].kind == .grown)
+        #expect(summary.topChanged[0].currentSize == 50_000_000)
+        #expect(summary.topChanged[0].path.hasSuffix("Big"))
+        #expect(summary.topChanged[1].kind == .new)
+        #expect(summary.topChanged[1].currentSize == 5_000_000)
+        #expect(summary.topChanged[1].path.hasSuffix("Small"))
+    }
+
+    // MARK: 2. All None
+
+    @Test("All-.none kinds produce zero counts and an empty topChanged")
+    func allNoneKinds() {
+        let tree = makeTree(
+            rootPath: "/TestRoot",
+            dirs: [("Documents", 50_000_000)]
+        )
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+
+        let result = TemporalDiffResult(
+            kinds: Array(repeating: TemporalDiffKind.none.rawValue, count: nodes.count),
+            strengths: Array(repeating: Float(0), count: nodes.count),
+            deletedByNode: [:]
+        )
+
+        let summary = TemporalDiffSummary.summarize(result: result, nodes: nodes, stringPool: stringPool, rootPath: rootPath)
+
+        #expect(summary.newCount == 0)
+        #expect(summary.grownCount == 0)
+        #expect(summary.shrunkCount == 0)
+        #expect(summary.lostDescendantsCount == 0)
+        #expect(summary.topChanged.isEmpty)
+    }
+
+    // MARK: 3. Lost Descendants Semantics
+
+    @Test("lostDescendantsCount counts flagged ancestor directories, not deleted-path counts")
+    func lostDescendantsCountsAncestors() {
+        let tree = makeTree(
+            rootPath: "/TestRoot",
+            dirs: [("Documents", 50_000_000)]
+        )
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+
+        // Documents (index 1) is flagged .deletedDescendants, but the DeletedSummary
+        // says 2 distinct deleted paths were aggregated onto it. lostDescendantsCount
+        // should reflect "1 ancestor flagged", not "2 deleted paths".
+        let result = TemporalDiffResult(
+            kinds: [TemporalDiffKind.none.rawValue, TemporalDiffKind.deletedDescendants.rawValue],
+            strengths: [0, 0.55],
+            deletedByNode: [1: DeletedSummary(bytes: 10_000_000, count: 2)]
+        )
+
+        let summary = TemporalDiffSummary.summarize(result: result, nodes: nodes, stringPool: stringPool, rootPath: rootPath)
+
+        #expect(summary.lostDescendantsCount == 1, "Should count the one flagged ancestor, not the 2 deleted paths it absorbed")
+        #expect(summary.newCount == 0)
+        #expect(summary.grownCount == 0)
+        #expect(summary.shrunkCount == 0)
+        #expect(summary.topChanged.count == 1)
+        #expect(summary.topChanged[0].kind == .deletedDescendants)
+        #expect(summary.topChanged[0].path.hasSuffix("Documents"))
+    }
+
+    // MARK: 4. topLimit Cap
+
+    @Test("topChanged is capped to topLimit, keeping the largest entries")
+    func topChangedCapRespected() {
+        // 25 child directories with distinct, strictly increasing sizes (1MB..25MB).
+        let dirs: [(name: String, size: UInt64)] = (1...25).map { i in
+            (name: "Dir\(i)", size: UInt64(i) * 1_000_000)
+        }
+        let tree = makeTree(rootPath: "/TestRoot", dirs: dirs)
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+
+        // Root (.none) + all 25 children (.new).
+        var kinds = Array(repeating: TemporalDiffKind.none.rawValue, count: nodes.count)
+        for i in 1..<nodes.count { kinds[i] = TemporalDiffKind.new.rawValue }
+        let result = TemporalDiffResult(
+            kinds: kinds,
+            strengths: Array(repeating: Float(0.5), count: nodes.count),
+            deletedByNode: [:]
+        )
+
+        let defaultSummary = TemporalDiffSummary.summarize(result: result, nodes: nodes, stringPool: stringPool, rootPath: rootPath)
+        #expect(defaultSummary.newCount == 25, "All 25 children should still be counted even though topChanged is capped")
+        #expect(defaultSummary.topChanged.count == 20, "Default topLimit is 20")
+        #expect(defaultSummary.topChanged.first?.currentSize == 25_000_000, "Largest dir (25MB) should be first")
+        #expect(defaultSummary.topChanged.last?.currentSize == 6_000_000, "20th-largest dir (6MB) should be last; 1-5MB dirs are excluded")
+
+        let limited = TemporalDiffSummary.summarize(result: result, nodes: nodes, stringPool: stringPool, rootPath: rootPath, topLimit: 5)
+        #expect(limited.topChanged.count == 5)
+        #expect(limited.topChanged.first?.currentSize == 25_000_000)
+        #expect(limited.topChanged.last?.currentSize == 21_000_000)
+    }
+}

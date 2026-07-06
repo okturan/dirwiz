@@ -7,6 +7,8 @@ import DirWizCore
 ///   dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>]
 ///   dirwiz-cli duplicates <path> [--min-size <bytes>] [--json]
 ///   dirwiz-cli info <path>
+///   dirwiz-cli snapshot <path> [--json]
+///   dirwiz-cli diff <path> [--json]
 ///   dirwiz-cli benchmark <path> [--iterations <n>] [--json]
 ///   dirwiz-cli --help
 @main
@@ -34,6 +36,10 @@ struct DirWizCLI {
             await handleDuplicates(args: remainingArgs)
         case "info":
             await handleInfo(args: remainingArgs)
+        case "snapshot":
+            await handleSnapshot(args: remainingArgs)
+        case "diff":
+            await handleDiff(args: remainingArgs)
         case "benchmark":
             await handleBenchmark(args: remainingArgs)
         default:
@@ -242,6 +248,192 @@ struct DirWizCLI {
         }
     }
 
+    // MARK: - Snapshot Command
+
+    static func handleSnapshot(args: [String]) async {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
+            errPrint("Error: snapshot requires a path argument")
+            exit(1)
+        }
+
+        let outputJSON = parsed.has("--json")
+        let quiet = parsed.has("--quiet") || parsed.has("-q")
+
+        let tree = FileTree()
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+
+        if !quiet { errPrint("Scanning \(path)...") }
+        await scanner.scan(path: path, progress: progress, tree: tree)
+
+        let snap = await TemporalDiffService.buildSnapshot(tree: tree)
+        do {
+            try snap.save()
+        } catch {
+            errPrint("Error saving snapshot: \(error.localizedDescription)")
+            exit(1)
+        }
+
+        let savedURL = TemporalSnapshot.snapshotURL(for: snap.meta.rootPath)
+
+        if outputJSON {
+            let jsonObject: [String: Any] = [
+                "rootPath": snap.meta.rootPath,
+                "dirCount": snap.meta.dirCount,
+                "totalBytes": snap.meta.totalBytes,
+                "createdAt": ISO8601DateFormatter().string(from: snap.meta.createdAt),
+                "snapshotFile": savedURL.path,
+            ]
+            do {
+                let data = try JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys])
+                if let str = String(data: data, encoding: .utf8) {
+                    print(str)
+                }
+            } catch {
+                errPrint("Error encoding JSON: \(error.localizedDescription)")
+                exit(1)
+            }
+        } else {
+            print("Root:      \(sanitizeForTerminal(snap.meta.rootPath))")
+            print("Dirs:      \(SizeFormatter.shared.formatCount(snap.meta.dirCount))")
+            print("Size:      \(SizeFormatter.shared.format(snap.meta.totalBytes))")
+            print("Saved to:  \(sanitizeForTerminal(savedURL.path))")
+        }
+    }
+
+    // MARK: - Diff Command
+
+    static func handleDiff(args: [String]) async {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
+            errPrint("Error: diff requires a path argument")
+            exit(1)
+        }
+
+        let outputJSON = parsed.has("--json")
+        let quiet = parsed.has("--quiet") || parsed.has("-q")
+
+        let snap: TemporalSnapshot
+        do {
+            guard let loaded = try TemporalSnapshot.load(for: path) else {
+                errPrint("No snapshot found for \(sanitizeForTerminal(path)). Run 'dirwiz-cli snapshot \(sanitizeForTerminal(path))' first.")
+                exit(1)
+            }
+            snap = loaded
+        } catch {
+            errPrint("Error loading snapshot: \(error.localizedDescription)")
+            exit(1)
+        }
+
+        let tree = FileTree()
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+
+        if !quiet { errPrint("Scanning \(path)...") }
+        await scanner.scan(path: path, progress: progress, tree: tree)
+
+        let result = await TemporalDiffService.computeDiff(currentTree: tree, snapshot: snap)
+        let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
+        let summary = TemporalDiffSummary.summarize(
+            result: result, nodes: nodes, stringPool: stringPool, rootPath: rootPath
+        )
+
+        let currentTotal = nodes.first?.fileSize ?? 0
+        let snapshotTotal = snap.meta.totalBytes
+        let grew = currentTotal >= snapshotTotal
+        let delta = grew ? currentTotal - snapshotTotal : snapshotTotal - currentTotal
+
+        if outputJSON {
+            printDiffJSON(summary: summary, snapshot: snap, currentTotal: currentTotal, grew: grew, delta: delta)
+        } else {
+            printDiffReport(summary: summary, snapshot: snap, currentTotal: currentTotal, grew: grew, delta: delta)
+        }
+    }
+
+    private static func printDiffReport(
+        summary: TemporalDiffSummary,
+        snapshot: TemporalSnapshot,
+        currentTotal: UInt64,
+        grew: Bool,
+        delta: UInt64
+    ) {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        let relative = RelativeDateTimeFormatter().localizedString(for: snapshot.meta.createdAt, relativeTo: Date())
+
+        print("Root:      \(sanitizeForTerminal(snapshot.meta.rootPath))")
+        print("Snapshot:  \(df.string(from: snapshot.meta.createdAt)) (\(relative))")
+        print("Size now:  \(SizeFormatter.shared.format(currentTotal)) (\(grew ? "+" : "-")\(SizeFormatter.shared.format(delta)) since snapshot)")
+        print()
+        print("Changes:   \(summary.newCount) new, \(summary.grownCount) grown, \(summary.shrunkCount) shrunk, \(summary.lostDescendantsCount) lost descendants")
+
+        guard !summary.topChanged.isEmpty else {
+            print()
+            print("No significant changes detected.")
+            return
+        }
+
+        print()
+        print("Top changed directories:")
+        for entry in summary.topChanged {
+            let label = kindLabel(entry.kind).padding(toLength: 10, withPad: " ", startingAt: 0)
+            let size = SizeFormatter.shared.format(entry.currentSize).leftPad(12)
+            print("  \(label) \(size)  \(sanitizeForTerminal(entry.path))")
+        }
+    }
+
+    private static func printDiffJSON(
+        summary: TemporalDiffSummary,
+        snapshot: TemporalSnapshot,
+        currentTotal: UInt64,
+        grew: Bool,
+        delta: UInt64
+    ) {
+        let jsonObject: [String: Any] = [
+            "rootPath": snapshot.meta.rootPath,
+            "snapshotCreatedAt": ISO8601DateFormatter().string(from: snapshot.meta.createdAt),
+            "currentTotalBytes": currentTotal,
+            "snapshotTotalBytes": snapshot.meta.totalBytes,
+            "totalBytesGrew": grew,
+            "totalBytesDelta": delta,
+            "counts": [
+                "new": summary.newCount,
+                "grown": summary.grownCount,
+                "shrunk": summary.shrunkCount,
+                "lostDescendants": summary.lostDescendantsCount,
+            ],
+            "topChanged": summary.topChanged.map { entry -> [String: Any] in
+                [
+                    "path": entry.path,
+                    "kind": kindLabel(entry.kind),
+                    "currentSize": entry.currentSize,
+                ]
+            },
+        ]
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys])
+            if let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+        } catch {
+            errPrint("Error encoding JSON: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+
+    private static func kindLabel(_ kind: TemporalDiffKind) -> String {
+        switch kind {
+        case .none: return "none"
+        case .new: return "new"
+        case .grown: return "grown"
+        case .shrunk: return "shrunk"
+        case .deletedDescendants: return "lost-desc"
+        }
+    }
+
     // MARK: - Helpers
 
     static func printTreeTable(tree: FileTree, minSize: UInt64) {
@@ -286,12 +478,16 @@ struct DirWizCLI {
           dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>] [-q]
           dirwiz-cli duplicates <path> [--min-size <bytes>] [--json] [-q]
           dirwiz-cli info <path> [-q]
+          dirwiz-cli snapshot <path> [--json] [-q]
+          dirwiz-cli diff <path> [--json] [-q]
           dirwiz-cli benchmark <path> [--iterations <n>] [--json] [-q]
 
         Commands:
           scan         Scan a directory tree and output results
           duplicates   Find duplicate files
           info         Show space categories, file age, size distribution, and volume info
+          snapshot     Save a baseline snapshot of a directory tree for later comparison
+          diff         Compare current directory state against a saved snapshot
           benchmark    Repeatedly time scan, duplicates, hardlinks, and insights passes
 
         Options:
@@ -301,6 +497,11 @@ struct DirWizCLI {
           --iterations Number of benchmark iterations (default: 3)
           -q, --quiet  Suppress progress messages on stderr
           -h, --help   Show this help
+
+        Notes:
+          snapshot/diff key the saved snapshot by the exact path string you pass —
+          use the same spelling (e.g. always without a trailing slash) for both
+          commands, or diff will report "no snapshot found" even though one exists.
         """)
     }
 
