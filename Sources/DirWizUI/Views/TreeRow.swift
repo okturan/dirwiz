@@ -1,6 +1,18 @@
 import SwiftUI
 import DirWizCore
 
+/// Single source of truth for tree-table column geometry — header and rows
+/// must use the same values or columns drift per row.
+enum TreeTableColumns {
+    static let percentage: CGFloat = 110
+    static let size: CGFloat = 90
+    static let logical: CGFloat = 90
+    static let items: CGFloat = 70
+    static let modified: CGFloat = 110
+    static let nameMinWidth: CGFloat = 200
+    static let rowTrailingPadding: CGFloat = 12
+}
+
 /// A single row in the tree table showing file/folder details.
 /// Indentation and disclosure arrow are rendered inside the name column
 /// so that numeric columns stay aligned with their headers at any depth.
@@ -15,21 +27,22 @@ struct TreeRow: View {
     var body: some View {
         HStack(spacing: 0) {
             nameColumn
-                .frame(minWidth: 200, alignment: .leading)
+                .frame(minWidth: TreeTableColumns.nameMinWidth, maxWidth: .infinity, alignment: .leading)
             percentageColumn
-                .frame(minWidth: 100, alignment: .leading)
+                .frame(width: TreeTableColumns.percentage, alignment: .leading)
             Text(SizeFormatter.shared.format(item.node.displaySize))
                 .font(.system(size: 11, design: .monospaced))
-                .frame(minWidth: 80, alignment: .trailing)
+                .frame(width: TreeTableColumns.size, alignment: .trailing)
             Text(SizeFormatter.shared.format(item.node.fileSize))
                 .font(.system(size: 11, design: .monospaced))
-                .frame(minWidth: 80, alignment: .trailing)
+                .frame(width: TreeTableColumns.logical, alignment: .trailing)
             itemsColumn
-                .frame(minWidth: 60, alignment: .trailing)
+                .frame(width: TreeTableColumns.items, alignment: .trailing)
             Text(formattedDate)
                 .font(.system(size: 11))
-                .frame(minWidth: 100, alignment: .trailing)
+                .frame(width: TreeTableColumns.modified, alignment: .trailing)
         }
+        .padding(.trailing, TreeTableColumns.rowTrailingPadding)
     }
 
     // MARK: - Column Views

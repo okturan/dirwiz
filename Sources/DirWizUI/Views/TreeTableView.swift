@@ -195,21 +195,25 @@ public struct TreeTableView: View {
 
     private var headerRow: some View {
         HStack(spacing: 0) {
-            headerButton("Name", key: .name, minWidth: 200, alignment: .leading)
-            headerButton("% of Parent", key: .percentage, minWidth: 100, alignment: .leading)
-            headerButton("On Disk", key: .size, minWidth: 80, alignment: .trailing)
-            headerButton("Logical", key: .allocated, minWidth: 80, alignment: .trailing)
-            headerButton("Items", key: .items, minWidth: 60, alignment: .trailing)
-            headerButton("Modified", key: .modified, minWidth: 100, alignment: .trailing)
+            headerButton("Name", key: .name, width: nil, alignment: .leading)
+                .frame(minWidth: TreeTableColumns.nameMinWidth, maxWidth: .infinity, alignment: .leading)
+            headerButton("% of Parent", key: .percentage, width: TreeTableColumns.percentage, alignment: .leading)
+            headerButton("On Disk", key: .size, width: TreeTableColumns.size, alignment: .trailing)
+            headerButton("Logical", key: .allocated, width: TreeTableColumns.logical, alignment: .trailing)
+            headerButton("Items", key: .items, width: TreeTableColumns.items, alignment: .trailing)
+            headerButton("Modified", key: .modified, width: TreeTableColumns.modified, alignment: .trailing)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+        .padding(.trailing, TreeTableColumns.rowTrailingPadding)
         .background(.bar)
     }
 
-    private func headerButton(_ title: String, key: TreeSortKey, minWidth: CGFloat, alignment: Alignment) -> some View {
+    /// - Parameter width: Fixed column width, or `nil` for the flexible name column
+    ///   (the caller applies `maxWidth: .infinity` in that case).
+    private func headerButton(_ title: String, key: TreeSortKey, width: CGFloat?, alignment: Alignment) -> some View {
         Button(action: {
             if sortKey == key {
                 sortAscending.toggle()
@@ -229,7 +233,7 @@ public struct TreeTableView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(minWidth: minWidth)
+        .frame(width: width)
     }
 
     // MARK: - Navigation Bar
