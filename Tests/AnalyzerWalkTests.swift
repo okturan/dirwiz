@@ -467,9 +467,17 @@ struct AnalyzerWalkTests {
 
     @Test("SpaceAnalyzer sorts independent categories by size descending")
     func spaceAnalyzerOrdersCategoriesBySizeDescending() async throws {
+        // Both subtrees share the "Library/Developer" prefix, so they're nested under one
+        // shared ancestor here — two independent nestedDir() calls with a shared prefix would
+        // each build their own "Library" wrapper, producing two sibling nodes with the same
+        // name under root, a shape no real filesystem (or scan) can ever produce.
         let tree = makeTree(rootPath: "/Users/tester", [
-            nestedDir("Library/Developer/Xcode/DerivedData", [file("build.o", size: 1_000)]),
-            nestedDir("Library/Developer/CoreSimulator", [file("runtime.dat", size: 9_000)]),
+            dir("Library", [
+                dir("Developer", [
+                    nestedDir("Xcode/DerivedData", [file("build.o", size: 1_000)]),
+                    dir("CoreSimulator", [file("runtime.dat", size: 9_000)]),
+                ]),
+            ]),
             dir(".Trash", [file("deleted.bin", size: 500)]),
         ])
 
