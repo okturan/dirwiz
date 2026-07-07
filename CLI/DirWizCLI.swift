@@ -361,7 +361,11 @@ struct DirWizCLI {
         let df = DateFormatter()
         df.dateStyle = .medium
         df.timeStyle = .short
-        let relative = RelativeDateTimeFormatter().localizedString(for: snapshot.meta.createdAt, relativeTo: Date())
+        let now = Date()
+        let ageSeconds = now.timeIntervalSince(snapshot.meta.createdAt)
+        let relative = abs(ageSeconds) < 60
+            ? "just now"
+            : RelativeDateTimeFormatter().localizedString(for: snapshot.meta.createdAt, relativeTo: now)
 
         print("Root:      \(sanitizeForTerminal(snapshot.meta.rootPath))")
         print("Snapshot:  \(df.string(from: snapshot.meta.createdAt)) (\(relative))")
