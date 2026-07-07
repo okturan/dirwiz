@@ -53,7 +53,7 @@ public struct TreeTableView: View {
                 .focusable()
                 .focused($isFocused)
                 .onChange(of: appState.selectedNodeIndex) { _, newValue in
-                    revealAndScroll(to: newValue, tree: tree, proxy: proxy)
+                    revealAndScroll(to: newValue, nodes: tree.nodesSnapshot(), proxy: proxy)
                 }
                 .onKeyPress(.upArrow) {
                     moveSelection(by: -1, tree: tree, proxy: proxy)
@@ -120,7 +120,7 @@ public struct TreeTableView: View {
     private func treeRowContainer(_ item: TreeNodeItem, tree: FileTree) -> some View {
         TreeRow(
             item: item,
-            parentSize: parentSize(for: item, tree: tree),
+            parentSize: parentSize(for: item),
             extensionPalette: appState.extensionPalette,
             depth: item.depth,
             isExpanded: expandedFolders.contains(item.id),
@@ -140,7 +140,7 @@ public struct TreeTableView: View {
         .onTapGesture {
             isFocused = true
             appState.selectedNodeIndex = item.id
-            ensureVisibleInTreemap(item.id, tree: tree)
+            ensureVisibleInTreemap(item.id, nodes: item.nodes)
         }
         .contextMenu {
             if let tree = appState.fileTree {
@@ -239,11 +239,11 @@ public struct TreeTableView: View {
     // MARK: - Navigation Bar
 
     private func treeNavigationBar(tree: FileTree, proxy: ScrollViewProxy) -> some View {
-        let canGoUp = canGoUpInTree(tree: tree)
+        let canGoUp = canGoUpInTree(nodes: tree.nodesSnapshot())
 
         return HStack(spacing: 6) {
             Button {
-                goUpInTree(tree: tree, proxy: proxy)
+                goUpInTree(nodes: tree.nodesSnapshot(), proxy: proxy)
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.up")
@@ -330,9 +330,8 @@ public struct TreeTableView: View {
         }
     }
 
-    private func canGoUpInTree(tree: FileTree) -> Bool {
+    private func canGoUpInTree(nodes: [FileNode]) -> Bool {
         guard let selected = appState.selectedNodeIndex else { return false }
-        let nodes = tree.nodesSnapshot()
         let i = Int(selected)
         guard i < nodes.count else { return false }
         return nodes[i].parentIndex != FileNode.invalid
@@ -347,9 +346,8 @@ public struct TreeTableView: View {
         return name.isEmpty ? "/" : name
     }
 
-    private func goUpInTree(tree: FileTree, proxy: ScrollViewProxy) {
+    private func goUpInTree(nodes: [FileNode], proxy: ScrollViewProxy) {
         guard let selected = appState.selectedNodeIndex else { return }
-        let nodes = tree.nodesSnapshot()
         let i = Int(selected)
         guard i < nodes.count else { return }
 
@@ -357,15 +355,14 @@ public struct TreeTableView: View {
         guard parentIndex != FileNode.invalid else { return }
 
         appState.selectedNodeIndex = parentIndex
-        revealAndScroll(to: parentIndex, tree: tree, proxy: proxy)
+        revealAndScroll(to: parentIndex, nodes: nodes, proxy: proxy)
     }
 
     // MARK: - Selection Sync
 
     /// Expand all ancestors of the selected node and scroll it into view.
-    private func revealAndScroll(to nodeIndex: UInt32?, tree: FileTree, proxy: ScrollViewProxy) {
+    private func revealAndScroll(to nodeIndex: UInt32?, nodes: [FileNode], proxy: ScrollViewProxy) {
         guard let nodeIndex else { return }
-        let nodes = tree.nodesSnapshot()
         let i = Int(nodeIndex)
         guard i < nodes.count else { return }
 
@@ -396,8 +393,7 @@ public struct TreeTableView: View {
     }
 
     /// If the node is not under the current treemap root, navigate treemap to show it.
-    private func ensureVisibleInTreemap(_ nodeIndex: UInt32, tree: FileTree) {
-        let nodes = tree.nodesSnapshot()
+    private func ensureVisibleInTreemap(_ nodeIndex: UInt32, nodes: [FileNode]) {
         let root = appState.navigation.treemapRootIndex
 
         // Walk parent chain — if we hit the current root, node is already visible
@@ -425,7 +421,8 @@ public struct TreeTableView: View {
         let newIdx = max(0, min(items.count - 1, fromIdx + delta))
         let newItem = items[newIdx]
         appState.selectedNodeIndex = newItem.id
-        ensureVisibleInTreemap(newItem.id, tree: tree)
+        // Reuse the item's own carried snapshot instead of asking the tree for a fresh one.
+        ensureVisibleInTreemap(newItem.id, nodes: newItem.nodes)
         proxy.scrollTo(newItem.id)
     }
 
@@ -483,10 +480,14 @@ public struct TreeTableView: View {
         return children
     }
 
-    private func parentSize(for item: TreeNodeItem, tree: FileTree) -> UInt64 {
+    /// Reads the parent's size from the item's own carried snapshot (`item.nodes`) rather
+    /// than `tree.node(at:)`, so rendering a row never takes the tree lock.
+    private func parentSize(for item: TreeNodeItem) -> UInt64 {
         let parentIdx = item.node.parentIndex
         if parentIdx == FileNode.invalid { return item.node.displaySize }
-        return tree.node(at: parentIdx)?.displaySize ?? item.node.displaySize
+        let i = Int(parentIdx)
+        guard i < item.nodes.count else { return item.node.displaySize }
+        return item.nodes[i].displaySize
     }
 
 }

@@ -178,6 +178,13 @@ public final class FileTree: @unchecked Sendable {
         lock.withLock { _ in nodes }
     }
 
+    /// The root node's on-disk size, read under the lock. Use this instead of a raw
+    /// `nodes.first?.displaySize` — the root can be mutated concurrently by deferred
+    /// bundle sizing or trash operations.
+    public var rootDisplaySize: UInt64 {
+        lock.withLock { _ in nodes.first?.displaySize ?? 0 }
+    }
+
     /// Snapshot the string pool for lock-free search.
     /// Data is CoW — O(1) unless mutated later.
     public func stringPoolSnapshot() -> Data {

@@ -196,7 +196,7 @@ struct ContentView: View {
                 Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(SizeFormatter.shared.format(tree.nodes.first?.displaySize ?? 0))
+                Text(SizeFormatter.shared.format(tree.rootDisplaySize))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -275,7 +275,7 @@ struct ContentView: View {
                                 case .extensions:
                                     ExtensionListView(
                                         fileTypeStats: appState.fileTypeStats,
-                                        totalSize: appState.fileTree?.nodes.first?.displaySize ?? 0,
+                                        totalSize: appState.fileTree?.rootDisplaySize ?? 0,
                                         extensionPalette: appState.extensionPalette,
                                         onDrillDown: { stat in
                                             appState.search.extensionFilter = stat.extensionHash
@@ -324,7 +324,7 @@ struct ContentView: View {
                 Divider()
                 ExtensionLegend(
                     palette: appState.extensionPalette,
-                    totalSize: appState.fileTree?.nodes.first?.displaySize ?? 0
+                    totalSize: appState.fileTree?.rootDisplaySize ?? 0
                 )
                 .frame(width: 220)
             }
