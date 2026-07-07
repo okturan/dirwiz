@@ -255,9 +255,11 @@ public struct SpaceAnalyzer: Sendable {
             ? String(rootPath.dropLast())
             : rootPath
 
-        // Build the set of absolute path prefixes to match for each category.
-        // Each entry: (absolutePrefix, categoryIndex).
-        var matchers: [(prefix: String, catIndex: Int)] = []
+        // Resolve each category path suffix directly to a node instead of walking every
+        // directory node in the tree and testing ~30 prefix matchers against each one.
+        // Category prefixes are a small, fixed set of shallow locations, so descending to
+        // them costs one FileTree.descendPath call each rather than an O(nodes) walk.
+        var targets: [(catIndex: Int, nodeIndex: UInt32, componentCount: Int)] = []
         for (catIdx, def) in categoryDefinitions.enumerated() {
             for suffix in def.pathSuffixes {
                 // Build absolute prefix from rootPath + suffix.
@@ -268,9 +270,39 @@ public struct SpaceAnalyzer: Sendable {
                 } else {
                     absPrefix = root + "/" + suffix
                 }
-                matchers.append((absPrefix, catIdx))
+                // A prefix that isn't actually under rootPath (can't happen given the
+                // construction above, but this mirrors iCloudAnalyzer's boundary-safe
+                // derivation rather than assuming it) contributes nothing.
+                guard let components = relativeComponents(of: absPrefix, from: rootPath) else { continue }
+                guard let nodeIndex = FileTree.descendPath(components, nodes: nodes, stringPool: stringPool),
+                      nodes[Int(nodeIndex)].isDirectory
+                else {
+                    // Unresolved (or resolved to a non-directory): this category isn't present
+                    // in the scanned tree, so it contributes nothing. This is also where the old
+                    // "direct child of an unclaimed prefix" branch is dropped — it only fired
+                    // when a child's array index was lower than its parent's, which no real scan
+                    // can produce (propagateSizes/sortAllChildren both rely on parent index <
+                    // child index holding everywhere). See
+                    // spaceAnalyzerNodeAnchoringIgnoresIndexInvertedLayouts for the accepted
+                    // divergence this causes on that one synthetic, unreachable-in-practice shape.
+                    continue
+                }
+                targets.append((catIndex: catIdx, nodeIndex: nodeIndex, componentCount: components.count))
             }
         }
+
+        // Process shallowest-first so a structural ancestor (e.g. Library/Caches) claims its
+        // whole subtree before a nested, more specific category (e.g. browser_caches) gets a
+        // turn. On every root-to-leaf chain, parent index < child index (guaranteed elsewhere
+        // in the codebase), so shallowest-first reproduces the old array-order-based shadowing
+        // exactly. Ties preserve categoryDefinitions order via the original build-order index.
+        let ordered = targets.enumerated()
+            .sorted {
+                $0.element.componentCount != $1.element.componentCount
+                    ? $0.element.componentCount < $1.element.componentCount
+                    : $0.offset < $1.offset
+            }
+            .map { $0.element }
 
         // Accumulators: one per category definition.
         var sizes = Array(repeating: UInt64(0), count: categoryDefinitions.count)
@@ -278,80 +310,32 @@ public struct SpaceAnalyzer: Sendable {
         var topPaths: [[String]] = Array(repeating: [], count: categoryDefinitions.count)
         let maxMatchedPaths = 20
 
-        // Track nodes whose subtrees are already counted so we don't double-count
-        // when a parent directory matched a category and its children also match.
-        // We mark a node index when its displaySize is added to a category; any
-        // descendant of that node should be skipped.
-        //
-        // Instead of storing all descendant indices, we check ancestry: if any
-        // ancestor is in `claimedRoots`, skip this node.
+        // Track claimed nodes so we don't double-count when a shallower category's subtree
+        // contains a deeper category's resolved node. We check ancestry: if any ancestor is
+        // in `claimedRoots`, skip this node; also skip if this exact node was already claimed
+        // by an earlier (shallower-or-equal, then definition-order) target.
         var claimedRoots = Set<UInt32>()
 
-        // Cancellation check interval — every 50k nodes.
-        let cancelCheckInterval = 50_000
-        var totalAnalyzed: UInt64 = 0
+        for target in ordered {
+            if Task.isCancelled { break }
 
-        for i in 0..<nodes.count {
-            if i % cancelCheckInterval == 0, Task.isCancelled { break }
+            guard !claimedRoots.contains(target.nodeIndex),
+                  !isDescendantOfClaimed(nodeIndex: target.nodeIndex, nodes: nodes, claimedRoots: claimedRoots)
+            else { continue }
 
-            let node = nodes[i]
-            totalAnalyzed = max(totalAnalyzed, nodes[0].displaySize)
-
-            // Skip non-directory leaf files and directories with no size.
-            // We only match directories at the "entry point" level.
-            guard node.isDirectory else { continue }
-
-            // Check if this node is already inside a claimed subtree.
-            if isDescendantOfClaimed(nodeIndex: UInt32(i), nodes: nodes, claimedRoots: claimedRoots) {
-                continue
-            }
-
-            // Build the path for this node.
+            let node = nodes[Int(target.nodeIndex)]
             let path = FileTree.pathFromSnapshot(
-                at: UInt32(i), nodes: nodes, stringPool: stringPool, rootPath: rootPath
+                at: target.nodeIndex, nodes: nodes, stringPool: stringPool, rootPath: rootPath
             )
-
-            // Try to match against category prefixes.
-            // A match means the node's path equals the prefix or is a direct child-level
-            // entry (e.g., DerivedData/MyProject-xxx).
-            for (prefix, catIdx) in matchers {
-                if path == prefix || path.hasPrefix(prefix + "/") {
-                    // This directory falls under this category.
-                    // If the path exactly equals the prefix, add its full displaySize.
-                    // If it's a subdirectory of the prefix and the prefix dir itself wasn't
-                    // scanned as a separate node, also add it.
-
-                    // Check: is this node the prefix directory itself, or a deeper one?
-                    if path == prefix {
-                        // Exact match — add full subtree size.
-                        sizes[catIdx] += node.displaySize
-                        counts[catIdx] += 1
-                        if topPaths[catIdx].count < maxMatchedPaths {
-                            topPaths[catIdx].append(path)
-                        }
-                        claimedRoots.insert(UInt32(i))
-                    } else {
-                        // This node is inside the category prefix.
-                        // Only count it if the prefix directory itself is NOT a node in the tree
-                        // (i.e., we haven't already claimed the prefix root). If the prefix root
-                        // exists and was claimed, we skip (descendant check above handles it).
-                        // If we get here, the prefix root wasn't in the tree or wasn't claimed,
-                        // so count direct children of the prefix as individual entries.
-                        let depth = path.dropFirst(prefix.count + 1)  // after "prefix/"
-                        if !depth.contains("/") {
-                            // Direct child of the category prefix.
-                            sizes[catIdx] += node.displaySize
-                            counts[catIdx] += 1
-                            if topPaths[catIdx].count < maxMatchedPaths {
-                                topPaths[catIdx].append(path)
-                            }
-                            claimedRoots.insert(UInt32(i))
-                        }
-                    }
-                    break  // First matching category wins.
-                }
+            sizes[target.catIndex] += node.displaySize
+            counts[target.catIndex] += 1
+            if topPaths[target.catIndex].count < maxMatchedPaths {
+                topPaths[target.catIndex].append(path)
             }
+            claimedRoots.insert(target.nodeIndex)
         }
+
+        let totalAnalyzed = nodes[0].displaySize
 
         // Build result categories (only include non-empty ones).
         var categories: [SpaceCategory] = []
@@ -392,5 +376,25 @@ public struct SpaceAnalyzer: Sendable {
             current = nodes[ci].parentIndex
         }
         return false
+    }
+
+    /// Path components of `child` relative to `ancestor`, when `ancestor` is `child` itself
+    /// or a path-boundary-respecting prefix of it. Returns nil when `ancestor` is not an
+    /// ancestor of (or equal to) `child` — including a merely-textual prefix match with no
+    /// "/" boundary. Mirrors `iCloudAnalyzer.relativeComponents(of:from:)`; kept as a local
+    /// copy so the two analyzers stay decoupled.
+    private func relativeComponents(of child: String, from ancestor: String) -> [String]? {
+        guard child.hasPrefix(ancestor) else { return nil }
+        var rest = child.dropFirst(ancestor.count)
+        if ancestor.hasSuffix("/") {
+            // Boundary already consumed by the trailing slash (also covers ancestor == "/").
+        } else if rest.isEmpty {
+            // child == ancestor exactly.
+        } else if rest.first == "/" {
+            rest = rest.dropFirst()
+        } else {
+            return nil
+        }
+        return rest.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     }
 }

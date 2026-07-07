@@ -492,13 +492,29 @@ struct AnalyzerWalkTests {
     /// child-index holding for every node — the real scanner guarantees it structurally
     /// (a directory can't get a node until it's discovered, and children are only
     /// discovered after their parent). `replaceContents` is the one construction path that
-    /// doesn't enforce it, which is exactly what's needed to exercise SpaceAnalyzer's
-    /// "direct child of a not-yet-claimed prefix" branch: with normal ordering, "Library/Caches"
-    /// (a real, always-materialized directory) is visited before any of its children and
-    /// immediately claims itself exactly, so the branch is unreachable. Nodes: 0=root,
-    /// 1=Library, 2=ChildA (parent=3, but index < 3), 3=Caches (parent=1).
-    @Test("SpaceAnalyzer's direct-child-of-prefix branch requires index-inverted ordering no real scan produces")
-    func spaceAnalyzerDirectChildBranchRequiresIndexInversion() async throws {
+    /// doesn't enforce it.
+    ///
+    /// Old world (per-directory-node walk, string prefix matching): this inversion was
+    /// exactly what was needed to reach the "direct child of a not-yet-claimed prefix"
+    /// branch. With normal ordering, "Library/Caches" (a real, always-materialized
+    /// directory) is visited before any of its children and immediately claims itself
+    /// exactly, so the branch was unreachable in practice. Here, ChildA (index 2) is
+    /// visited before its own parent Caches (index 3), so it wasn't yet a "descendant of
+    /// a claimed node" and was claimed on its own — in addition to Caches's own later,
+    /// separate exact-match claim. Two claims, two paths, sizes NOT deduplicated
+    /// (12,345 + 999).
+    ///
+    /// New world (node-anchoring): `application_caches` resolves straight to the
+    /// "Library/Caches" node (index 3) via `FileTree.descendPath`, by name, without ever
+    /// walking the tree looking for matches. ChildA is never visited — its index relative
+    /// to its parent is irrelevant because nothing iterates node order anymore. Only
+    /// Caches's own `displaySize` (999 — this hand-built tree never calls
+    /// `propagateSizes()`, unlike `makeTree`, so ChildA's size was never bubbled up into
+    /// it) is claimed. This is the accepted divergence: the old branch is gone, not
+    /// reproduced. Nodes: 0=root, 1=Library, 2=ChildA (parent=3, but index < 3), 3=Caches
+    /// (parent=1).
+    @Test("SpaceAnalyzer's node anchoring resolves the prefix node directly, ignoring an index-inverted child no real scan produces")
+    func spaceAnalyzerNodeAnchoringIgnoresIndexInvertedLayouts() async throws {
         let tree = FileTree()
         tree.setRootPath("/Users/tester")
 
@@ -548,15 +564,26 @@ struct AnalyzerWalkTests {
         let result = await SpaceAnalyzer().analyze(tree: tree)
         let appCaches = result.categories.first { $0.id == "application_caches" }
 
-        // Pinned current behavior: ChildA (index 2) is visited before Caches (index 3), so it
-        // is not yet a "descendant of a claimed node" when its turn comes — it hits the
-        // direct-child branch and is claimed on its own, in addition to Caches's own later,
-        // separate exact-match claim. Two claims, two paths, sizes NOT deduplicated.
-        #expect(appCaches?.fileCount == 2)
-        #expect(appCaches?.totalSize == 12_345 + 999)
-        #expect(appCaches?.matchedPaths == [
-            "/Users/tester/Library/Caches/ChildA",
-            "/Users/tester/Library/Caches",
+        // New pinned behavior: only Caches (the resolved node) is claimed. ChildA is
+        // invisible to the analyzer regardless of its array index.
+        #expect(appCaches?.fileCount == 1)
+        #expect(appCaches?.totalSize == 999)
+        #expect(appCaches?.matchedPaths == ["/Users/tester/Library/Caches"])
+    }
+
+    @Test("SpaceAnalyzer: a category prefix absent from the scanned tree contributes nothing, without affecting other categories or crashing")
+    func spaceAnalyzerMissingPrefixIsNoOp() async throws {
+        // No Library/Developer/* (or any other known category) directory exists here, so
+        // every one of those descendPath lookups resolves to nil. Only .Trash matches.
+        let tree = makeTree(rootPath: "/Users/tester", [
+            dir(".Trash", [file("deleted.bin", size: 500)]),
+            dir("Documents", [file("notes.txt", size: 777)]),
         ])
+
+        let result = await SpaceAnalyzer().analyze(tree: tree)
+
+        #expect(result.categories.map(\.id) == ["trash"])
+        #expect(result.categories.first?.totalSize == 500)
+        #expect(result.totalAnalyzed == 1_277)
     }
 }
