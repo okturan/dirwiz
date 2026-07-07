@@ -42,7 +42,6 @@ fi
 
 SIGN_ARGS=(
   --force
-  --deep
   --options runtime
   --entitlements "$ENTITLEMENTS"
   --sign "$SIGN_IDENTITY"
@@ -57,7 +56,7 @@ fi
 codesign "${SIGN_ARGS[@]}" "$APP"
 xattr -cr "$APP" 2>/dev/null || true
 
-codesign --verify --deep --strict --verbose=2 "$APP"
+codesign --verify --strict --verbose=2 "$APP"
 DITTONORSRC=1 COPYFILE_DISABLE=1 ditto -c -k --keepParent --norsrc --noextattr --noqtn --noacl "$APP" "$ZIP"
 
 echo "Built $APP"
