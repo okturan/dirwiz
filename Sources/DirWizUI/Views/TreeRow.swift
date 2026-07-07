@@ -95,10 +95,26 @@ struct TreeRow: View {
             }
             .frame(width: 60, height: 10)
 
-            Text(String(format: "%.1f%%", pct * 100))
+            Text(Self.formatParentPercentage(pct))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Formats a parent-relative share with precision that scales down as the
+    /// value shrinks, so small-but-real items don't all collapse into a flat
+    /// "0.0%" (e.g. a 2MB file inside a 500GB parent).
+    static func formatParentPercentage(_ pct: Double) -> String {
+        let v = pct * 100
+        guard v > 0 else { return "0%" }
+        if v >= 10 {
+            return String(format: "%.1f", v) + "%"
+        }
+        let twoDecimal = String(format: "%.2f", v)
+        if twoDecimal == "0.00" {
+            return "<0.01%"
+        }
+        return "\(twoDecimal)%"
     }
 
     private var itemsColumn: some View {
