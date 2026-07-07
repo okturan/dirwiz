@@ -1,5 +1,8 @@
 import Foundation
 import Darwin
+import os
+
+private let log = Logger(subsystem: "com.dirwiz", category: "SearchEngine")
 
 /// Filters for search results.
 public struct SearchFilters: Sendable {
@@ -42,7 +45,7 @@ public enum SearchEngine {
         // so it never reads out of bounds. Log in debug to catch stale snapshots early.
         if searchEntries.count < nodes.count {
             #if DEBUG
-            print("SearchEngine: searchEntries (\(searchEntries.count)) < nodes (\(nodes.count)); snapshot may be stale")
+            log.debug("searchEntries (\(searchEntries.count)) < nodes (\(nodes.count)); snapshot may be stale")
             #endif
         }
 

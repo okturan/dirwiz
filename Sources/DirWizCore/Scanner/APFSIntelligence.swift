@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.dirwiz", category: "APFSIntelligence")
 
 // MARK: - Clone Detection
 
@@ -181,6 +184,7 @@ public struct APFSIntelligence: Sendable {
         do {
             try process.run()
         } catch {
+            log.error("Failed to run tmutil listlocalsnapshots: \(error.localizedDescription)")
             return nil
         }
 

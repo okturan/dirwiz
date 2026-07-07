@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.dirwiz", category: "StorageTrends")
 
 public struct ScanSummary: Codable, Sendable {
     public let date: Date
@@ -123,6 +126,7 @@ public struct StorageTrends: Sendable {
             let free = UInt64(values.volumeAvailableCapacity ?? 0)
             return (capacity, free)
         } catch {
+            log.error("Failed to read volume stats for \(path): \(error.localizedDescription)")
             return (0, 0)
         }
     }

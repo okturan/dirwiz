@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.dirwiz", category: "iCloudAnalyzer")
 
 /// iCloud file download status.
 public enum iCloudStatus: String, Sendable, CaseIterable {
@@ -166,6 +169,7 @@ public struct iCloudAnalyzer: Sendable {
                 successes += 1
             } catch {
                 // Continue with remaining files.
+                log.error("Failed to evict \(path): \(error.localizedDescription)")
             }
         }
         return successes
