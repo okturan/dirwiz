@@ -220,26 +220,26 @@ public struct DuplicateScanStats: Sendable {
     public let confirmedGroups: Int
 
     public init(
-        groupingSeconds: TimeInterval,
-        partialHashingSeconds: TimeInterval,
-        fullHashingSeconds: TimeInterval,
-        finalizingSeconds: TimeInterval,
-        sizeQualifiedFiles: Int,
-        sizeCollisionGroups: Int,
-        totalCandidates: Int,
-        partialHashedFiles: Int,
-        partialBytesRequested: UInt64,
-        partialInlineConfirmedFiles: Int,
-        partialInlineConfirmedBytesRequested: UInt64,
-        partialDefaultSampledFiles: Int,
-        partialDefaultSampledBytesRequested: UInt64,
-        partialLargeGroupSampledFiles: Int,
-        partialLargeGroupSampledBytesRequested: UInt64,
-        partialMatchGroups: Int,
-        totalFullCandidates: Int,
-        fullHashedFiles: Int,
-        fullBytesRequested: UInt64,
-        confirmedGroups: Int
+        groupingSeconds: TimeInterval = 0,
+        partialHashingSeconds: TimeInterval = 0,
+        fullHashingSeconds: TimeInterval = 0,
+        finalizingSeconds: TimeInterval = 0,
+        sizeQualifiedFiles: Int = 0,
+        sizeCollisionGroups: Int = 0,
+        totalCandidates: Int = 0,
+        partialHashedFiles: Int = 0,
+        partialBytesRequested: UInt64 = 0,
+        partialInlineConfirmedFiles: Int = 0,
+        partialInlineConfirmedBytesRequested: UInt64 = 0,
+        partialDefaultSampledFiles: Int = 0,
+        partialDefaultSampledBytesRequested: UInt64 = 0,
+        partialLargeGroupSampledFiles: Int = 0,
+        partialLargeGroupSampledBytesRequested: UInt64 = 0,
+        partialMatchGroups: Int = 0,
+        totalFullCandidates: Int = 0,
+        fullHashedFiles: Int = 0,
+        fullBytesRequested: UInt64 = 0,
+        confirmedGroups: Int = 0
     ) {
         self.groupingSeconds = groupingSeconds
         self.partialHashingSeconds = partialHashingSeconds
@@ -369,27 +369,10 @@ public final class DuplicateFinder {
             await progress?(DuplicateScanUpdate(phase: .finalizing, processed: 0, total: 0))
             return DuplicateScanReport(
                 groups: [],
-                stats: DuplicateScanStats(
+                stats: Self.emptyStats(
+                    totalFiles: sizeQualifiedFiles,
                     groupingSeconds: groupingSeconds,
-                    partialHashingSeconds: 0,
-                    fullHashingSeconds: 0,
-                    finalizingSeconds: 0,
-                    sizeQualifiedFiles: sizeQualifiedFiles,
-                    sizeCollisionGroups: sizeCollisionGroups,
-                    totalCandidates: 0,
-                    partialHashedFiles: 0,
-                    partialBytesRequested: 0,
-                    partialInlineConfirmedFiles: 0,
-                    partialInlineConfirmedBytesRequested: 0,
-                    partialDefaultSampledFiles: 0,
-                    partialDefaultSampledBytesRequested: 0,
-                    partialLargeGroupSampledFiles: 0,
-                    partialLargeGroupSampledBytesRequested: 0,
-                    partialMatchGroups: 0,
-                    totalFullCandidates: 0,
-                    fullHashedFiles: 0,
-                    fullBytesRequested: 0,
-                    confirmedGroups: 0
+                    sizeCollisionGroups: sizeCollisionGroups
                 )
             )
         }
@@ -612,8 +595,6 @@ public final class DuplicateFinder {
                 stats: DuplicateScanStats(
                     groupingSeconds: groupingSeconds,
                     partialHashingSeconds: partialHashingSeconds,
-                    fullHashingSeconds: 0,
-                    finalizingSeconds: 0,
                     sizeQualifiedFiles: sizeQualifiedFiles,
                     sizeCollisionGroups: sizeCollisionGroups,
                     totalCandidates: totalCandidates,
@@ -625,11 +606,7 @@ public final class DuplicateFinder {
                     partialDefaultSampledBytesRequested: partialDefaultSampledBytesRequested,
                     partialLargeGroupSampledFiles: partialLargeGroupSampledFiles,
                     partialLargeGroupSampledBytesRequested: partialLargeGroupSampledBytesRequested,
-                    partialMatchGroups: partialMatchGroups,
-                    totalFullCandidates: 0,
-                    fullHashedFiles: 0,
-                    fullBytesRequested: 0,
-                    confirmedGroups: 0
+                    partialMatchGroups: partialMatchGroups
                 )
             )
         }
@@ -1079,28 +1056,15 @@ public final class DuplicateFinder {
 
         return (digest: hasher.finalize(), bytesRequested: UInt64(byteCount))
     }
-    private static func emptyStats(totalFiles: Int) -> DuplicateScanStats {
+    private static func emptyStats(
+        totalFiles: Int,
+        groupingSeconds: TimeInterval = 0,
+        sizeCollisionGroups: Int = 0
+    ) -> DuplicateScanStats {
         DuplicateScanStats(
-            groupingSeconds: 0,
-            partialHashingSeconds: 0,
-            fullHashingSeconds: 0,
-            finalizingSeconds: 0,
+            groupingSeconds: groupingSeconds,
             sizeQualifiedFiles: totalFiles,
-            sizeCollisionGroups: 0,
-            totalCandidates: 0,
-            partialHashedFiles: 0,
-            partialBytesRequested: 0,
-            partialInlineConfirmedFiles: 0,
-            partialInlineConfirmedBytesRequested: 0,
-            partialDefaultSampledFiles: 0,
-            partialDefaultSampledBytesRequested: 0,
-            partialLargeGroupSampledFiles: 0,
-            partialLargeGroupSampledBytesRequested: 0,
-            partialMatchGroups: 0,
-            totalFullCandidates: 0,
-            fullHashedFiles: 0,
-            fullBytesRequested: 0,
-            confirmedGroups: 0
+            sizeCollisionGroups: sizeCollisionGroups
         )
     }
 }
