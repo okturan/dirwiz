@@ -217,17 +217,24 @@ public final class AppState {
                 return "Resolving app bundle sizes"
             }
         }
+
+        /// Single source of truth mapping each case to its running flag on `AppState`.
+        @MainActor
+        func isRunning(in state: AppState) -> Bool {
+            switch self {
+            case .duplicateScan: return state.duplicate.isDuplicateScanRunning
+            case .hardlinkScan: return state.isHardlinkScanRunning
+            case .spaceAnalysis: return state.isSpaceAnalysisRunning
+            case .iCloudAnalysis: return state.isICloudAnalysisRunning
+            case .apfsQuery: return state.isAPFSQueryRunning
+            case .cloneCheck: return state.isCloneCheckRunning
+            case .bundleSizing: return state.isBundleSizingRunning
+            }
+        }
     }
 
     public var activeHeavyTask: HeavyTaskKind? {
-        if duplicate.isDuplicateScanRunning { return .duplicateScan }
-        if isHardlinkScanRunning { return .hardlinkScan }
-        if isSpaceAnalysisRunning { return .spaceAnalysis }
-        if isICloudAnalysisRunning { return .iCloudAnalysis }
-        if isAPFSQueryRunning { return .apfsQuery }
-        if isCloneCheckRunning { return .cloneCheck }
-        if isBundleSizingRunning { return .bundleSizing }
-        return nil
+        HeavyTaskKind.allCases.first { $0.isRunning(in: self) }
     }
 
     public var activeHeavyTaskStatusText: String? {
@@ -236,47 +243,11 @@ public final class AppState {
 
     public func canStartHeavyTask(_ kind: HeavyTaskKind) -> Bool {
         guard fileTree != nil, !scanProgress.isScanning else { return false }
-
-        switch kind {
-        case .duplicateScan:
-            return !duplicate.isDuplicateScanRunning && activeHeavyTaskExcluding(kind) == nil
-        case .hardlinkScan:
-            return !isHardlinkScanRunning && activeHeavyTaskExcluding(kind) == nil
-        case .spaceAnalysis:
-            return !isSpaceAnalysisRunning && activeHeavyTaskExcluding(kind) == nil
-        case .iCloudAnalysis:
-            return !isICloudAnalysisRunning && activeHeavyTaskExcluding(kind) == nil
-        case .apfsQuery:
-            return !isAPFSQueryRunning && activeHeavyTaskExcluding(kind) == nil
-        case .cloneCheck:
-            return !isCloneCheckRunning && activeHeavyTaskExcluding(kind) == nil
-        case .bundleSizing:
-            return !isBundleSizingRunning && activeHeavyTaskExcluding(kind) == nil
-        }
+        return !kind.isRunning(in: self) && activeHeavyTaskExcluding(kind) == nil
     }
 
     private func activeHeavyTaskExcluding(_ excluded: HeavyTaskKind) -> HeavyTaskKind? {
-        for kind in HeavyTaskKind.allCases where kind != excluded {
-            switch kind {
-            case .duplicateScan where duplicate.isDuplicateScanRunning:
-                return kind
-            case .hardlinkScan where isHardlinkScanRunning:
-                return kind
-            case .spaceAnalysis where isSpaceAnalysisRunning:
-                return kind
-            case .iCloudAnalysis where isICloudAnalysisRunning:
-                return kind
-            case .apfsQuery where isAPFSQueryRunning:
-                return kind
-            case .cloneCheck where isCloneCheckRunning:
-                return kind
-            case .bundleSizing where isBundleSizingRunning:
-                return kind
-            default:
-                continue
-            }
-        }
-        return nil
+        HeavyTaskKind.allCases.first { $0 != excluded && $0.isRunning(in: self) }
     }
 
     /// Reset navigation state for a new scan.
