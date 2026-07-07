@@ -68,6 +68,17 @@ private func makeTree(
     return tree
 }
 
+/// Little-endian byte encoding helpers for hand-building binary snapshot headers in tests.
+/// Mirrors the private `Data.appendLE` layout in TemporalSnapshot.swift.
+private func leBytes<T: FixedWidthInteger>(_ value: T) -> [UInt8] {
+    var v = value.littleEndian
+    return withUnsafeBytes(of: &v) { Array($0) }
+}
+
+private func leBytes(_ value: Double) -> [UInt8] {
+    leBytes(value.bitPattern)
+}
+
 /// Build a snapshot directly from a path-to-size dictionary, bypassing the tree.
 private func makeSnapshot(
     rootPath: String = "/TestRoot",
@@ -86,7 +97,7 @@ private func makeSnapshot(
 
 // MARK: - Tests
 
-@Suite("TemporalDiffService Tests")
+@Suite("TemporalDiffService Tests", .serialized)
 struct TemporalDiffTests {
 
     // MARK: 1. Snapshot Building
@@ -372,6 +383,60 @@ struct TemporalDiffTests {
         // Clean up the saved file.
         let url = TemporalSnapshot.snapshotURL(for: original.meta.rootPath)
         try? FileManager.default.removeItem(at: url)
+    }
+
+    // MARK: 9b. Corrupted Header Clamp
+
+    @Test("Header declaring a huge dirCount with a tiny body throws instead of over-allocating")
+    func hugeDirCountHeaderIsClamped() throws {
+        let tempSupportRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DirWizAppSupport_\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempSupportRoot, withIntermediateDirectories: true)
+        let previousOverride = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"]
+        setenv("DIRWIZ_APP_SUPPORT_DIR", tempSupportRoot.path, 1)
+        defer {
+            if let previousOverride {
+                setenv("DIRWIZ_APP_SUPPORT_DIR", previousOverride, 1)
+            } else {
+                unsetenv("DIRWIZ_APP_SUPPORT_DIR")
+            }
+            try? FileManager.default.removeItem(at: tempSupportRoot)
+        }
+
+        let rootPath = "/tmp/DirWizHugeCountTest_\(UUID().uuidString)"
+        let rootPathUTF8 = Array(rootPath.utf8)
+
+        // Hand-build a binary header (magic, version, uuid, createdAt, totalBytes,
+        // dirCount, rootPathLen, rootPath, caseFlag) that declares ~UInt32.max
+        // directories but has zero entry bytes following it.
+        var bytes: [UInt8] = []
+        bytes.append(contentsOf: [0x54, 0x44, 0x53, 0x4E]) // magic "TDSN"
+        bytes.append(contentsOf: leBytes(UInt32(2)))        // version 2
+        bytes.append(contentsOf: Array(repeating: UInt8(0), count: 16)) // uuid
+        bytes.append(contentsOf: leBytes(Date().timeIntervalSince1970)) // createdAt
+        bytes.append(contentsOf: leBytes(UInt64(0)))        // totalBytes
+        bytes.append(contentsOf: leBytes(UInt32.max))       // dirCount — hostile, huge
+        bytes.append(contentsOf: leBytes(UInt16(rootPathUTF8.count))) // rootPathLen
+        bytes.append(contentsOf: rootPathUTF8)              // rootPath
+        bytes.append(0)                                     // v2 case-sensitivity flag
+        // No entry bytes follow — the declared dirCount vastly exceeds what the
+        // remaining (zero) bytes could hold.
+
+        let data = Data(bytes)
+        let url = TemporalSnapshot.snapshotURL(for: rootPath)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        do {
+            _ = try TemporalSnapshot.load(for: rootPath)
+            Issue.record("Expected load(for:) to throw for a header/body size mismatch")
+        } catch {
+            // TemporalSnapshotFormatError is file-private, so match on the
+            // description rather than the case directly.
+            #expect(String(describing: error) == "truncatedBinary",
+                "Expected truncatedBinary, got \(error)")
+        }
     }
 
     // MARK: 10. Empty Tree
