@@ -42,14 +42,18 @@ Build a release app bundle:
 open dist/DirWiz.app
 ```
 
-The package script creates `dist/DirWiz.app` and `dist/DirWiz-1.0.0-macos.zip`.
+The package script creates `dist/DirWiz.app` and `dist/DirWiz-<version>-macos.zip` (version read from `Info.plist`).
 
 Run the CLI:
 
 ```bash
 .build/release/dirwiz-cli scan /path/to/scan
 .build/release/dirwiz-cli scan /path/to/scan --json --max-depth 3
+.build/release/dirwiz-cli scan /path/to/scan -q
 .build/release/dirwiz-cli duplicates /path/to/scan --min-size 1048576
+.build/release/dirwiz-cli info /path/to/scan
+.build/release/dirwiz-cli snapshot /path/to/scan
+.build/release/dirwiz-cli diff /path/to/scan
 .build/release/dirwiz-cli benchmark /path/to/scan --iterations 3
 ```
 
@@ -93,7 +97,17 @@ DIRWIZ_SCAN_WORKERS=6
 DIRWIZ_DEFER_TREE=0
 DIRWIZ_SKIP_BUNDLE_SIZES=1
 DIRWIZ_BUNDLE_WORKERS=4
+DIRWIZ_BULK_BUFFER_BYTES=262144
 ```
+
+Release script knobs (see `scripts/package-release.sh`):
+
+```bash
+DIRWIZ_DIST_DIR=/path/to/output
+DIRWIZ_CODESIGN_IDENTITY="Developer ID Application: ..."
+```
+
+Advanced: `DIRWIZ_APP_SUPPORT_DIR` overrides where `snapshot`/`diff` persist saved snapshots (defaults to Application Support); mainly useful for tests and sandboxed runs.
 
 ## Requirements
 
