@@ -865,7 +865,7 @@ public final class DuplicateFinder {
                         }
 
                         let verifiedGroups = DuplicateContentVerifier
-                            .exactGroups(paths: dedupedPaths, expectedSize: key.size)
+                            .exactGroupsLockStep(paths: dedupedPaths, expectedSize: key.size)
                             .map { exactPaths in
                                 DuplicateGroup(
                                     fileSize: key.size,

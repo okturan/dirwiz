@@ -133,10 +133,10 @@ struct DuplicateFinderTests {
     @Test("Finalize byte-verification splits a group whose members differ only in the last byte")
     func finalizeSplitsGroupDifferingInLastByte() async throws {
         // A true 128-bit hash collision can't be forced in a test, so this pins the
-        // byte-verification step (DuplicateContentVerifier.exactGroups) that
-        // DuplicateFinder's parallel finalize pass calls per confirmed group — it
-        // must still split out a file that differs by a single trailing byte,
-        // exercising the same code path finalize uses post-parallelization.
+        // byte-verification step (DuplicateContentVerifier.exactGroupsLockStep) that
+        // DuplicateFinder's parallel finalize pass now calls per confirmed group — it
+        // must still split out a file that differs by a single trailing byte instead
+        // of treating the lock-step fast path's divergence as a match.
         let size = 8192
         var mutated = Data(repeating: 0x5C, count: size)
         let a = mutated
@@ -150,17 +150,42 @@ struct DuplicateFinderTests {
         ])
         defer { cleanup() }
 
-        let groups = DuplicateContentVerifier.exactGroups(
-            paths: [
-                url.appendingPathComponent("a.bin").path,
-                url.appendingPathComponent("b.bin").path,
-                url.appendingPathComponent("c.bin").path,
-            ],
-            expectedSize: UInt64(size)
-        )
+        let paths = [
+            url.appendingPathComponent("a.bin").path,
+            url.appendingPathComponent("b.bin").path,
+            url.appendingPathComponent("c.bin").path,
+        ]
+
+        let lockStepGroups = DuplicateContentVerifier.exactGroupsLockStep(paths: paths, expectedSize: UInt64(size))
+        let pairwiseGroups = DuplicateContentVerifier.exactGroups(paths: paths, expectedSize: UInt64(size))
+
+        for groups in [lockStepGroups, pairwiseGroups] {
+            #expect(groups.count == 1)
+            #expect(Set(groups[0].map { URL(fileURLWithPath: $0).lastPathComponent }) == ["a.bin", "b.bin"])
+        }
+    }
+
+    @Test("Lock-step group verification confirms a larger all-identical group in one pass")
+    func lockStepVerifiesLargerIdenticalGroup() async throws {
+        // Exercises exactGroupsLockStep's fast path directly: every member truly
+        // matches, so it must return one group containing all of them (not fall
+        // back into treating them as unverified or as singletons).
+        let content = Data(repeating: 0x37, count: 32 * 1024)
+        var files: [String: Data] = [:]
+        var names: Set<String> = []
+        for i in 0..<9 {
+            let name = "identical-\(i).bin"
+            files[name] = content
+            names.insert(name)
+        }
+        let (url, cleanup) = try createTempFiles(files)
+        defer { cleanup() }
+
+        let paths = names.map { url.appendingPathComponent($0).path }
+        let groups = DuplicateContentVerifier.exactGroupsLockStep(paths: paths, expectedSize: UInt64(content.count))
 
         #expect(groups.count == 1)
-        #expect(Set(groups[0].map { URL(fileURLWithPath: $0).lastPathComponent }) == ["a.bin", "b.bin"])
+        #expect(Set(groups[0].map { URL(fileURLWithPath: $0).lastPathComponent }) == names)
     }
 
     @Test("Trash safety requires an unselected byte-identical copy")
