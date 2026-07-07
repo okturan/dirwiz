@@ -791,37 +791,102 @@ public final class DuplicateFinder {
             guard lstat(path, &st) == 0 else { return nil }
             return DevIno(dev: st.st_dev, ino: st.st_ino)
         }
-        var results: [DuplicateGroup] = []
-        for (key, indices) in confirmedFullGroups {
-            guard indices.count >= 2 else { continue }
+        // Process candidate groups in a fixed, deterministic order (independent of
+        // Dictionary iteration order) so parallel completion order can't change the
+        // pre-sort ordering used to break ties in the wastedSpace sort below.
+        let finalizeWorkItems = confirmedFullGroups.sorted { lhs, rhs in
+            if lhs.key.size != rhs.key.size { return lhs.key.size < rhs.key.size }
+            if lhs.key.lo != rhs.key.lo { return lhs.key.lo < rhs.key.lo }
+            return lhs.key.hi < rhs.key.hi
+        }
 
-            // Deduplicate by scan-time (device, inode) metadata — hardlinked files share both.
-            // This avoids a path rebuild + lstat round-trip for every confirmed file.
-            var seenInodes: [DevIno: UInt32] = [:]
-            for nodeIndex in indices {
-                guard let devIno = devIno(for: nodeIndex) else { continue }
-                if seenInodes[devIno] == nil {
-                    seenInodes[devIno] = nodeIndex
-                }
+        var results: [DuplicateGroup] = []
+        if !finalizeWorkItems.isEmpty {
+            await progress?(DuplicateScanUpdate(
+                phase: .finalizing,
+                processed: 0,
+                total: finalizeWorkItems.count
+            ))
+
+            // Same GCD-timer + shared-counter bridge as passes 2/3: progress is
+            // counted per completed group (not per file within a group), and the
+            // timer keeps the UI advancing even if a large group's byte-verification
+            // blocks its task for a while.
+            let finalizeCounter = ProgressCounter()
+            let finalizeProgressTimer = ProgressTimerBridge(
+                phase: .finalizing,
+                total: finalizeWorkItems.count,
+                counter: finalizeCounter,
+                progress: progress
+            )
+
+            struct FinalizeGroupReport: Sendable {
+                let index: Int
+                let groups: [DuplicateGroup]
             }
 
-            let dedupedPaths = seenInodes.values.map { nodeIndex in
-                FileTree.pathFromSnapshot(
-                    at: nodeIndex,
-                    nodes: snapshotNodes,
-                    stringPool: snapshotStringPool,
-                    rootPath: snapshotRootPath
-                )
-            }.sorted()
-            guard dedupedPaths.count >= 2 else { continue }
+            let orderedGroups = await withTaskGroup(
+                of: FinalizeGroupReport.self,
+                returning: [[DuplicateGroup]].self
+            ) { group in
+                for (index, entry) in finalizeWorkItems.enumerated() {
+                    group.addTask {
+                        defer { finalizeCounter.add(1) }
+                        guard !Task.isCancelled else {
+                            return FinalizeGroupReport(index: index, groups: [])
+                        }
 
-            for exactPaths in DuplicateContentVerifier.exactGroups(paths: dedupedPaths, expectedSize: key.size) {
-                let dupGroup = DuplicateGroup(
-                    fileSize: key.size,
-                    hash: key.lo,  // Lower 64 bits for display identity
-                    paths: exactPaths
-                )
-                results.append(dupGroup)
+                        let key = entry.key
+                        let indices = entry.value
+                        guard indices.count >= 2 else {
+                            return FinalizeGroupReport(index: index, groups: [])
+                        }
+
+                        // Deduplicate by scan-time (device, inode) metadata — hardlinked files share both.
+                        // This avoids a path rebuild + lstat round-trip for every confirmed file.
+                        var seenInodes: [DevIno: UInt32] = [:]
+                        for nodeIndex in indices {
+                            guard let devIno = devIno(for: nodeIndex) else { continue }
+                            if seenInodes[devIno] == nil {
+                                seenInodes[devIno] = nodeIndex
+                            }
+                        }
+
+                        let dedupedPaths = seenInodes.values.map { nodeIndex in
+                            FileTree.pathFromSnapshot(
+                                at: nodeIndex,
+                                nodes: snapshotNodes,
+                                stringPool: snapshotStringPool,
+                                rootPath: snapshotRootPath
+                            )
+                        }.sorted()
+                        guard dedupedPaths.count >= 2 else {
+                            return FinalizeGroupReport(index: index, groups: [])
+                        }
+
+                        let verifiedGroups = DuplicateContentVerifier
+                            .exactGroups(paths: dedupedPaths, expectedSize: key.size)
+                            .map { exactPaths in
+                                DuplicateGroup(
+                                    fileSize: key.size,
+                                    hash: key.lo,  // Lower 64 bits for display identity
+                                    paths: exactPaths
+                                )
+                            }
+                        return FinalizeGroupReport(index: index, groups: verifiedGroups)
+                    }
+                }
+
+                var slots = [[DuplicateGroup]](repeating: [], count: finalizeWorkItems.count)
+                for await report in group {
+                    slots[report.index] = report.groups
+                }
+                return slots
+            }
+
+            finalizeProgressTimer.stop()
+            for groups in orderedGroups {
+                results.append(contentsOf: groups)
             }
         }
 
@@ -830,8 +895,8 @@ public final class DuplicateFinder {
 
         await progress?(DuplicateScanUpdate(
             phase: .finalizing,
-            processed: results.count,
-            total: results.count
+            processed: finalizeWorkItems.count,
+            total: finalizeWorkItems.count
         ))
         let finalizingSeconds = CFAbsoluteTimeGetCurrent() - finalizingStart
         return DuplicateScanReport(

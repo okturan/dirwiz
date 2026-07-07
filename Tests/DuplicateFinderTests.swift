@@ -130,6 +130,39 @@ struct DuplicateFinderTests {
         #expect(Set(groups[0].map { URL(fileURLWithPath: $0).lastPathComponent }) == ["a.bin", "b.bin"])
     }
 
+    @Test("Finalize byte-verification splits a group whose members differ only in the last byte")
+    func finalizeSplitsGroupDifferingInLastByte() async throws {
+        // A true 128-bit hash collision can't be forced in a test, so this pins the
+        // byte-verification step (DuplicateContentVerifier.exactGroups) that
+        // DuplicateFinder's parallel finalize pass calls per confirmed group — it
+        // must still split out a file that differs by a single trailing byte,
+        // exercising the same code path finalize uses post-parallelization.
+        let size = 8192
+        var mutated = Data(repeating: 0x5C, count: size)
+        let a = mutated
+        let b = mutated
+        mutated[size - 1] = 0x5D
+        let c = mutated
+        let (url, cleanup) = try createTempFiles([
+            "a.bin": a,
+            "b.bin": b,
+            "c.bin": c,
+        ])
+        defer { cleanup() }
+
+        let groups = DuplicateContentVerifier.exactGroups(
+            paths: [
+                url.appendingPathComponent("a.bin").path,
+                url.appendingPathComponent("b.bin").path,
+                url.appendingPathComponent("c.bin").path,
+            ],
+            expectedSize: UInt64(size)
+        )
+
+        #expect(groups.count == 1)
+        #expect(Set(groups[0].map { URL(fileURLWithPath: $0).lastPathComponent }) == ["a.bin", "b.bin"])
+    }
+
     @Test("Trash safety requires an unselected byte-identical copy")
     func trashSafetyRequiresUnselectedExactCopy() async throws {
         let content = Data(repeating: 0xAB, count: 8192)
@@ -226,6 +259,45 @@ struct DuplicateFinderTests {
         let groups = await finder.findDuplicates(in: tree)
         #expect(groups.count == 1, "Only the dup pair should form a group")
         #expect(groups[0].paths.count == 2)
+    }
+
+    @Test("Many confirmed groups are all verified in parallel with deterministic content")
+    func manyGroupsFinalizeInParallel() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DupFinderManyGroups-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Distinct sizes so pass 1 already splits these into separate size
+        // groups, each of which becomes its own finalize task.
+        let groupCount = 12
+        var expectedNamesBySize: [UInt64: Set<String>] = [:]
+        for i in 0..<groupCount {
+            let size = 4096 + i * 32
+            let content = Data(repeating: UInt8(i & 0xFF), count: size)
+            let nameA = "group-\(i)-a.bin"
+            let nameB = "group-\(i)-b.bin"
+            try content.write(to: root.appendingPathComponent(nameA))
+            try content.write(to: root.appendingPathComponent(nameB))
+            expectedNamesBySize[UInt64(size)] = [nameA, nameB]
+        }
+
+        let tree = await scanDirectory(root.path)
+        let localFinder = DuplicateFinder()
+
+        // Repeat to surface any nondeterminism from parallel task scheduling.
+        for _ in 0..<3 {
+            let groups = await localFinder.findDuplicates(in: tree)
+            #expect(groups.count == groupCount, "All groups should be verified regardless of task scheduling")
+            for group in groups {
+                #expect(group.paths.count == 2)
+                let names = Set(group.paths.map { URL(fileURLWithPath: $0).lastPathComponent })
+                #expect(
+                    expectedNamesBySize[group.fileSize] == names,
+                    "Group contents for size \(group.fileSize) should match the known-answer pair"
+                )
+            }
+        }
     }
 
     // MARK: - Large file hash correctness
@@ -436,6 +508,34 @@ struct DuplicateFinderTests {
         }
 
         #expect(groups.isEmpty, "Scan in a cancelled task should return empty results")
+    }
+
+    @Test("Cancellation requested during a scan with real work does not hang or crash")
+    func cancellationDuringScanReturnsWithoutHanging() async throws {
+        // Enough real groups to spread work across grouping, hashing, and the
+        // parallel finalize pass, so a prompt cancel has a chance to land in any
+        // of them. Exactly which phase observes Task.isCancelled first isn't
+        // pinned — only that the scan always returns instead of hanging or crashing.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DupFinderCancelMidRun-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for i in 0..<40 {
+            let content = Data(repeating: UInt8(i & 0xFF), count: 64 * 1024)
+            try content.write(to: root.appendingPathComponent("pair-\(i)-a.bin"))
+            try content.write(to: root.appendingPathComponent("pair-\(i)-b.bin"))
+        }
+
+        let tree = await scanDirectory(root.path)
+
+        let task = Task {
+            await DuplicateFinder().findDuplicates(in: tree)
+        }
+        task.cancel()
+        let groups = await task.value
+
+        #expect(groups.count <= 40, "Cancellation may truncate results but must not fabricate extra groups")
     }
 
     // MARK: - Hardlink exclusion
