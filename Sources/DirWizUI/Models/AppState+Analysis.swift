@@ -4,8 +4,7 @@ import DirWizCore
 extension AppState {
     private enum SpaceAnalysisStepResult {
         case space(SpaceAnalysisResult)
-        case fileAge(FileAgeResult)
-        case sizeDistribution(SizeDistributionResult)
+        case fileStats(FileAgeResult, SizeDistributionResult)
     }
 
     // MARK: - Space Analysis
@@ -21,13 +20,15 @@ extension AppState {
         isSpaceAnalysisRunning = true
         isFileAgeRunning = true
         isSizeDistRunning = true
-        spaceAnalysisProgress = (0, 3)
+        spaceAnalysisProgress = (0, 2)
 
         spaceAnalysisTask = Task.detached(priority: .userInitiated) {
             await withTaskGroup(of: SpaceAnalysisStepResult.self) { group in
                 group.addTask { .space(await SpaceAnalyzer().analyze(tree: tree)) }
-                group.addTask { .fileAge(await FileAgeAnalyzer().analyze(tree: tree)) }
-                group.addTask { .sizeDistribution(await SizeDistributionAnalyzer().analyze(tree: tree)) }
+                group.addTask {
+                    let (age, size) = await CombinedFileStatsAnalyzer().analyze(tree: tree)
+                    return .fileStats(age, size)
+                }
 
                 var completed = 0
                 for await result in group {
@@ -38,14 +39,13 @@ extension AppState {
                         switch result {
                         case .space(let spaceResult):
                             self.spaceAnalysis = spaceResult
-                        case .fileAge(let ageResult):
+                        case .fileStats(let ageResult, let sizeResult):
                             self.fileAgeResult = ageResult
                             self.isFileAgeRunning = false
-                        case .sizeDistribution(let sizeResult):
                             self.sizeDistribution = sizeResult
                             self.isSizeDistRunning = false
                         }
-                        self.spaceAnalysisProgress = (completedCount, 3)
+                        self.spaceAnalysisProgress = (completedCount, 2)
                     }
                 }
             }

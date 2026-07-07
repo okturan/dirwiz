@@ -25,21 +25,48 @@ public struct SizeDistributionResult: Sendable {
     public let medianSize: UInt64
 }
 
-public struct SizeDistributionAnalyzer: Sendable {
-    public init() {}
+/// Accumulates per-file sizes as nodes are visited during a tree walk, then
+/// produces the exact bucket/percentile math on `finalize()`. Extracted so
+/// `SizeDistributionAnalyzer.analyze(tree:)` and `CombinedFileStatsAnalyzer`
+/// can feed the same node stream through identical (unchanged) sort-based
+/// percentile logic without duplicating it.
+struct SizeAccumulator {
+    private var fileSizes: [UInt64] = []
 
-    public func analyze(tree: FileTree) async -> SizeDistributionResult {
-        let nodes = tree.nodesSnapshot()
-
-        // Collect all file sizes
-        var fileSizes: [UInt64] = []
-        fileSizes.reserveCapacity(nodes.count)
-
-        let completed = FileTree.forEachFileInSnapshot(nodes) { _, node in
-            fileSizes.append(node.displaySize)
+    init(reservingCapacity capacity: Int = 0) {
+        if capacity > 0 {
+            fileSizes.reserveCapacity(capacity)
         }
-        guard completed else { return emptyResult() }
+    }
 
+    mutating func add(node: FileNode) {
+        fileSizes.append(node.displaySize)
+    }
+
+    /// Nearest-rank percentile on a sorted array.
+    private func percentile(sorted: [UInt64], p: Int) -> UInt64 {
+        guard !sorted.isEmpty else { return 0 }
+        let rank = (p * sorted.count + 99) / 100  // ceiling division
+        let index = min(rank, sorted.count) - 1
+        return sorted[max(index, 0)]
+    }
+
+    /// Map a file size to the appropriate bucket index.
+    private func bucketIndex(for size: UInt64) -> Int {
+        switch size {
+        case 0:                          return 0
+        case 1..<1_024:                  return 1
+        case 1_024..<10_240:             return 2
+        case 10_240..<102_400:           return 3
+        case 102_400..<1_048_576:        return 4
+        case 1_048_576..<10_485_760:     return 5
+        case 10_485_760..<104_857_600:   return 6
+        case 104_857_600..<1_073_741_824: return 7
+        default:                         return 8
+        }
+    }
+
+    mutating func finalize() -> SizeDistributionResult {
         if Task.isCancelled { return emptyResult() }
 
         let totalFiles = fileSizes.count
@@ -102,30 +129,7 @@ public struct SizeDistributionAnalyzer: Sendable {
         )
     }
 
-    /// Map a file size to the appropriate bucket index.
-    private func bucketIndex(for size: UInt64) -> Int {
-        switch size {
-        case 0:                          return 0
-        case 1..<1_024:                  return 1
-        case 1_024..<10_240:             return 2
-        case 10_240..<102_400:           return 3
-        case 102_400..<1_048_576:        return 4
-        case 1_048_576..<10_485_760:     return 5
-        case 10_485_760..<104_857_600:   return 6
-        case 104_857_600..<1_073_741_824: return 7
-        default:                         return 8
-        }
-    }
-
-    /// Nearest-rank percentile on a sorted array.
-    private func percentile(sorted: [UInt64], p: Int) -> UInt64 {
-        guard !sorted.isEmpty else { return 0 }
-        let rank = (p * sorted.count + 99) / 100  // ceiling division
-        let index = min(rank, sorted.count) - 1
-        return sorted[max(index, 0)]
-    }
-
-    private func emptyResult() -> SizeDistributionResult {
+    func emptyResult() -> SizeDistributionResult {
         SizeDistributionResult(
             buckets: [],
             percentiles: SizePercentiles(p50: 0, p90: 0, p95: 0, p99: 0),
@@ -134,5 +138,21 @@ public struct SizeDistributionAnalyzer: Sendable {
             meanSize: 0,
             medianSize: 0
         )
+    }
+}
+
+public struct SizeDistributionAnalyzer: Sendable {
+    public init() {}
+
+    public func analyze(tree: FileTree) async -> SizeDistributionResult {
+        let nodes = tree.nodesSnapshot()
+        var accumulator = SizeAccumulator(reservingCapacity: nodes.count)
+
+        let completed = FileTree.forEachFileInSnapshot(nodes) { _, node in
+            accumulator.add(node: node)
+        }
+        guard completed else { return accumulator.emptyResult() }
+
+        return accumulator.finalize()
     }
 }

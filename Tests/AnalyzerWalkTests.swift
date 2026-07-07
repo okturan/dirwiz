@@ -255,6 +255,68 @@ struct AnalyzerWalkTests {
         #expect(result.totalSize == 0)
     }
 
+    // MARK: - CombinedFileStatsAnalyzer equivalence (plan 014)
+
+    @Test("CombinedFileStatsAnalyzer's single walk matches FileAgeAnalyzer and SizeDistributionAnalyzer run independently")
+    func combinedFileStatsMatchesIndividualAnalyzers() async throws {
+        let now = UInt32(Date().timeIntervalSince1970)
+        let day: UInt32 = 86_400
+        let tree = makeTree(rootPath: "/fake-root", [
+            file("recent.bin", size: 1_000, modifiedDate: now - 5 * day),
+            dir("sub", [
+                file("mid.bin", size: 2_000, modifiedDate: now - 45 * day),
+                dir("deep", [
+                    file("old.bin", size: 50_000, modifiedDate: now - 200 * day),
+                    file("ancient.bin", size: 500_000, modifiedDate: now - 500 * day),
+                ]),
+            ]),
+            file("veryOld.bin", size: 5_000_000, modifiedDate: now - 1_000 * day),
+            file("unknown.bin", size: 6_000, modifiedDate: 0),
+            file("big.bin", size: 5_000_000_000, modifiedDate: now - 10 * day),
+        ])
+
+        let individualAge = await FileAgeAnalyzer().analyze(tree: tree)
+        let individualSize = await SizeDistributionAnalyzer().analyze(tree: tree)
+        let combined = await CombinedFileStatsAnalyzer().analyze(tree: tree)
+
+        // FileAgeResult: top-level fields
+        #expect(combined.fileAge.totalFiles == individualAge.totalFiles)
+        #expect(combined.fileAge.totalSize == individualAge.totalSize)
+        #expect(combined.fileAge.oldestFileDate == individualAge.oldestFileDate)
+        #expect(combined.fileAge.newestFileDate == individualAge.newestFileDate)
+        #expect(combined.fileAge.buckets.count == individualAge.buckets.count)
+
+        // FileAgeResult: bucket-by-bucket
+        let combinedAgeById = Dictionary(uniqueKeysWithValues: combined.fileAge.buckets.map { ($0.id, $0) })
+        let individualAgeById = Dictionary(uniqueKeysWithValues: individualAge.buckets.map { ($0.id, $0) })
+        for id in individualAgeById.keys {
+            #expect(combinedAgeById[id]?.fileCount == individualAgeById[id]?.fileCount, "age bucket \(id) fileCount")
+            #expect(combinedAgeById[id]?.totalSize == individualAgeById[id]?.totalSize, "age bucket \(id) totalSize")
+            #expect(combinedAgeById[id]?.percentage == individualAgeById[id]?.percentage, "age bucket \(id) percentage")
+            #expect(combinedAgeById[id]?.minDays == individualAgeById[id]?.minDays, "age bucket \(id) minDays")
+            #expect(combinedAgeById[id]?.maxDays == individualAgeById[id]?.maxDays, "age bucket \(id) maxDays")
+        }
+
+        // SizeDistributionResult: top-level fields, including the sort-based percentiles
+        #expect(combined.sizeDistribution.totalFiles == individualSize.totalFiles)
+        #expect(combined.sizeDistribution.totalSize == individualSize.totalSize)
+        #expect(combined.sizeDistribution.meanSize == individualSize.meanSize)
+        #expect(combined.sizeDistribution.medianSize == individualSize.medianSize)
+        #expect(combined.sizeDistribution.percentiles.p50 == individualSize.percentiles.p50)
+        #expect(combined.sizeDistribution.percentiles.p90 == individualSize.percentiles.p90)
+        #expect(combined.sizeDistribution.percentiles.p95 == individualSize.percentiles.p95)
+        #expect(combined.sizeDistribution.percentiles.p99 == individualSize.percentiles.p99)
+        #expect(combined.sizeDistribution.buckets.count == individualSize.buckets.count)
+
+        // SizeDistributionResult: bucket-by-bucket
+        let combinedSizeById = Dictionary(uniqueKeysWithValues: combined.sizeDistribution.buckets.map { ($0.id, $0) })
+        let individualSizeById = Dictionary(uniqueKeysWithValues: individualSize.buckets.map { ($0.id, $0) })
+        for id in individualSizeById.keys {
+            #expect(combinedSizeById[id]?.fileCount == individualSizeById[id]?.fileCount, "size bucket \(id) fileCount")
+            #expect(combinedSizeById[id]?.totalSize == individualSizeById[id]?.totalSize, "size bucket \(id) totalSize")
+        }
+    }
+
     // MARK: - iCloudAnalyzer characterization (pins pre-refactor behavior)
 
     @Test("iCloudAnalyzer returns an empty result for a tree with no iCloud container paths")
