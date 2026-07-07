@@ -243,8 +243,15 @@ public struct TemporalSnapshot: Sendable {
             isCaseSensitive = flagBytes[flagBytes.startIndex] != 0
         }
 
+        // Clamp the reservation to what the remaining bytes could actually hold —
+        // a corrupted/hostile header declaring a huge count must not force a huge
+        // pre-allocation. Minimum entry size: UInt16 path length (2) + empty path (0)
+        // + UInt64 size (8) = 10 bytes.
+        let minEntrySize = 10
+        let remainingBytes = data.count - cursor
+        let maxPossibleEntries = remainingBytes / minEntrySize
         var byPath: [String: UInt64] = [:]
-        byPath.reserveCapacity(Int(dirCountRaw))
+        byPath.reserveCapacity(min(Int(dirCountRaw), maxPossibleEntries))
 
         while cursor < data.count {
             let pathLength: UInt16 = try data.readLE(at: &cursor)
