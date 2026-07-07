@@ -79,6 +79,12 @@ private func leBytes(_ value: Double) -> [UInt8] {
     leBytes(value.bitPattern)
 }
 
+/// Raw 16-byte encoding of a UUID, matching the binary writer's
+/// `withUnsafeBytes(of: &uuid) { data.append(contentsOf: $0) }` layout.
+private func uuidBytes(_ uuid: UUID) -> [UInt8] {
+    withUnsafeBytes(of: uuid.uuid) { Array($0) }
+}
+
 /// Build a snapshot directly from a path-to-size dictionary, bypassing the tree.
 private func makeSnapshot(
     rootPath: String = "/TestRoot",
@@ -437,6 +443,138 @@ struct TemporalDiffTests {
             #expect(String(describing: error) == "truncatedBinary",
                 "Expected truncatedBinary, got \(error)")
         }
+    }
+
+    // MARK: 9c. Legacy Format Decode — v1 Binary
+
+    @Test("v1 binary snapshot (no case-sensitivity byte) decodes with isCaseSensitive defaulting to false")
+    func v1BinaryDecodesWithCaseSensitiveDefault() throws {
+        let tempSupportRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DirWizAppSupport_\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempSupportRoot, withIntermediateDirectories: true)
+        let previousOverride = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"]
+        setenv("DIRWIZ_APP_SUPPORT_DIR", tempSupportRoot.path, 1)
+        defer {
+            if let previousOverride {
+                setenv("DIRWIZ_APP_SUPPORT_DIR", previousOverride, 1)
+            } else {
+                unsetenv("DIRWIZ_APP_SUPPORT_DIR")
+            }
+            try? FileManager.default.removeItem(at: tempSupportRoot)
+        }
+
+        let rootPath = "/tmp/DirWizV1Test_\(UUID().uuidString)"
+        let rootPathUTF8 = Array(rootPath.utf8)
+        let id = UUID()
+        let entries: [(path: String, size: UInt64)] = [("alpha", 1_000), ("beta", 2_000)]
+
+        var entryBytes: [UInt8] = []
+        for entry in entries {
+            let pathUTF8 = Array(entry.path.utf8)
+            entryBytes.append(contentsOf: leBytes(UInt16(pathUTF8.count)))
+            entryBytes.append(contentsOf: pathUTF8)
+            entryBytes.append(contentsOf: leBytes(entry.size))
+        }
+
+        // v1 layout = writer layout minus the v2 case-sensitivity byte: magic, version=1,
+        // uuid, createdAt, totalBytes, dirCount, rootPathLen, rootPath, then entries
+        // immediately (no flag byte in between).
+        var bytes: [UInt8] = []
+        bytes.append(contentsOf: [0x54, 0x44, 0x53, 0x4E]) // magic "TDSN"
+        bytes.append(contentsOf: leBytes(UInt32(1)))        // version 1 (legacy)
+        bytes.append(contentsOf: uuidBytes(id))
+        bytes.append(contentsOf: leBytes(Date().timeIntervalSince1970))
+        bytes.append(contentsOf: leBytes(UInt64(3_000)))        // totalBytes
+        bytes.append(contentsOf: leBytes(UInt32(entries.count))) // dirCount
+        bytes.append(contentsOf: leBytes(UInt16(rootPathUTF8.count)))
+        bytes.append(contentsOf: rootPathUTF8)
+        // No case-sensitivity byte here — v1 predates it.
+        bytes.append(contentsOf: entryBytes)
+
+        let data = Data(bytes)
+        let url = TemporalSnapshot.snapshotURL(for: rootPath)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let loaded = try TemporalSnapshot.load(for: rootPath)
+        #expect(loaded != nil, "v1 binary should load via the same public load(for:) as v2")
+        guard let loaded else { return }
+
+        #expect(loaded.meta.id == id)
+        #expect(loaded.meta.rootPath == rootPath)
+        #expect(loaded.meta.totalBytes == 3_000)
+        #expect(loaded.meta.dirCount == 2)
+        #expect(loaded.meta.isCaseSensitive == false,
+            "v1 snapshots predate case-sensitivity tracking; must default to false")
+        #expect(loaded.byPath["alpha"] == 1_000)
+        #expect(loaded.byPath["beta"] == 2_000)
+    }
+
+    // MARK: 9d. Legacy Format Decode — JSON
+
+    @Test("Legacy JSON snapshot decodes via the public load(for:), defaulting isCaseSensitive to false")
+    func legacyJSONDecodes() throws {
+        let tempSupportRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DirWizAppSupport_\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempSupportRoot, withIntermediateDirectories: true)
+        let previousOverride = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"]
+        setenv("DIRWIZ_APP_SUPPORT_DIR", tempSupportRoot.path, 1)
+        defer {
+            if let previousOverride {
+                setenv("DIRWIZ_APP_SUPPORT_DIR", previousOverride, 1)
+            } else {
+                unsetenv("DIRWIZ_APP_SUPPORT_DIR")
+            }
+            try? FileManager.default.removeItem(at: tempSupportRoot)
+        }
+
+        let rootPath = "/tmp/DirWizLegacyJSONTest_\(UUID().uuidString)"
+        let id = UUID()
+        // loadLegacyJSON sets `decoder.dateDecodingStrategy = .iso8601`, so createdAt must
+        // be an ISO8601 string (not a raw numeric timestamp) for the decode to succeed.
+        let createdAtEpoch: Double = 1_700_000_000
+        let createdAt = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: createdAtEpoch))
+
+        // Hand-built to match the private SnapshotFile/SnapshotEntry/TemporalSnapshotMeta
+        // shapes: meta {id, createdAt, rootPath, totalBytes, dirCount} (isCaseSensitive
+        // deliberately omitted to exercise the decodeIfPresent-defaults-to-false path) +
+        // entries [{path, size}].
+        let json = """
+{
+    "meta": {
+        "id": "\(id.uuidString)",
+        "createdAt": "\(createdAt)",
+        "rootPath": "\(rootPath)",
+        "totalBytes": 3000,
+        "dirCount": 2
+    },
+    "entries": [
+        {"path": "alpha", "size": 1000},
+        {"path": "beta", "size": 2000}
+    ]
+}
+"""
+
+        let data = Data(json.utf8)
+        let url = TemporalSnapshot.snapshotURL(for: rootPath)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let loaded = try TemporalSnapshot.load(for: rootPath)
+        #expect(loaded != nil, "Legacy JSON should load via the same public load(for:) as binary formats")
+        guard let loaded else { return }
+
+        #expect(loaded.meta.id == id)
+        #expect(loaded.meta.rootPath == rootPath)
+        #expect(loaded.meta.totalBytes == 3_000)
+        #expect(loaded.meta.dirCount == 2)
+        #expect(loaded.meta.createdAt.timeIntervalSince1970 == createdAtEpoch)
+        #expect(loaded.meta.isCaseSensitive == false,
+            "Legacy JSON predates case-sensitivity tracking; must default to false")
+        #expect(loaded.byPath["alpha"] == 1_000)
+        #expect(loaded.byPath["beta"] == 2_000)
     }
 
     // MARK: 10. Empty Tree

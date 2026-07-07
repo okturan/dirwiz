@@ -352,12 +352,15 @@ private let kRequestedFileAttrs: attrgroup_t =
     attrgroup_t(ATTR_FILE_DATALENGTH) |
     attrgroup_t(ATTR_FILE_ALLOCSIZE)
 
-private let kOffsetName:     Int = 24
+// kOffsetName and kOffsetFileData are `internal` (not `private`) so the contract tests in
+// Tests/FilesystemProviderParsingTests.swift can build fixtures against the real offsets
+// instead of a hardcoded copy that could silently drift from these values.
+let kOffsetName:     Int = 24
 private let kOffsetDevID:    Int = 32
 private let kOffsetObjType:  Int = 36
 private let kOffsetModTime:  Int = 40
 private let kOffsetFileID:   Int = 56
-private let kOffsetFileData: Int = 64
+let kOffsetFileData: Int = 64
 
 private func parseEntryName(from entry: UnsafeRawPointer, entryLength: Int) -> String {
     guard let nameBytes = parseEntryNameBytes(from: entry, entryLength: entryLength) else {
@@ -378,7 +381,9 @@ private func appendPathComponent(_ parent: String, _ child: String) -> String {
     return path
 }
 
-private func parseEntryNameBytes(from entry: UnsafeRawPointer, entryLength: Int) -> UnsafeBufferPointer<UInt8>? {
+// `internal` (not `private`) so Tests/FilesystemProviderParsingTests.swift can drive this
+// pure, pointer-based parser directly with crafted buffers via `@testable import`.
+func parseEntryNameBytes(from entry: UnsafeRawPointer, entryLength: Int) -> UnsafeBufferPointer<UInt8>? {
     let nameRef = entry.advanced(by: kOffsetName)
     let nameOffset = Int(nameRef.loadUnaligned(as: Int32.self))
     let nameLength = Int(nameRef.advanced(by: 4).loadUnaligned(as: UInt32.self))
@@ -404,7 +409,9 @@ private func isDotOrDotDot(_ bytes: UnsafeBufferPointer<UInt8>) -> Bool {
     return false
 }
 
-private func parseFileSizes(from entry: UnsafeRawPointer) -> (dataLength: UInt64, allocSize: UInt64) {
+// `internal` (not `private`) so Tests/FilesystemProviderParsingTests.swift can drive this
+// pure, pointer-based parser directly with crafted buffers via `@testable import`.
+func parseFileSizes(from entry: UnsafeRawPointer) -> (dataLength: UInt64, allocSize: UInt64) {
     let allocSize  = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
     let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
     return (dataLength, allocSize)
