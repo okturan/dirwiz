@@ -444,8 +444,6 @@ public final class DuplicateFinder {
             progress: progress
         )
 
-        let partialItemsPerTask = 1
-        let fullItemsPerTask = 1
         struct PartialBatchReport: Sendable {
             let partialPairs: [(PartialHashKey, UInt32)]
             let fullPairs: [(FullHashKey, UInt32)]
@@ -481,9 +479,7 @@ public final class DuplicateFinder {
             var partialDefaultSampledBytesRequested: UInt64 = 0
             var partialLargeGroupSampledFiles = 0
             var partialLargeGroupSampledBytesRequested: UInt64 = 0
-            for chunkStart in stride(from: 0, to: partialWorkItems.count, by: partialItemsPerTask) {
-                let chunkEnd = min(chunkStart + partialItemsPerTask, partialWorkItems.count)
-                let chunk = partialWorkItems[chunkStart..<chunkEnd]
+            for workItem in partialWorkItems {
                 group.addTask {
                     var partialResults: [(PartialHashKey, UInt32)] = []
                     var fullResults: [(FullHashKey, UInt32)] = []
@@ -498,46 +494,43 @@ public final class DuplicateFinder {
                     let partialBufferCapacity = self.partialReadSize * 2
                     let partialBuffer = UnsafeMutableRawPointer.allocate(byteCount: partialBufferCapacity, alignment: 8)
                     defer { partialBuffer.deallocate() }
-                    for workItem in chunk {
+                    for nodeIndex in workItem.indices {
                         guard !Task.isCancelled else { break }
-                        for nodeIndex in workItem.indices {
-                            guard !Task.isCancelled else { break }
-                            hashedFiles += 1
-                            let result = FileTree.withCPathFromSnapshot(
-                                at: nodeIndex,
-                                nodes: snapshotNodes,
-                                stringPool: snapshotStringPool,
-                                rootPath: snapshotRootPath
-                            ) { cPath in
-                                Self.partialHash(
-                                    cPath: cPath,
-                                    fileSize: workItem.fileSize,
-                                    plan: workItem.plan,
-                                    scratchBuffer: partialBuffer,
-                                    scratchCapacity: partialBufferCapacity
-                                )
-                            }
-                            if let result {
-                                bytesRequested += result.bytesRequested
-                                if let digest = result.fullDigest {
-                                    inlineConfirmedFiles += 1
-                                    inlineConfirmedBytesRequested += result.bytesRequested
-                                    let key = FullHashKey(size: workItem.fileSize, lo: digest.lo, hi: digest.hi)
-                                    fullResults.append((key, nodeIndex))
-                                } else {
-                                    if workItem.plan.includeMiddle {
-                                        largeGroupSampledFiles += 1
-                                        largeGroupSampledBytesRequested += result.bytesRequested
-                                    } else {
-                                        defaultSampledFiles += 1
-                                        defaultSampledBytesRequested += result.bytesRequested
-                                    }
-                                    let key = PartialHashKey(size: workItem.fileSize, hash: result.hash)
-                                    partialResults.append((key, nodeIndex))
-                                }
-                            }
-                            partialHashCounter.add(1)
+                        hashedFiles += 1
+                        let result = FileTree.withCPathFromSnapshot(
+                            at: nodeIndex,
+                            nodes: snapshotNodes,
+                            stringPool: snapshotStringPool,
+                            rootPath: snapshotRootPath
+                        ) { cPath in
+                            Self.partialHash(
+                                cPath: cPath,
+                                fileSize: workItem.fileSize,
+                                plan: workItem.plan,
+                                scratchBuffer: partialBuffer,
+                                scratchCapacity: partialBufferCapacity
+                            )
                         }
+                        if let result {
+                            bytesRequested += result.bytesRequested
+                            if let digest = result.fullDigest {
+                                inlineConfirmedFiles += 1
+                                inlineConfirmedBytesRequested += result.bytesRequested
+                                let key = FullHashKey(size: workItem.fileSize, lo: digest.lo, hi: digest.hi)
+                                fullResults.append((key, nodeIndex))
+                            } else {
+                                if workItem.plan.includeMiddle {
+                                    largeGroupSampledFiles += 1
+                                    largeGroupSampledBytesRequested += result.bytesRequested
+                                } else {
+                                    defaultSampledFiles += 1
+                                    defaultSampledBytesRequested += result.bytesRequested
+                                }
+                                let key = PartialHashKey(size: workItem.fileSize, hash: result.hash)
+                                partialResults.append((key, nodeIndex))
+                            }
+                        }
+                        partialHashCounter.add(1)
                     }
                     return PartialBatchReport(
                         partialPairs: partialResults,
@@ -701,18 +694,14 @@ public final class DuplicateFinder {
             ) { group in
                 var stageFullHashedFiles = 0
                 var stageFullBytesRequested: UInt64 = 0
-                for chunkStart in stride(from: 0, to: fullWorkItems.count, by: fullItemsPerTask) {
-                    let chunkEnd = min(chunkStart + fullItemsPerTask, fullWorkItems.count)
-                    let chunk = fullWorkItems[chunkStart..<chunkEnd]
+                for workItem in fullWorkItems {
                     group.addTask {
-                    var results: [(FullHashKey, UInt32)] = []
-                    var hashedFiles = 0
-                    var bytesRequested: UInt64 = 0
-                    let fullBufferCapacity = 128 * 1024
-                    let fullBuffer = UnsafeMutableRawPointer.allocate(byteCount: fullBufferCapacity, alignment: 8)
-                    defer { fullBuffer.deallocate() }
-                    for workItem in chunk {
-                        guard !Task.isCancelled else { break }
+                        var results: [(FullHashKey, UInt32)] = []
+                        var hashedFiles = 0
+                        var bytesRequested: UInt64 = 0
+                        let fullBufferCapacity = 128 * 1024
+                        let fullBuffer = UnsafeMutableRawPointer.allocate(byteCount: fullBufferCapacity, alignment: 8)
+                        defer { fullBuffer.deallocate() }
                         for nodeIndex in workItem.indices {
                             guard !Task.isCancelled else { break }
                             hashedFiles += 1
@@ -725,18 +714,17 @@ public final class DuplicateFinder {
                                 Self.fullFileHash(
                                     cPath: cPath,
                                     expectedSize: workItem.key.size,
-                                        scratchBuffer: fullBuffer,
-                                        scratchCapacity: fullBufferCapacity
-                                    )
-                                }
-                                if let result {
-                                    bytesRequested += result.bytesRequested
-                                    let digest = result.digest
-                                    let key = FullHashKey(size: workItem.key.size, lo: digest.lo, hi: digest.hi)
-                                    results.append((key, nodeIndex))
-                                }
-                                fullHashCounter.add(1)
+                                    scratchBuffer: fullBuffer,
+                                    scratchCapacity: fullBufferCapacity
+                                )
                             }
+                            if let result {
+                                bytesRequested += result.bytesRequested
+                                let digest = result.digest
+                                let key = FullHashKey(size: workItem.key.size, lo: digest.lo, hi: digest.hi)
+                                results.append((key, nodeIndex))
+                            }
+                            fullHashCounter.add(1)
                         }
                         return FullBatchReport(
                             pairs: results,
