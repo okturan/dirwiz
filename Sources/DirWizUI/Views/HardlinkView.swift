@@ -20,9 +20,9 @@ public struct HardlinkView: View {
             toolbar
             Divider()
 
-            if appState.isHardlinkScanRunning {
+            if appState.hardlink.isHardlinkScanRunning {
                 scanProgress
-            } else if appState.hardlinkGroups.isEmpty {
+            } else if appState.hardlink.hardlinkGroups.isEmpty {
                 emptyState
                     .frame(maxHeight: .infinity)
             } else {
@@ -45,8 +45,8 @@ public struct HardlinkView: View {
 
             Spacer()
 
-            if !appState.hardlinkGroups.isEmpty {
-                Text("\(appState.hardlinkGroups.count) groups")
+            if !appState.hardlink.hardlinkGroups.isEmpty {
+                Text("\(appState.hardlink.hardlinkGroups.count) groups")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
@@ -69,16 +69,16 @@ public struct HardlinkView: View {
                 .controlSize(.large)
             Text("Scanning for hardlinks...")
                 .font(.headline)
-            if appState.hardlinkProgress.total > 0 {
+            if appState.hardlink.hardlinkProgress.total > 0 {
                 Text(
-                    "\(SizeFormatter.shared.formatCount(appState.hardlinkProgress.processed)) / " +
-                    "\(SizeFormatter.shared.formatCount(appState.hardlinkProgress.total)) files"
+                    "\(SizeFormatter.shared.formatCount(appState.hardlink.hardlinkProgress.processed)) / " +
+                    "\(SizeFormatter.shared.formatCount(appState.hardlink.hardlinkProgress.total)) files"
                 )
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 ProgressView(
-                    value: Double(appState.hardlinkProgress.processed),
-                    total: Double(max(appState.hardlinkProgress.total, 1))
+                    value: Double(appState.hardlink.hardlinkProgress.processed),
+                    total: Double(max(appState.hardlink.hardlinkProgress.total, 1))
                 )
                 .progressViewStyle(.linear)
                 .frame(maxWidth: 300)
@@ -98,7 +98,7 @@ public struct HardlinkView: View {
         ContentUnavailableView {
             Label("No Hardlinks Found", systemImage: "link")
         } description: {
-            if appState.hardlinkGroups.isEmpty && !appState.isHardlinkScanRunning {
+            if appState.hardlink.hardlinkGroups.isEmpty && !appState.hardlink.isHardlinkScanRunning {
                 Text("Click \"Scan for Hardlinks\" to search for files sharing the same inode.\n\nHardlinks are multiple directory entries pointing to identical file data. Removing a hardlink only unlinks one directory entry — the data is freed only when the last link is removed.")
             }
         }
@@ -109,15 +109,15 @@ public struct HardlinkView: View {
     private var hardlinkList: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(appState.hardlinkGroups) { group in
+                ForEach(appState.hardlink.hardlinkGroups) { group in
                     HardlinkGroupRow(
                         group: group,
-                        isExpanded: appState.hardlinkExpandedGroups.contains(group.id),
+                        isExpanded: appState.hardlink.hardlinkExpandedGroups.contains(group.id),
                         onToggleExpand: {
-                            if appState.hardlinkExpandedGroups.contains(group.id) {
-                                appState.hardlinkExpandedGroups.remove(group.id)
+                            if appState.hardlink.hardlinkExpandedGroups.contains(group.id) {
+                                appState.hardlink.hardlinkExpandedGroups.remove(group.id)
                             } else {
-                                appState.hardlinkExpandedGroups.insert(group.id)
+                                appState.hardlink.hardlinkExpandedGroups.insert(group.id)
                             }
                         }
                     )
@@ -131,7 +131,7 @@ public struct HardlinkView: View {
     // MARK: - Computed
 
     private var totalExtraLinkBytes: UInt64 {
-        appState.hardlinkGroups.reduce(0) { $0 + $1.extraLinkBytes }
+        appState.hardlink.hardlinkGroups.reduce(0) { $0 + $1.extraLinkBytes }
     }
 
     // MARK: - Actions
@@ -142,23 +142,23 @@ public struct HardlinkView: View {
         appState.hardlinkTask?.cancel()
         appState.hardlinkToken &+= 1
         let token = appState.hardlinkToken
-        appState.isHardlinkScanRunning = true
-        appState.hardlinkExpandedGroups.removeAll()
-        appState.hardlinkProgress = (0, 0)
+        appState.hardlink.isHardlinkScanRunning = true
+        appState.hardlink.hardlinkExpandedGroups.removeAll()
+        appState.hardlink.hardlinkProgress = (0, 0)
 
         appState.hardlinkTask = Task.detached(priority: .userInitiated) {
             let finder = HardlinkFinder()
             let groups = await finder.findHardlinks(in: tree) { processed, total in
                 guard appState.hardlinkToken == token else { return }
-                appState.hardlinkProgress = (processed, total)
+                appState.hardlink.hardlinkProgress = (processed, total)
             }
             await MainActor.run {
                 guard appState.hardlinkToken == token else { return }
-                appState.hardlinkGroups = groups
-                appState.isHardlinkScanRunning = false
-                appState.hardlinkProgress = (
-                    appState.hardlinkProgress.total,
-                    appState.hardlinkProgress.total
+                appState.hardlink.hardlinkGroups = groups
+                appState.hardlink.isHardlinkScanRunning = false
+                appState.hardlink.hardlinkProgress = (
+                    appState.hardlink.hardlinkProgress.total,
+                    appState.hardlink.hardlinkProgress.total
                 )
                 appState.hardlinkTask = nil
             }

@@ -30,11 +30,8 @@ public final class AppState {
     /// Duplicate scan state (groups, checked paths, progress).
     public var duplicate = DuplicateState()
 
-    /// Hardlink groups (populated after hardlink scan).
-    public var hardlinkGroups: [HardlinkGroup] = []
-    public var hardlinkExpandedGroups: Set<UUID> = []
-    public var hardlinkProgress: (processed: Int, total: Int) = (0, 0)
-    public var isHardlinkScanRunning: Bool = false
+    /// Hardlink scan state (groups, expanded UI state, progress).
+    public var hardlink = HardlinkState()
     var hardlinkToken: UInt64 = 0
     var hardlinkTask: Task<Void, Never>? {
         get { analysisCoordinator.hardlinkTask }
@@ -223,7 +220,7 @@ public final class AppState {
         func isRunning(in state: AppState) -> Bool {
             switch self {
             case .duplicateScan: return state.duplicate.isDuplicateScanRunning
-            case .hardlinkScan: return state.isHardlinkScanRunning
+            case .hardlinkScan: return state.hardlink.isHardlinkScanRunning
             case .spaceAnalysis: return state.isSpaceAnalysisRunning
             case .iCloudAnalysis: return state.isICloudAnalysisRunning
             case .apfsQuery: return state.isAPFSQueryRunning
@@ -256,10 +253,7 @@ public final class AppState {
         search.reset()
         duplicate.reset()
         temporalDiff.reset()
-        hardlinkGroups = []
-        hardlinkExpandedGroups = []
-        hardlinkProgress = (0, 0)
-        isHardlinkScanRunning = false
+        hardlink.reset()
         hardlinkToken &+= 1
         selectedNodeIndex = nil
         fileTypeStats = []

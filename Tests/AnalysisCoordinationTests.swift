@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import DirWizCore
 @testable import DirWizUI
@@ -18,7 +19,7 @@ struct AnalysisCoordinationTests {
         #expect(state.canStartHeavyTask(.cloneCheck))
         #expect(state.canStartHeavyTask(.bundleSizing))
 
-        state.isHardlinkScanRunning = true
+        state.hardlink.isHardlinkScanRunning = true
         #expect(!state.canStartHeavyTask(.hardlinkScan))
         #expect(!state.canStartHeavyTask(.duplicateScan))
         #expect(!state.canStartHeavyTask(.spaceAnalysis))
@@ -27,7 +28,7 @@ struct AnalysisCoordinationTests {
         #expect(!state.canStartHeavyTask(.cloneCheck))
         #expect(!state.canStartHeavyTask(.bundleSizing))
 
-        state.isHardlinkScanRunning = false
+        state.hardlink.isHardlinkScanRunning = false
         state.isAPFSQueryRunning = true
         #expect(!state.canStartHeavyTask(.duplicateScan))
         #expect(!state.canStartHeavyTask(.hardlinkScan))
@@ -55,8 +56,10 @@ struct AnalysisCoordinationTests {
         let state = AppState()
         state.fileTree = FileTree()
         state.duplicate.isDuplicateScanRunning = true
-        state.hardlinkProgress = (5, 12)
-        state.isHardlinkScanRunning = true
+        state.hardlink.hardlinkGroups = [HardlinkGroup(inode: 1, device: 1, fileSize: 100, paths: ["/a", "/b"])]
+        state.hardlink.hardlinkExpandedGroups = [UUID()]
+        state.hardlink.hardlinkProgress = (5, 12)
+        state.hardlink.isHardlinkScanRunning = true
         state.spaceAnalysisProgress = (2, 3)
         state.isSpaceAnalysisRunning = true
         state.isFileAgeRunning = true
@@ -69,9 +72,11 @@ struct AnalysisCoordinationTests {
         state.resetForNewScan()
 
         #expect(!state.duplicate.isDuplicateScanRunning)
-        #expect(state.hardlinkProgress.processed == 0)
-        #expect(state.hardlinkProgress.total == 0)
-        #expect(!state.isHardlinkScanRunning)
+        #expect(state.hardlink.hardlinkGroups.isEmpty)
+        #expect(state.hardlink.hardlinkExpandedGroups.isEmpty)
+        #expect(state.hardlink.hardlinkProgress.processed == 0)
+        #expect(state.hardlink.hardlinkProgress.total == 0)
+        #expect(!state.hardlink.isHardlinkScanRunning)
         #expect(state.spaceAnalysisProgress.completed == 0)
         #expect(state.spaceAnalysisProgress.total == 0)
         #expect(!state.isSpaceAnalysisRunning)
@@ -82,5 +87,23 @@ struct AnalysisCoordinationTests {
         #expect(!state.isCloneCheckRunning)
         #expect(!state.isBundleSizingRunning)
         #expect(state.activeHeavyTask == nil)
+    }
+
+    @MainActor
+    @Test("HardlinkState.reset restores defaults")
+    func hardlinkStateResetRestoresDefaults() {
+        let hardlink = HardlinkState()
+        hardlink.hardlinkGroups = [HardlinkGroup(inode: 1, device: 1, fileSize: 100, paths: ["/a", "/b"])]
+        hardlink.hardlinkExpandedGroups = [UUID()]
+        hardlink.hardlinkProgress = (5, 12)
+        hardlink.isHardlinkScanRunning = true
+
+        hardlink.reset()
+
+        #expect(hardlink.hardlinkGroups.isEmpty)
+        #expect(hardlink.hardlinkExpandedGroups.isEmpty)
+        #expect(hardlink.hardlinkProgress.processed == 0)
+        #expect(hardlink.hardlinkProgress.total == 0)
+        #expect(!hardlink.isHardlinkScanRunning)
     }
 }
