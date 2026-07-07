@@ -733,16 +733,39 @@ public final class FileScanner: @unchecked Sendable {
         }
     }
 
-    private func scanDirectoryRaw(
+    /// Decode a name from a scratch/arena-local name pool by byte offset/length.
+    /// Shared by both raw materialization strategies below.
+    private static func nameString(in namePool: Data, offset: Int, length: Int) -> String {
+        namePool.withUnsafeBytes { rawPool in
+            let pool = rawPool.bindMemory(to: UInt8.self)
+            guard let base = pool.baseAddress, offset >= 0, offset < pool.count else { return "" }
+            let clampedLength = min(length, pool.count - offset)
+            return String(decoding: UnsafeBufferPointer(start: base.advanced(by: offset), count: clampedLength), as: UTF8.self)
+        }
+    }
+
+    /// Shared core for both raw-buffer scan strategies (immediate and deferred
+    /// materialization): reads one directory's entries via `forEachRawDirectoryEntry`,
+    /// classifies each into file/dir/bundle with size + counter accounting, then hands
+    /// the populated scratch buffer to `materialize` — the only variation point.
+    ///
+    /// `materialize` performs bundle-size computation and writes the children into
+    /// their destination (tree or deferred arena) in whichever order that destination
+    /// requires (immediate mode publishes to the tree first so the UI sees the entry
+    /// sooner, then patches bundle sizes in place; deferred mode has no tree node to
+    /// patch later, so it must bake bundle sizes into the scratch children before they
+    /// are copied into the arena). It returns the first child index, which this shared
+    /// core then uses to enqueue subdirectories — identical in both strategies.
+    private func processRawDirectory(
         filesystem: RealFilesystemProvider,
         dirPath: String,
         parentIndex: UInt32,
-        tree: FileTree,
         progress: ScanProgress,
         visited: VisitedDirectories,
         enqueue: @escaping @Sendable (String, UInt32) -> Void,
         rawBuffer: UnsafeMutableRawPointer?,
-        scratch: inout RawScanScratch
+        scratch: inout RawScanScratch,
+        materialize: (inout RawScanScratch, UInt32) -> UInt32
     ) {
         scratch.reset()
 
@@ -833,50 +856,71 @@ public final class FileScanner: @unchecked Sendable {
         }
 
         guard !scratch.children.isEmpty else { return }
-        let firstChildIndex = tree.addChildren(
-            encoded: scratch.children,
-            namePool: scratch.namePool,
-            parentIndex: parentIndex
-        )
 
-        func nameString(offset: Int, length: Int) -> String {
-            scratch.namePool.withUnsafeBytes { rawPool in
-                let pool = rawPool.bindMemory(to: UInt8.self)
-                guard let base = pool.baseAddress, offset >= 0, offset < pool.count else { return "" }
-                let clampedLength = min(length, pool.count - offset)
-                return String(decoding: UnsafeBufferPointer(start: base.advanced(by: offset), count: clampedLength), as: UTF8.self)
-            }
-        }
-
-        if computeBundleSizes {
-            for bundle in scratch.bundleDirs {
-                guard !isCancelled else { break }
-                let bundleName = nameString(offset: bundle.nameOffset, length: bundle.nameLength)
-                guard !bundleName.isEmpty else { continue }
-                let bundlePath = appendPathComponent(dirPath, bundleName)
-                let (bundleFileSize, bundleAllocatedSize) = filesystem.computeBundleSize(
-                    path: bundlePath,
-                    isCancelled: { self.isCancelled }
-                )
-                guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
-                let bundleTreeIndex = firstChildIndex + UInt32(bundle.childIndex)
-                tree.updateNode(at: bundleTreeIndex) { node in
-                    node.fileSize = bundleFileSize
-                    node.allocatedSize = bundleAllocatedSize
-                }
-            }
-        }
+        let firstChildIndex = materialize(&scratch, parentIndex)
 
         for subdir in scratch.subdirs {
             guard !isCancelled else { break }
             guard visited.insert(dev: subdir.dev, inode: subdir.inode) else {
                 continue
             }
-            let subdirName = nameString(offset: subdir.nameOffset, length: subdir.nameLength)
+            let subdirName = Self.nameString(in: scratch.namePool, offset: subdir.nameOffset, length: subdir.nameLength)
             guard !subdirName.isEmpty else { continue }
             let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
             let subdirPath = appendPathComponent(dirPath, subdirName)
             enqueue(subdirPath, childTreeIndex)
+        }
+    }
+
+    private func scanDirectoryRaw(
+        filesystem: RealFilesystemProvider,
+        dirPath: String,
+        parentIndex: UInt32,
+        tree: FileTree,
+        progress: ScanProgress,
+        visited: VisitedDirectories,
+        enqueue: @escaping @Sendable (String, UInt32) -> Void,
+        rawBuffer: UnsafeMutableRawPointer?,
+        scratch: inout RawScanScratch
+    ) {
+        processRawDirectory(
+            filesystem: filesystem,
+            dirPath: dirPath,
+            parentIndex: parentIndex,
+            progress: progress,
+            visited: visited,
+            enqueue: enqueue,
+            rawBuffer: rawBuffer,
+            scratch: &scratch
+        ) { scratch, parentIndex in
+            // Materialize immediately so the tree is visible to readers as soon as
+            // possible, then patch bundle sizes into the already-published node in place.
+            let firstChildIndex = tree.addChildren(
+                encoded: scratch.children,
+                namePool: scratch.namePool,
+                parentIndex: parentIndex
+            )
+
+            if self.computeBundleSizes {
+                for bundle in scratch.bundleDirs {
+                    guard !self.isCancelled else { break }
+                    let bundleName = Self.nameString(in: scratch.namePool, offset: bundle.nameOffset, length: bundle.nameLength)
+                    guard !bundleName.isEmpty else { continue }
+                    let bundlePath = appendPathComponent(dirPath, bundleName)
+                    let (bundleFileSize, bundleAllocatedSize) = filesystem.computeBundleSize(
+                        path: bundlePath,
+                        isCancelled: { self.isCancelled }
+                    )
+                    guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
+                    let bundleTreeIndex = firstChildIndex + UInt32(bundle.childIndex)
+                    tree.updateNode(at: bundleTreeIndex) { node in
+                        node.fileSize = bundleFileSize
+                        node.allocatedSize = bundleAllocatedSize
+                    }
+                }
+            }
+
+            return firstChildIndex
         }
     }
 
@@ -892,139 +936,42 @@ public final class FileScanner: @unchecked Sendable {
         builder: DeferredTreeBuilder,
         arena: inout RawScanArena
     ) {
-        scratch.reset()
-
-        var totalFileSize: UInt64 = 0
-        var totalAllocatedSize: UInt64 = 0
-        var fileCount = 0
-        var dirCount = 0
-
-        let opened: Bool
-        if let rawBuffer {
-            opened = filesystem.forEachRawDirectoryEntry(
-                path: dirPath,
-                buffer: rawBuffer,
-                bufferSize: RealFilesystemProvider.directoryBufferSize,
-                { rawEntry in processRawEntry(rawEntry) }
-            )
-        } else {
-            opened = filesystem.forEachRawDirectoryEntry(path: dirPath) { rawEntry in
-                processRawEntry(rawEntry)
-            }
-        }
-
-        func processRawEntry(_ rawEntry: RawDirectoryEntry) -> Bool {
-            guard !isCancelled else { return false }
-            let isDir = rawEntry.isDirectory
-
-            var node = FileNode()
-            node.isDirectory = isDir
-            node.fileSize = isDir ? 0 : rawEntry.fileSize
-            node.allocatedSize = isDir ? 0 : rawEntry.allocatedSize
-            node.modifiedDate = rawEntry.modifiedDate
-            node.device = rawEntry.device
-            node.inode = rawEntry.inode
-            if !isDir {
-                node.extensionHash = extensionHash(rawEntry.nameBytes)
-            }
-
-            let isBundle = isDir && isBundleName(rawEntry.nameBytes)
-            if isBundle {
-                node.isBundle = true
-            }
-
-            let nameOffset = scratch.namePool.count
-            let nameLength = rawEntry.nameBytes.count
-            if let base = rawEntry.nameBytes.baseAddress {
-                scratch.namePool.append(contentsOf: UnsafeBufferPointer(start: base, count: nameLength))
-            }
-
-            let childLocalIndex = scratch.children.count
-            scratch.children.append(EncodedFileNode(
-                node: node,
-                nameOffset: nameOffset,
-                nameLength: nameLength
-            ))
-
-            if isDir {
-                if isBundle {
-                    scratch.bundleDirs.append((nameOffset: nameOffset, nameLength: nameLength, childIndex: childLocalIndex))
-                } else {
-                    scratch.subdirs.append((
-                        nameOffset: nameOffset,
-                        nameLength: nameLength,
-                        childIndex: childLocalIndex,
-                        dev: rawEntry.device,
-                        inode: rawEntry.inode
-                    ))
+        processRawDirectory(
+            filesystem: filesystem,
+            dirPath: dirPath,
+            parentIndex: parentIndex,
+            progress: progress,
+            visited: visited,
+            enqueue: enqueue,
+            rawBuffer: rawBuffer,
+            scratch: &scratch
+        ) { scratch, parentIndex in
+            // No tree node exists yet to patch after the fact — bundle sizes must be
+            // baked into the scratch children before they are copied into the arena.
+            if self.computeBundleSizes {
+                for bundle in scratch.bundleDirs {
+                    guard !self.isCancelled else { break }
+                    let bundleName = Self.nameString(in: scratch.namePool, offset: bundle.nameOffset, length: bundle.nameLength)
+                    guard !bundleName.isEmpty else { continue }
+                    let bundlePath = appendPathComponent(dirPath, bundleName)
+                    let (bundleFileSize, bundleAllocatedSize) = filesystem.computeBundleSize(
+                        path: bundlePath,
+                        isCancelled: { self.isCancelled }
+                    )
+                    guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
+                    scratch.children[bundle.childIndex].node.fileSize = bundleFileSize
+                    scratch.children[bundle.childIndex].node.allocatedSize = bundleAllocatedSize
                 }
-                dirCount += 1
-            } else {
-                totalFileSize += rawEntry.fileSize
-                totalAllocatedSize += rawEntry.allocatedSize
-                fileCount += 1
             }
-            return true
-        }
 
-        guard opened else {
-            scanLog.warning("Skipped (permission denied): \(dirPath, privacy: .public)")
-            progress.incrementSkippedDirectories()
-            return
-        }
-
-        if fileCount > 0 {
-            progress.incrementFiles(count: fileCount, size: totalFileSize, allocatedSize: totalAllocatedSize)
-        }
-        if dirCount > 0 {
-            progress.incrementDirectories(count: dirCount)
-        }
-
-        guard !scratch.children.isEmpty else { return }
-
-        func nameString(offset: Int, length: Int) -> String {
-            scratch.namePool.withUnsafeBytes { rawPool in
-                let pool = rawPool.bindMemory(to: UInt8.self)
-                guard let base = pool.baseAddress, offset >= 0, offset < pool.count else { return "" }
-                let clampedLength = min(length, pool.count - offset)
-                return String(decoding: UnsafeBufferPointer(start: base.advanced(by: offset), count: clampedLength), as: UTF8.self)
-            }
-        }
-
-        if computeBundleSizes {
-            for bundle in scratch.bundleDirs {
-                guard !isCancelled else { break }
-                let bundleName = nameString(offset: bundle.nameOffset, length: bundle.nameLength)
-                guard !bundleName.isEmpty else { continue }
-                let bundlePath = appendPathComponent(dirPath, bundleName)
-                let (bundleFileSize, bundleAllocatedSize) = filesystem.computeBundleSize(
-                    path: bundlePath,
-                    isCancelled: { self.isCancelled }
-                )
-                guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
-                scratch.children[bundle.childIndex].node.fileSize = bundleFileSize
-                scratch.children[bundle.childIndex].node.allocatedSize = bundleAllocatedSize
-            }
-        }
-
-        let firstChildIndex = builder.reserveChildren(parentIndex: parentIndex, count: scratch.children.count)
-        arena.append(
-            children: scratch.children,
-            localNamePool: scratch.namePool,
-            firstIndex: firstChildIndex,
-            parentIndex: parentIndex
-        )
-
-        for subdir in scratch.subdirs {
-            guard !isCancelled else { break }
-            guard visited.insert(dev: subdir.dev, inode: subdir.inode) else {
-                continue
-            }
-            let subdirName = nameString(offset: subdir.nameOffset, length: subdir.nameLength)
-            guard !subdirName.isEmpty else { continue }
-            let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
-            let subdirPath = appendPathComponent(dirPath, subdirName)
-            enqueue(subdirPath, childTreeIndex)
+            let firstChildIndex = builder.reserveChildren(parentIndex: parentIndex, count: scratch.children.count)
+            arena.append(
+                children: scratch.children,
+                localNamePool: scratch.namePool,
+                firstIndex: firstChildIndex,
+                parentIndex: parentIndex
+            )
+            return firstChildIndex
         }
     }
 

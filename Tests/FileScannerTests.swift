@@ -1036,4 +1036,95 @@ struct FileScannerMockTests {
         #expect(paths[bundlePath]?.isBundle == true)
         #expect((paths[bundlePath]?.displaySize ?? 0) > 0)
     }
+
+    // MARK: - Immediate-raw vs deferred materialization equivalence
+    //
+    // `DIRWIZ_DEFER_TREE=0` is the only way to reach the immediate raw-materialization
+    // path (`scanDirectoryRaw`) against a real filesystem in production, and until now
+    // no test exercised it — it was environment-gated and skipped by every other test.
+    // `FileScanner.init` already accepts `deferTreeMaterialization` as a constructor
+    // parameter, so this threads the flag directly instead of touching the environment.
+
+    private struct ScanNodeSummary: Equatable {
+        let isDirectory: Bool
+        let isBundle: Bool
+        let fileSize: UInt64
+        let allocatedSize: UInt64
+        let childCount: UInt32
+    }
+
+    private func summarize(_ tree: FileTree) -> [String: ScanNodeSummary] {
+        var result: [String: ScanNodeSummary] = [:]
+        for i in 0..<tree.count {
+            let node = tree.nodes[i]
+            result[tree.path(at: UInt32(i))] = ScanNodeSummary(
+                isDirectory: node.isDirectory,
+                isBundle: node.isBundle,
+                fileSize: node.fileSize,
+                allocatedSize: node.allocatedSize,
+                childCount: node.childCount
+            )
+        }
+        return result
+    }
+
+    @Test("Immediate raw materialization matches deferred materialization on the same fixture")
+    func immediateRawMatchesDeferredMaterialization() async throws {
+        let (root, cleanup) = try createTempTree([
+            "alpha/a.txt": 4096,
+            "alpha/beta/b.txt": 8192,
+            "alpha/beta/empty_dir/": 0,
+            "Sample.app/Contents/Resources/data.bin": 16384,
+            "loose.txt": 100,
+        ])
+        defer { cleanup() }
+
+        let immediateScanner = FileScanner(deferTreeMaterialization: false)
+        let immediateProgress = ScanProgress()
+        let immediateTree = FileTree()
+        await immediateScanner.scan(path: root, progress: immediateProgress, tree: immediateTree)
+
+        let deferredScanner = FileScanner(deferTreeMaterialization: true)
+        let deferredProgress = ScanProgress()
+        let deferredTree = FileTree()
+        await deferredScanner.scan(path: root, progress: deferredProgress, tree: deferredTree)
+
+        #expect(immediateProgress.scanComplete)
+        #expect(deferredProgress.scanComplete)
+        #expect(immediateTree.count == deferredTree.count,
+            "Same fixture must produce the same total node count regardless of materialization strategy")
+
+        let immediateByPath = summarize(immediateTree)
+        let deferredByPath = summarize(deferredTree)
+
+        #expect(Set(immediateByPath.keys) == Set(deferredByPath.keys),
+            "Both materialization strategies must produce the same set of paths (same child sets)")
+
+        for (nodePath, immediateValue) in immediateByPath {
+            guard let deferredValue = deferredByPath[nodePath] else {
+                Issue.record("Path \(nodePath) present in immediate scan but missing from deferred scan")
+                continue
+            }
+            #expect(immediateValue == deferredValue, "Node summary mismatch at \(nodePath): immediate \(immediateValue) vs deferred \(deferredValue)")
+        }
+
+        // Root aggregate sizes must match across strategies.
+        let immediateRoot = immediateTree.nodes[0]
+        let deferredRoot = deferredTree.nodes[0]
+        #expect(immediateRoot.fileSize == deferredRoot.fileSize, "Root fileSize must match across strategies")
+        #expect(immediateRoot.allocatedSize == deferredRoot.allocatedSize, "Root allocatedSize must match across strategies")
+
+        // The bundle must have actually resolved to a non-zero size in both strategies —
+        // this is the one place the two strategies genuinely differ in internal sequencing
+        // (immediate publishes to the tree then patches the bundle size in place; deferred
+        // bakes the bundle size into the scratch buffer before it is copied into the arena).
+        // A coincidental both-zero result would pass the equality checks above without
+        // actually exercising that difference.
+        guard let bundleInfo = immediateByPath[root + "/Sample.app"] else {
+            Issue.record("Sample.app bundle not found in immediate scan")
+            return
+        }
+        #expect(bundleInfo.isBundle)
+        #expect(bundleInfo.fileSize == 16384)
+    }
 }
