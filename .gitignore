@@ -14,3 +14,5 @@ docs/assets/*
 !docs/assets/*.png
 .claude/worktrees/
 repomix-output*
+scripts/notary.env
+*.p8
