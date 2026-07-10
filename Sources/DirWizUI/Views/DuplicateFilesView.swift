@@ -125,13 +125,14 @@ public struct DuplicateFilesView: View {
             if !appState.duplicate.duplicateGroups.isEmpty {
                 let groups = filteredGroups
                 let clones = cloneMap
-                let total = totalWastedSpace(for: groups)
+                let systemGroupIDs = systemGroupIDs(for: groups)
+                let total = totalWastedSpace(for: groups, excluding: systemGroupIDs)
 
                 Text("\(groups.count) groups")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                let realWasted = realWastedSpace(for: groups, clones: clones)
+                let realWasted = realWastedSpace(for: groups, clones: clones, excluding: systemGroupIDs)
                 if realWasted < total && !appState.cloneResults.isEmpty {
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(SizeFormatter.shared.format(realWasted) + " real waste")
@@ -263,12 +264,14 @@ public struct DuplicateFilesView: View {
     private var duplicateList: some View {
         let groups = filteredGroups // one filter pass
         let clones = cloneMap // one dictionary build
+        let systemGroupIDs = systemGroupIDs(for: groups) // one classification pass
         return ScrollView {
             LazyVStack(spacing: 2) {
                 ForEach(groups) { group in
                     DuplicateGroupRow(
                         group: group,
                         cloneResult: clones[group.id],
+                        isSystemManaged: systemGroupIDs.contains(group.id),
                         isExpanded: appState.duplicate.duplicateExpandedGroups.contains(group.id),
                         checkedPaths: $appState.duplicate.duplicateCheckedPaths,
                         onToggleExpand: {
@@ -296,14 +299,24 @@ public struct DuplicateFilesView: View {
         Dictionary(uniqueKeysWithValues: appState.cloneResults.map { ($0.group.id, $0) })
     }
 
-    private func totalWastedSpace(for groups: [DuplicateGroup]) -> UInt64 {
-        groups.reduce(0) { $0 + $1.wastedSpace }
+    /// IDs of groups where every path is macOS-managed/SIP-protected — not user-reclaimable.
+    private func systemGroupIDs(for groups: [DuplicateGroup]) -> Set<UUID> {
+        Set(groups.filter { SystemPathClassifier.isSystemManagedGroup(paths: $0.paths) }.map(\.id))
+    }
+
+    private func totalWastedSpace(for groups: [DuplicateGroup], excluding systemGroupIDs: Set<UUID>) -> UInt64 {
+        groups.reduce(0) { systemGroupIDs.contains($1.id) ? $0 : $0 + $1.wastedSpace }
     }
 
     /// Wasted space accounting for APFS clones (if clone check has been run).
-    private func realWastedSpace(for groups: [DuplicateGroup], clones: [UUID: CloneCheckResult]) -> UInt64 {
-        guard !appState.cloneResults.isEmpty else { return totalWastedSpace(for: groups) }
+    private func realWastedSpace(
+        for groups: [DuplicateGroup],
+        clones: [UUID: CloneCheckResult],
+        excluding systemGroupIDs: Set<UUID>
+    ) -> UInt64 {
+        guard !appState.cloneResults.isEmpty else { return totalWastedSpace(for: groups, excluding: systemGroupIDs) }
         return groups.reduce(UInt64(0)) { total, group in
+            guard !systemGroupIDs.contains(group.id) else { return total }
             if let check = clones[group.id] {
                 return total + check.realWastedSpace
             }
@@ -400,9 +413,12 @@ public struct DuplicateFilesView: View {
 private struct DuplicateGroupRow: View {
     let group: DuplicateGroup
     let cloneResult: CloneCheckResult?
+    let isSystemManaged: Bool
     let isExpanded: Bool
     @Binding var checkedPaths: Set<String>
     var onToggleExpand: () -> Void
+
+    private static let systemManagedHelp = "macOS-managed (SIP-protected) — not user-reclaimable; the OS owns this space"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -428,7 +444,20 @@ private struct DuplicateGroupRow: View {
 
                         Text("Wasted: " + SizeFormatter.shared.format(group.wastedSpace))
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(isSystemManaged ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+
+                        if isSystemManaged {
+                            Text("System")
+                                .font(.system(size: 10, weight: .medium))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color.secondary.opacity(0.15))
+                                )
+                                .foregroundStyle(.secondary)
+                                .help(Self.systemManagedHelp)
+                        }
 
                         if let cr = cloneResult {
                             let pct = Int((cr.sharingConfidence * 100).rounded())
@@ -446,20 +475,22 @@ private struct DuplicateGroupRow: View {
                 }
                 .buttonStyle(.plain)
 
-                Menu {
-                    Button("Keep Newest, Select Others") { selectAllExcept(keepNewest: true) }
-                    Button("Keep Oldest, Select Others") { selectAllExcept(keepNewest: false) }
-                    Divider()
-                    Button("Deselect All in Group") { deselectGroup() }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
+                if !isSystemManaged {
+                    Menu {
+                        Button("Keep Newest, Select Others") { selectAllExcept(keepNewest: true) }
+                        Button("Keep Oldest, Select Others") { selectAllExcept(keepNewest: false) }
+                        Divider()
+                        Button("Deselect All in Group") { deselectGroup() }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(width: 28)
+                    .help("Quick-select duplicates to remove")
                 }
-                .menuStyle(.borderlessButton)
-                .frame(width: 28)
-                .help("Quick-select duplicates to remove")
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
@@ -492,6 +523,8 @@ private struct DuplicateGroupRow: View {
                                 EmptyView()
                             }
                             .toggleStyle(.checkbox)
+                            .disabled(isSystemManaged)
+                            .help(isSystemManaged ? Self.systemManagedHelp : "")
 
                             Image(systemName: "doc")
                                 .font(.system(size: 10))
@@ -531,6 +564,7 @@ private struct DuplicateGroupRow: View {
 
     /// Check all paths in this group except the one with the newest/oldest modification date.
     private func selectAllExcept(keepNewest: Bool) {
+        guard !isSystemManaged else { return } // defense in depth — the menu is hidden for these groups
         let dated: [(path: String, date: Date)] = group.paths.map { path in
             let url = URL(fileURLWithPath: path)
             let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
@@ -549,6 +583,7 @@ private struct DuplicateGroupRow: View {
     }
 
     private func deselectGroup() {
+        guard !isSystemManaged else { return } // defense in depth — the menu is hidden for these groups
         for path in group.paths {
             checkedPaths.remove(path)
         }
