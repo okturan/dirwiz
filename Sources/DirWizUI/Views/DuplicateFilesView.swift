@@ -9,6 +9,7 @@ public struct DuplicateFilesView: View {
     @State private var resultMinimumSize: UInt64 = 1_048_576 // 1 MB default
     @State private var showTrashConfirmation: Bool = false
     @State private var trashErrorPaths: [String] = []
+    @State private var visibleGroupCap: Int = 300
 
     public init(appState: AppState) {
         self.appState = appState
@@ -43,6 +44,14 @@ public struct DuplicateFilesView: View {
             } else {
                 duplicateList
             }
+        }
+        .onChange(of: appState.duplicate.isDuplicateScanRunning) { wasRunning, isRunning in
+            if wasRunning && !isRunning {
+                visibleGroupCap = 300
+            }
+        }
+        .onChange(of: resultMinimumSize) { _, _ in
+            visibleGroupCap = 300
         }
     }
 
@@ -234,7 +243,7 @@ public struct DuplicateFilesView: View {
             .help("Minimum file size included in the duplicate scan")
 
             HStack(spacing: 0) {
-                ForEach(Array(Self.duplicateSizeOptionLabels.enumerated()), id: \.offset) { index, label in
+                ForEach(Array(Self.duplicateSizeOptionLabels.enumerated()), id: \.element) { index, label in
                     Text(label)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(index == scanThresholdIndex(for: scanMinimumSize) ? .primary : .tertiary)
@@ -265,9 +274,10 @@ public struct DuplicateFilesView: View {
         let groups = filteredGroups // one filter pass
         let clones = cloneMap // one dictionary build
         let systemGroupIDs = systemGroupIDs(for: groups) // one classification pass
+        let visibleGroups = groups.prefix(visibleGroupCap)
         return ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(groups) { group in
+                ForEach(visibleGroups) { group in
                     DuplicateGroupRow(
                         group: group,
                         cloneResult: clones[group.id],
@@ -283,10 +293,28 @@ public struct DuplicateFilesView: View {
                         }
                     )
                 }
+
+                if groups.count > visibleGroups.count {
+                    showMoreFooter(shown: visibleGroups.count, total: groups.count)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
         }
+    }
+
+    private func showMoreFooter(shown: Int, total: Int) -> some View {
+        HStack(spacing: 12) {
+            Button("Show 300 more (\(shown) of \(total) shown)") {
+                visibleGroupCap += 300
+            }
+            Button("Show all \(total)") {
+                visibleGroupCap = total
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Computed
@@ -502,7 +530,7 @@ private struct DuplicateGroupRow: View {
             // Expanded paths — with per-path modification date label.
             if isExpanded {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(group.paths.enumerated()), id: \.offset) { index, path in
+                    ForEach(Array(group.paths.enumerated()), id: \.element) { index, path in
                         HStack(spacing: 8) {
                             Toggle(
                                 isOn: Binding(
