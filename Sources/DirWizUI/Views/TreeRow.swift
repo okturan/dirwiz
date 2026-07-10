@@ -1,8 +1,10 @@
 import SwiftUI
 import DirWizCore
 
-/// Single source of truth for tree-table column geometry — header and rows
-/// must use the same values or columns drift per row.
+/// Default column widths for the tree table, and the resizable-column specs derived
+/// from them. The specs — consumed through a shared `ColumnWidthsStore` — are the
+/// live source of truth for layout; these constants only seed the defaults. Header
+/// and rows must consume the same store or columns drift per row.
 enum TreeTableColumns {
     static let percentage: CGFloat = 110
     static let size: CGFloat = 90
@@ -11,6 +13,17 @@ enum TreeTableColumns {
     static let modified: CGFloat = 110
     static let nameMinWidth: CGFloat = 200
     static let rowTrailingPadding: CGFloat = 12
+
+    static let storageKey = "columnWidths.treeTable"
+
+    static let specs: [ColumnSpec] = [
+        ColumnSpec(id: "name", defaultWidth: 0, minWidth: nameMinWidth, maxWidth: .infinity, isFlexible: true),
+        ColumnSpec(id: "percentage", defaultWidth: percentage, minWidth: 80, maxWidth: 400, isFlexible: false),
+        ColumnSpec(id: "size", defaultWidth: size, minWidth: 60, maxWidth: 400, isFlexible: false),
+        ColumnSpec(id: "logical", defaultWidth: logical, minWidth: 60, maxWidth: 400, isFlexible: false),
+        ColumnSpec(id: "items", defaultWidth: items, minWidth: 50, maxWidth: 400, isFlexible: false),
+        ColumnSpec(id: "modified", defaultWidth: modified, minWidth: 60, maxWidth: 400, isFlexible: false),
+    ]
 }
 
 /// A single row in the tree table showing file/folder details.
@@ -22,6 +35,7 @@ struct TreeRow: View {
     let extensionPalette: ExtensionPalette
     let depth: Int
     let isExpanded: Bool
+    let store: ColumnWidthsStore
     var onToggleExpand: (() -> Void)?
 
     var body: some View {
@@ -29,18 +43,18 @@ struct TreeRow: View {
             nameColumn
                 .frame(minWidth: TreeTableColumns.nameMinWidth, maxWidth: .infinity, alignment: .leading)
             percentageColumn
-                .frame(width: TreeTableColumns.percentage, alignment: .leading)
+                .frame(width: store.width(for: "percentage"), alignment: .leading)
             Text(SizeFormatter.shared.format(item.node.displaySize))
                 .font(.system(size: 11, design: .monospaced))
-                .frame(width: TreeTableColumns.size, alignment: .trailing)
+                .frame(width: store.width(for: "size"), alignment: .trailing)
             Text(SizeFormatter.shared.format(item.node.fileSize))
                 .font(.system(size: 11, design: .monospaced))
-                .frame(width: TreeTableColumns.logical, alignment: .trailing)
+                .frame(width: store.width(for: "logical"), alignment: .trailing)
             itemsColumn
-                .frame(width: TreeTableColumns.items, alignment: .trailing)
+                .frame(width: store.width(for: "items"), alignment: .trailing)
             Text(formattedDate)
                 .font(.system(size: 11))
-                .frame(width: TreeTableColumns.modified, alignment: .trailing)
+                .frame(width: store.width(for: "modified"), alignment: .trailing)
         }
         .padding(.trailing, TreeTableColumns.rowTrailingPadding)
     }

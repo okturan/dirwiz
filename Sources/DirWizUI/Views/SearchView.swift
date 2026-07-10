@@ -21,6 +21,7 @@ public struct SearchView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var searchGeneration: UInt64 = 0
     @State private var showMoreCount: Int = 200
+    @State private var columnStore = ColumnWidthsStore(specs: Self.columnSpecs, storageKey: Self.storageKey)
     @State private var previousQuery: String = ""
     @State private var previousMatchIndices: [UInt32]? = nil
     @State private var previousWasCapped: Bool = false
@@ -28,6 +29,16 @@ public struct SearchView: View {
 
     private enum FocusField { case searchBar, resultsList }
     private let pageSize = 200
+
+    /// Resizable-column specs — Path is the flexible column, absorbing the width
+    /// the fixed Name/Size/Modified columns don't use.
+    private static let columnSpecs: [ColumnSpec] = [
+        ColumnSpec(id: "name", defaultWidth: 250, minWidth: 120, maxWidth: 500, isFlexible: false),
+        ColumnSpec(id: "path", defaultWidth: 0, minWidth: 200, maxWidth: .infinity, isFlexible: true),
+        ColumnSpec(id: "size", defaultWidth: 80, minWidth: 60, maxWidth: 200, isFlexible: false),
+        ColumnSpec(id: "modified", defaultWidth: 100, minWidth: 80, maxWidth: 220, isFlexible: false),
+    ]
+    private static let storageKey = "columnWidths.searchTable"
 
     public init(appState: AppState) {
         self.appState = appState
@@ -202,13 +213,16 @@ public struct SearchView: View {
 
     private var headerRow: some View {
         HStack(spacing: 0) {
-            sortButton("Name", key: .name, width: 250, alignment: .leading)
-            // Path column header (not sortable — paths are lazy).
+            sortButton("Name", key: .name, width: columnStore.width(for: "name"), alignment: .leading)
+            // Path column header (not sortable — paths are lazy). Flexible: absorbs
+            // whatever width the fixed columns don't use.
             Text("Path")
-                .frame(width: 300, alignment: .leading)
-            sortButton("Size", key: .size, width: 80, alignment: .trailing)
-            sortButton("Modified", key: .modified, width: 100, alignment: .trailing)
-            Spacer()
+                .frame(minWidth: 200, maxWidth: .infinity, alignment: .leading)
+                .resizeHandle(store: columnStore, controls: "name", direction: 1)
+            sortButton("Size", key: .size, width: columnStore.width(for: "size"), alignment: .trailing)
+                .resizeHandle(store: columnStore, controls: "size", direction: -1)
+            sortButton("Modified", key: .modified, width: columnStore.width(for: "modified"), alignment: .trailing)
+                .resizeHandle(store: columnStore, controls: "size", direction: 1)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
@@ -297,7 +311,7 @@ public struct SearchView: View {
                     .font(.system(size: 12))
                     .lineLimit(1)
             }
-            .frame(width: 250, alignment: .leading)
+            .frame(width: columnStore.width(for: "name"), alignment: .leading)
 
             // Path — computed lazily per visible row via FileTree.path(at:).
             Text(appState.fileTree?.path(at: idx) ?? "")
@@ -305,18 +319,16 @@ public struct SearchView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(width: 300, alignment: .leading)
+                .frame(minWidth: 200, maxWidth: .infinity, alignment: .leading)
 
             Text(SizeFormatter.shared.format(node.fileSize))
                 .font(.system(size: 11, design: .monospaced))
-                .frame(width: 80, alignment: .trailing)
+                .frame(width: columnStore.width(for: "size"), alignment: .trailing)
 
             Text(Self.formatDate(node.modifiedDate))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .frame(width: 100, alignment: .trailing)
-
-            Spacer()
+                .frame(width: columnStore.width(for: "modified"), alignment: .trailing)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

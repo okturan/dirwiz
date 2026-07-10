@@ -11,6 +11,7 @@ public struct TreeTableView: View {
     @State private var expandedFolders: Set<UInt32> = []
     @State private var scrollGeneration: UInt64 = 0
     @State private var minSizeFilter: UInt64 = 0
+    @State private var columnStore = ColumnWidthsStore(specs: TreeTableColumns.specs, storageKey: TreeTableColumns.storageKey)
     @FocusState private var isFocused: Bool
     /// Cached visible items for keyboard navigation — avoids O(n) recompute on every keypress.
     @State private var cachedItems: [TreeNodeItem] = []
@@ -124,6 +125,7 @@ public struct TreeTableView: View {
             extensionPalette: appState.extensionPalette,
             depth: item.depth,
             isExpanded: expandedFolders.contains(item.id),
+            store: columnStore,
             onToggleExpand: {
                 withAnimation(.easeInOut(duration: 0.12)) {
                     if expandedFolders.contains(item.id) {
@@ -197,11 +199,16 @@ public struct TreeTableView: View {
         HStack(spacing: 0) {
             headerButton("Name", key: .name, width: nil, alignment: .leading)
                 .frame(minWidth: TreeTableColumns.nameMinWidth, maxWidth: .infinity, alignment: .leading)
-            headerButton("% of Parent", key: .percentage, width: TreeTableColumns.percentage, alignment: .leading)
-            headerButton("On Disk", key: .size, width: TreeTableColumns.size, alignment: .trailing)
-            headerButton("Logical", key: .allocated, width: TreeTableColumns.logical, alignment: .trailing)
-            headerButton("Items", key: .items, width: TreeTableColumns.items, alignment: .trailing)
-            headerButton("Modified", key: .modified, width: TreeTableColumns.modified, alignment: .trailing)
+            headerButton("% of Parent", key: .percentage, width: columnStore.width(for: "percentage"), alignment: .leading)
+                .resizeHandle(store: columnStore, controls: "percentage", direction: -1)
+            headerButton("On Disk", key: .size, width: columnStore.width(for: "size"), alignment: .trailing)
+                .resizeHandle(store: columnStore, controls: "percentage", direction: 1)
+            headerButton("Logical", key: .allocated, width: columnStore.width(for: "logical"), alignment: .trailing)
+                .resizeHandle(store: columnStore, controls: "size", direction: 1)
+            headerButton("Items", key: .items, width: columnStore.width(for: "items"), alignment: .trailing)
+                .resizeHandle(store: columnStore, controls: "logical", direction: 1)
+            headerButton("Modified", key: .modified, width: columnStore.width(for: "modified"), alignment: .trailing)
+                .resizeHandle(store: columnStore, controls: "items", direction: 1)
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
