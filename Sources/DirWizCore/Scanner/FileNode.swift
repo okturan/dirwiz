@@ -930,6 +930,129 @@ public final class FileTree: @unchecked Sendable {
         }
     }
 
+    /// Remove all descendants of `index`, keeping the node itself in place with an empty
+    /// child range. Compacts the array and renumbers every remaining index — same
+    /// discipline as `removeSubtree`, but the target node survives so its identity and
+    /// position in the tree are preserved. Used by subtree rescan to clear a changed
+    /// directory's stale children before re-enumerating it.
+    ///
+    /// Does NOT repair aggregate sizes (the target and its ancestors are left with stale
+    /// totals) — callers must follow with `recomputeAggregates()` once all splices in a
+    /// batch are done. Repairing sizes incrementally per-splice here would require either
+    /// double-counting or a second recompute pass anyway, so subtree rescan does the
+    /// bookkeeping once at the end instead.
+    public func removeChildren(of index: UInt32) {
+        lock.withLock { _ in
+            let targetIndex = Int(index)
+            guard targetIndex >= 0, targetIndex < nodes.count else { return }
+            let targetNode = nodes[targetIndex]
+            guard targetNode.firstChildIndex != FileNode.invalid else { return }
+
+            var removed = Set<UInt32>()
+            var stack: [UInt32] = []
+            let start = Int(targetNode.firstChildIndex)
+            let end = min(start + Int(targetNode.childCount), nodes.count)
+            for child in start..<end {
+                stack.append(UInt32(child))
+            }
+            while let current = stack.popLast() {
+                guard removed.insert(current).inserted else { continue }
+                let i = Int(current)
+                guard i < nodes.count else { continue }
+                let node = nodes[i]
+                guard node.firstChildIndex != FileNode.invalid else { continue }
+                let cStart = Int(node.firstChildIndex)
+                let cEnd = min(cStart + Int(node.childCount), nodes.count)
+                for child in cStart..<cEnd {
+                    stack.append(UInt32(child))
+                }
+            }
+
+            guard !removed.isEmpty else { return }
+
+            let oldNodes = nodes
+            let oldStringPool = stringPool
+            var oldToNew = Array(repeating: FileNode.invalid, count: oldNodes.count)
+            var newNodes: [FileNode] = []
+            var newStringPool = Data()
+
+            newNodes.reserveCapacity(oldNodes.count - removed.count)
+            newStringPool.reserveCapacity(oldStringPool.count)
+
+            for oldIndex in oldNodes.indices {
+                let oldUInt = UInt32(oldIndex)
+                guard !removed.contains(oldUInt) else { continue }
+
+                var node = oldNodes[oldIndex]
+
+                let nameStart = Int(node.nameOffset)
+                let nameEnd = nameStart + Int(node.nameLength)
+                guard nameEnd <= oldStringPool.count else { continue }
+                let nameBytes = oldStringPool[nameStart..<nameEnd]
+                node.nameOffset = UInt32(newStringPool.count)
+                node.nameLength = UInt16(nameBytes.count)
+                newStringPool.append(contentsOf: nameBytes)
+
+                node.firstChildIndex = FileNode.invalid
+                node.childCount = 0
+
+                oldToNew[oldIndex] = UInt32(newNodes.count)
+                newNodes.append(node)
+            }
+
+            // Rebuild parent/child links for every survivor (indices shifted for anything
+            // after the target). Root's parentIndex stays invalid — nothing sets it below.
+            for oldIndex in oldNodes.indices {
+                let newIndex = oldToNew[oldIndex]
+                guard newIndex != FileNode.invalid else { continue }
+                let oldParent = oldNodes[oldIndex].parentIndex
+                guard oldParent != FileNode.invalid else { continue }
+                let newParent = oldToNew[Int(oldParent)]
+                guard newParent != FileNode.invalid else { continue }
+
+                let parentIndex = Int(newParent)
+                let childIndex = Int(newIndex)
+                newNodes[childIndex].parentIndex = newParent
+                if newNodes[parentIndex].firstChildIndex == FileNode.invalid {
+                    newNodes[parentIndex].firstChildIndex = newIndex
+                }
+                newNodes[parentIndex].childCount &+= 1
+            }
+
+            nodes = newNodes
+            stringPool = newStringPool
+            lowercaseNamePool.removeAll(keepingCapacity: true)
+            lowercaseNameEntries.removeAll(keepingCapacity: true)
+            isSearchIndexBuilt = false
+        }
+    }
+
+    /// Recompute every directory's aggregate size from scratch: zero non-bundle directory
+    /// totals (bundles are opaque leaves whose size comes from `computeBundleSize`, not
+    /// from summing children — same distinction `removeSubtree` makes), then bottom-up
+    /// accumulate each node into its immediate parent.
+    ///
+    /// Safe to call any number of times, unlike `propagateSizes()`: that method assumes
+    /// every node starts holding only its own direct size, so re-running it on an
+    /// already-propagated tree would add already-aggregated child totals into parents a
+    /// second time. Zeroing directory totals first makes this idempotent — repeated
+    /// subtree splices can't accumulate error. Requires the parent-index-less-than-
+    /// child-index invariant, which `addChildren` and `removeChildren` both preserve.
+    public func recomputeAggregates() {
+        lock.withLock { _ in
+            for i in 0..<nodes.count where nodes[i].isDirectory && !nodes[i].isBundle {
+                nodes[i].fileSize = 0
+                nodes[i].allocatedSize = 0
+            }
+            for i in stride(from: nodes.count - 1, through: 0, by: -1) {
+                let parentIdx = Int(nodes[i].parentIndex)
+                guard nodes[i].parentIndex != FileNode.invalid, parentIdx < nodes.count else { continue }
+                nodes[parentIdx].fileSize += nodes[i].fileSize
+                nodes[parentIdx].allocatedSize += nodes[i].allocatedSize
+            }
+        }
+    }
+
     /// Single-pass bottom-up size propagation. Call after all nodes are added (post-scan).
     /// Each node's fileSize starts as its own direct size. This walk adds each node's size
     /// to its parent, naturally bubbling totals up to the root in O(n) time.

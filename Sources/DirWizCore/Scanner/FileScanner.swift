@@ -224,6 +224,25 @@ public struct BundleSizeResolutionReport: Sendable {
     public let wasCancelled: Bool
 }
 
+/// Outcome of `FileScanner.rescanSubtrees`.
+public struct SubtreeRescanReport: Sendable {
+    public let requestedPaths: [String]
+    /// Targets actually spliced, after ancestor-resolution + outermost-dedupe. A
+    /// root-level entry here means some requested path couldn't resolve to anything
+    /// narrower than the scan root — recorded honestly rather than silently absorbed;
+    /// callers with a cold-fallback threshold (e.g. warm start) should treat it as a
+    /// signal to prefer a full rescan.
+    public let rescannedRoots: [String]
+    /// Requested paths that weren't under the tree's root at all.
+    public let unresolvedPaths: [String]
+
+    public init(requestedPaths: [String], rescannedRoots: [String], unresolvedPaths: [String]) {
+        self.requestedPaths = requestedPaths
+        self.rescannedRoots = rescannedRoots
+        self.unresolvedPaths = unresolvedPaths
+    }
+}
+
 // MARK: - FileScanner
 
 public final class FileScanner: @unchecked Sendable {
@@ -336,6 +355,234 @@ public final class FileScanner: @unchecked Sendable {
             totalAllocatedSize: finalTotals.allocatedSize,
             wasCancelled: isCancelled || Task.isCancelled
         )
+    }
+
+    /// Re-enumerate the given directories into `tree`, replacing each one's descendants.
+    /// Paths are absolute, expected under tree's root. Serial per subtree root (changed
+    /// sets are typically small); cancellable via Task.isCancelled between roots.
+    ///
+    /// Resolution runs entirely against path strings before any mutation begins — never
+    /// holds a tree index across a splice, since indices are garbage after any mutation
+    /// that compacts the array (same discipline as `TreeActions.batchTrash(paths:tree:)`).
+    /// Each surviving target is re-resolved to a fresh index immediately before its own
+    /// splice, so an earlier splice in this batch can never invalidate a later one.
+    public func rescanSubtrees(
+        _ changedDirectories: [String],
+        tree: FileTree,
+        progress: ScanProgress
+    ) async -> SubtreeRescanReport {
+        // A scanner instance can be reused after cancel(); reset so a stale cancellation
+        // from an earlier scan() call doesn't silently no-op this rescan.
+        cancelState.withLock { $0 = false }
+
+        var unresolvedPaths: [String] = []
+        var resolvedPaths: [String] = []
+        for changedPath in changedDirectories {
+            guard let resolved = resolveRescanTarget(changedPath, tree: tree) else {
+                unresolvedPaths.append(changedPath)
+                continue
+            }
+            resolvedPaths.append(resolved)
+        }
+
+        let rescannedRoots = Self.outermostPaths(resolvedPaths)
+
+        // One instance shared across every target in this batch — matches cold scan's
+        // single firmlink/hardlink guard for the whole operation, not one per target.
+        let visited = VisitedDirectories()
+
+        for targetPath in rescannedRoots {
+            guard !Task.isCancelled else { break }
+
+            // Re-resolve fresh: an earlier splice in this loop may have compacted and
+            // renumbered every index in the tree.
+            let snapshot = tree.pathBuildingSnapshot()
+            guard let components = Self.relativeComponents(of: targetPath, rootPath: snapshot.rootPath),
+                  let targetIndex = FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool),
+                  let targetNode = tree.node(at: targetIndex) else {
+                continue
+            }
+
+            if targetNode.isBundle {
+                let (fileSize, allocatedSize) = filesystem.computeBundleSize(
+                    path: targetPath,
+                    isCancelled: { Task.isCancelled }
+                )
+                tree.setNodeSizeAndPropagate(
+                    at: targetIndex,
+                    fileSize: fileSize,
+                    allocatedSize: allocatedSize,
+                    expectedDevice: targetNode.device,
+                    expectedInode: targetNode.inode
+                )
+                continue
+            }
+
+            tree.removeChildren(of: targetIndex)
+            scanSubtreeImmediate(
+                rootPath: targetPath,
+                rootIndex: targetIndex,
+                tree: tree,
+                progress: progress,
+                visited: visited
+            )
+
+            // A changed dir's mtime is user-visible in the table.
+            if let mtime = Self.modifiedDate(atPath: targetPath) {
+                tree.updateNode(at: targetIndex) { $0.modifiedDate = mtime }
+            }
+        }
+
+        tree.recomputeAggregates()
+
+        return SubtreeRescanReport(
+            requestedPaths: changedDirectories,
+            rescannedRoots: rescannedRoots,
+            unresolvedPaths: unresolvedPaths
+        )
+    }
+
+    /// Resolve one changed-directory path to the deepest ancestor that both still exists
+    /// on disk and already resolves inside `tree` — handles deleted dirs, brand-new dirs
+    /// (whose parent resolves instead), and renames with a single rule. Root is always a
+    /// valid last resort. Returns nil only when `changedPath` isn't under the tree's root.
+    private func resolveRescanTarget(_ changedPath: String, tree: FileTree) -> String? {
+        let snapshot = tree.pathBuildingSnapshot()
+        guard !snapshot.nodes.isEmpty else { return nil }
+        let rootPath = snapshot.rootPath
+
+        guard let components = Self.relativeComponents(of: changedPath, rootPath: rootPath) else {
+            return nil
+        }
+
+        var depth = components.count
+        while depth > 0 {
+            let candidateComponents = Array(components[0..<depth])
+            let candidatePath = Self.absolutePath(rootPath: rootPath, components: candidateComponents)
+            if filesystem.deviceAndInode(forPath: candidatePath) != nil,
+               FileTree.descendPath(candidateComponents, nodes: snapshot.nodes, stringPool: snapshot.stringPool) != nil {
+                return candidatePath
+            }
+            depth -= 1
+        }
+        return Self.absolutePath(rootPath: rootPath, components: [])
+    }
+
+    /// Immediate-mode re-enumeration of one directory into an already-existing tree node:
+    /// reuses the same `scanDirectory` dispatcher a cold scan uses in immediate mode
+    /// (raw buffer path for `RealFilesystemProvider`, generic listing otherwise), seeded
+    /// mid-tree instead of at a fresh root, drained on the calling task rather than a
+    /// worker pool — changed sets are small, so a dedicated pool isn't worth the setup cost.
+    private func scanSubtreeImmediate(
+        rootPath: String,
+        rootIndex: UInt32,
+        tree: FileTree,
+        progress: ScanProgress,
+        visited: VisitedDirectories
+    ) {
+        // Mark the target itself visited before recursing, same as the cold scan marks
+        // its root, so a firmlink loop can't immediately re-enter this subtree.
+        if let di = filesystem.deviceAndInode(forPath: rootPath) {
+            _ = visited.insert(dev: di.device, inode: di.inode)
+        }
+
+        let queue = DirectoryWorkQueue()
+        queue.enqueue(path: rootPath, parentIndex: rootIndex)
+
+        let rawFilesystemForScan = filesystem as? RealFilesystemProvider
+        let rawBuffer = rawFilesystemForScan.map { _ in
+            UnsafeMutableRawPointer.allocate(
+                byteCount: RealFilesystemProvider.directoryBufferSize,
+                alignment: 16
+            )
+        }
+        defer { rawBuffer?.deallocate() }
+
+        var rawScratch = RawScanScratch()
+        var rawArena = RawScanArena()
+
+        while let item = queue.next() {
+            scanDirectory(
+                dirPath: item.path,
+                parentIndex: item.parentIndex,
+                tree: tree,
+                progress: progress,
+                visited: visited,
+                enqueue: { path, parentIndex in queue.enqueue(path: path, parentIndex: parentIndex) },
+                maybeUpdateProgress: { _ in },
+                rawFilesystem: rawFilesystemForScan,
+                rawBuffer: rawBuffer,
+                rawScratch: &rawScratch,
+                deferredBuilder: nil,
+                rawArena: &rawArena
+            )
+            queue.complete()
+        }
+    }
+
+    /// Split `path` into components relative to `rootPath`, or nil if `path` is neither
+    /// `rootPath` itself nor a boundary-respecting descendant of it (e.g. rejects
+    /// "/root-2" against root "/root").
+    private static func relativeComponents(of path: String, rootPath: String) -> [String]? {
+        let normalizedPath = normalizePath(path)
+        let normalizedRoot = normalizePath(rootPath)
+        if normalizedPath == normalizedRoot { return [] }
+        let boundaryPrefix = normalizedRoot.hasSuffix("/") ? normalizedRoot : normalizedRoot + "/"
+        guard normalizedPath.hasPrefix(boundaryPrefix) else { return nil }
+        let relative = String(normalizedPath.dropFirst(boundaryPrefix.count))
+        guard !relative.isEmpty else { return [] }
+        return relative.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    private static func absolutePath(rootPath: String, components: [String]) -> String {
+        let normalizedRoot = normalizePath(rootPath)
+        guard !components.isEmpty else { return normalizedRoot }
+        let suffix = components.joined(separator: "/")
+        if normalizedRoot == "/" { return "/" + suffix }
+        return normalizedRoot + "/" + suffix
+    }
+
+    /// Drop any path nested inside another path in the set (including exact duplicates),
+    /// keeping only the outermost survivors in first-seen order. Same shallowest-first
+    /// claim discipline as `SpaceAnalyzer.isDescendantOfClaimed`, but string-prefix based
+    /// since this runs before any index-invalidating mutation — resolved targets are
+    /// still plain paths here, not tree indices.
+    private static func outermostPaths(_ paths: [String]) -> [String] {
+        var uniqueInOrder: [String] = []
+        var seen = Set<String>()
+        for path in paths where seen.insert(path).inserted {
+            uniqueInOrder.append(path)
+        }
+
+        let shallowestFirst = uniqueInOrder.enumerated().sorted { a, b in
+            let depthA = a.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
+            let depthB = b.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
+            if depthA != depthB { return depthA < depthB }
+            return a.offset < b.offset
+        }
+
+        var claimed: [String] = []
+        for (_, path) in shallowestFirst {
+            let nested = claimed.contains { ancestor in
+                path.hasPrefix(ancestor.hasSuffix("/") ? ancestor : ancestor + "/")
+            }
+            if !nested {
+                claimed.append(path)
+            }
+        }
+
+        let claimedSet = Set(claimed)
+        return uniqueInOrder.filter { claimedSet.contains($0) }
+    }
+
+    /// One-off `lstat` for the mtime refresh after a splice. Bypasses `FilesystemProvider`
+    /// (which has no modification-time accessor and is out of scope to extend here) — this
+    /// only degrades gracefully on a mocked provider in tests, since real subtree rescans
+    /// always run against `RealFilesystemProvider`.
+    private static func modifiedDate(atPath path: String) -> UInt32? {
+        var s = stat()
+        guard lstat(path, &s) == 0 else { return nil }
+        return UInt32(clamping: max(0, Int(s.st_mtimespec.tv_sec)))
     }
 
     /// Scan the filesystem at `path`, returning the tree.
