@@ -7,10 +7,12 @@ public struct VolumePickerView: View {
     @Bindable var appState: AppState
 
     var onScan: () -> Void
+    var onFullRescan: () -> Void
 
-    public init(appState: AppState, onScan: @escaping () -> Void) {
+    public init(appState: AppState, onScan: @escaping () -> Void, onFullRescan: @escaping () -> Void) {
         self.appState = appState
         self.onScan = onScan
+        self.onFullRescan = onFullRescan
     }
 
     public var body: some View {
@@ -88,18 +90,37 @@ public struct VolumePickerView: View {
     }
 
     private var scanButton: some View {
-        Button(action: onScan) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                Text("Scan Volume")
+        VStack(spacing: 6) {
+            Button(action: onScan) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                    Text("Scan Volume")
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(appState.selectedVolume == nil || appState.scanProgress.isScanning)
+
+            if fullRescanAvailable {
+                Button(action: onFullRescan) {
+                    Text("Full Rescan")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(appState.scanProgress.isScanning)
+                .help("Ignore the cached scan and re-enumerate the whole volume from scratch")
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .disabled(appState.selectedVolume == nil || appState.scanProgress.isScanning)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    /// Only offer the escape hatch when there's actually a cache to bypass — a warm
+    /// start wouldn't be attempted otherwise, so "Full Rescan" would be a no-op button.
+    private var fullRescanAvailable: Bool {
+        guard let url = appState.selectedVolume else { return false }
+        return appState.hasCachedTree(for: url.path)
     }
 
     // MARK: - Helpers

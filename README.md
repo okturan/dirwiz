@@ -18,6 +18,7 @@ The main UI combines a WinDirStat-style treemap, a sortable file tree, extension
 ## Features
 
 - **Fast scanner**: Uses bulk filesystem metadata reads, bounded worker pools, compact node storage, and deferred tree materialization for large scans.
+- **Warm start**: Rescanning a volume with an unchanged-since-last-time cache loads the saved tree and patches only what an FSEvents journal replay says changed, instead of a full enumeration. Falls back to a normal cold scan automatically on any doubt; "Full Rescan" always forces cold.
 - **Deferred bundle sizing**: App bundles stay as opaque leaves during the first scan so the UI becomes usable sooner. Bundle sizes are resolved in the background and propagated into parent totals.
 - **Metal cushion treemap**: Shows disk usage visually with extension-based color mapping, zoom, selection, and hover details.
 - **Sortable tree table**: Browse folders and files by on-disk size, logical size, item count, modified date, and parent percentage.
@@ -90,6 +91,8 @@ DirWiz stores scan results in a flat array tree with a shared string pool. This 
 
 The app path favors quick first results. It skips inline recursive sizing for bundles, renders the tree, then computes bundle sizes as a bounded background task. The CLI defaults to exact inline bundle sizing unless `DIRWIZ_SKIP_BUNDLE_SIZES=1` is set.
 
+After a scan completes, the app saves the tree to a small on-disk cache keyed by the scanned root path. The next time you scan that same volume, if the cache is still valid it replays the FSEvents journal since the cache was saved, patches just the directories that actually changed, and republishes the tree in a fraction of the time a full scan would take. Anything that makes the replay untrustworthy — a poisoned journal (e.g. the volume was unmounted, or too much changed to enumerate cheaply), a stale/corrupt cache, or a changed path that can't be resolved — falls back to an ordinary cold scan automatically; nothing about the cold path changes. Use the "Full Rescan" button next to "Scan Volume" to bypass the cache and force a cold scan on demand (shown only when a cache exists), or set `DIRWIZ_NO_WARM_START=1` to disable warm start entirely. This is app-only; the CLI's `scan` subcommand always scans cold.
+
 Useful scan toggles:
 
 ```bash
@@ -98,6 +101,7 @@ DIRWIZ_DEFER_TREE=0
 DIRWIZ_SKIP_BUNDLE_SIZES=1
 DIRWIZ_BUNDLE_WORKERS=4
 DIRWIZ_BULK_BUFFER_BYTES=262144
+DIRWIZ_NO_WARM_START=1
 ```
 
 Release script knobs (see `scripts/package-release.sh`):

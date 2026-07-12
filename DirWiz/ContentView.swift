@@ -121,7 +121,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            VolumePickerView(appState: appState, onScan: startScan)
+            VolumePickerView(appState: appState, onScan: startScan, onFullRescan: startFullRescan)
 
             if !appState.hasFullDiskAccess {
                 fullDiskAccessBanner
@@ -437,6 +437,10 @@ struct ContentView: View {
 
     private func startScan() {
         appState.startSelectedVolumeScan()
+    }
+
+    private func startFullRescan() {
+        appState.startFullRescan()
     }
 
     private func cancelScan() {

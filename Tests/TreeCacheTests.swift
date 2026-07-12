@@ -7,25 +7,9 @@ import Foundation
 // TreeCache's binary header is reproduced here (offsets, FNV-1a 64) so tests can
 // hand-patch a saved cache file and still recompute a valid checksum — the same
 // hand-assembled-header discipline used in TemporalDiffTests for TemporalSnapshot.
-
-/// Point DIRWIZ_APP_SUPPORT_DIR at a scratch directory for the duration of a test,
-/// restoring the previous value (or unsetting it) afterward.
-private func withTemporaryAppSupportDir<T>(_ body: () async throws -> T) async rethrows -> T {
-    let tempSupportRoot = FileManager.default.temporaryDirectory
-        .appendingPathComponent("DirWizAppSupport_\(UUID().uuidString)", isDirectory: true)
-    try? FileManager.default.createDirectory(at: tempSupportRoot, withIntermediateDirectories: true)
-    let previousOverride = ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"]
-    setenv("DIRWIZ_APP_SUPPORT_DIR", tempSupportRoot.path, 1)
-    defer {
-        if let previousOverride {
-            setenv("DIRWIZ_APP_SUPPORT_DIR", previousOverride, 1)
-        } else {
-            unsetenv("DIRWIZ_APP_SUPPORT_DIR")
-        }
-        try? FileManager.default.removeItem(at: tempSupportRoot)
-    }
-    return try await body()
-}
+//
+// `withTemporaryAppSupportDir` lives in TestHelpers.swift — shared with WarmStartTests,
+// which also needs a scratch TreeCache location.
 
 /// Build a small in-memory tree rooted at a real on-disk path (needed so TreeCache's
 /// volume-UUID lookup resolves to a real volume, not an empty string). 3 nodes total:

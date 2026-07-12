@@ -10,62 +10,8 @@ import Foundation
 @Suite("Subtree Rescan Tests")
 struct SubtreeRescanTests {
 
-    private struct NodeSummary: Equatable, CustomStringConvertible {
-        let isDirectory: Bool
-        let isBundle: Bool
-        let fileSize: UInt64
-        let allocatedSize: UInt64
-        let childCount: UInt32
-
-        var description: String {
-            "(dir: \(isDirectory), bundle: \(isBundle), size: \(fileSize), alloc: \(allocatedSize), children: \(childCount))"
-        }
-    }
-
-    private func summarize(_ tree: FileTree) -> [String: NodeSummary] {
-        var result: [String: NodeSummary] = [:]
-        for i in 0..<tree.count {
-            let node = tree.nodes[i]
-            result[tree.path(at: UInt32(i))] = NodeSummary(
-                isDirectory: node.isDirectory,
-                isBundle: node.isBundle,
-                fileSize: node.fileSize,
-                allocatedSize: node.allocatedSize,
-                childCount: node.childCount
-            )
-        }
-        return result
-    }
-
-    /// Asserts `actual` is structurally indistinguishable from `expected`: same path set,
-    /// per-path fileSize/allocatedSize/isDirectory/childCount, and equal root aggregate
-    /// totals. `expected` is typically a fresh cold scan of the same on-disk fixture.
-    private func assertTreesEquivalent(_ actual: FileTree, _ expected: FileTree, _ context: String) {
-        let actualByPath = summarize(actual)
-        let expectedByPath = summarize(expected)
-
-        #expect(Set(actualByPath.keys) == Set(expectedByPath.keys),
-            "\(context): path sets differ (actual: \(actualByPath.keys.sorted()), expected: \(expectedByPath.keys.sorted()))")
-
-        for (path, expectedValue) in expectedByPath {
-            guard let actualValue = actualByPath[path] else {
-                Issue.record("\(context): path \(path) missing from the rescanned tree")
-                continue
-            }
-            #expect(actualValue == expectedValue,
-                "\(context): mismatch at \(path): rescanned \(actualValue) vs cold \(expectedValue)")
-        }
-
-        guard !actual.isEmpty, !expected.isEmpty else {
-            Issue.record("\(context): one of the trees is empty")
-            return
-        }
-        let actualRoot = actual.nodes[0]
-        let expectedRoot = expected.nodes[0]
-        #expect(actualRoot.fileSize == expectedRoot.fileSize,
-            "\(context): root fileSize mismatch (rescanned \(actualRoot.fileSize) vs cold \(expectedRoot.fileSize))")
-        #expect(actualRoot.allocatedSize == expectedRoot.allocatedSize,
-            "\(context): root allocatedSize mismatch (rescanned \(actualRoot.allocatedSize) vs cold \(expectedRoot.allocatedSize))")
+    private func summarize(_ tree: FileTree) -> [String: TreeNodeSummary] {
+        summarizeTree(tree)
     }
 
     private func coldScan(_ path: String) async -> FileTree {
