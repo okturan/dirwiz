@@ -688,6 +688,29 @@ public final class FileTree: @unchecked Sendable {
         }
     }
 
+    /// Install a fully-formed nodes array + string pool directly, bypassing the
+    /// arena-based scan build path in `replaceContents`. Used by `TreeCache` to
+    /// materialize a tree loaded from disk onto a freshly-created `FileTree` (before
+    /// any concurrent access begins, same contract as `setRootPath`/`setCaseSensitivity`).
+    /// Resets the lazy search index so the next `searchIndexSnapshot()` rebuilds it
+    /// against the loaded data.
+    func installLoadedContents(
+        nodes: [FileNode],
+        stringPool: Data,
+        rootPath: String,
+        isCaseSensitive: Bool
+    ) {
+        lock.withLock { _ in
+            self.nodes = nodes
+            self.stringPool = stringPool
+            self.rootPath = rootPath
+            self.isCaseSensitive = isCaseSensitive
+            lowercaseNamePool.removeAll(keepingCapacity: true)
+            lowercaseNameEntries.removeAll(keepingCapacity: true)
+            isSearchIndexBuilt = false
+        }
+    }
+
     /// Batch-add children for a parent. Returns the index of the first child.
     @discardableResult
     public func addChildren(_ children: [(node: FileNode, name: String)], parentIndex: UInt32) -> UInt32 {
