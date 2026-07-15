@@ -182,9 +182,14 @@ struct FSEventsJournalTests {
 
 // MARK: - Composed pipeline (the feature's proof)
 
-// `.serialized`: this suite flips the process-global DIRWIZ_APP_SUPPORT_DIR env var via
-// `withTemporaryAppSupportDir` (same discipline as `TreeCacheTests`).
-@Suite("WarmStart Composed Pipeline Tests", .serialized)
+// Nested under `AppSupportEnvSuites` (TestHelpers.swift): this suite flips the
+// process-global DIRWIZ_APP_SUPPORT_DIR env var via `withTemporaryAppSupportDir` (same
+// discipline as `TreeCacheTests`), and the parent's `.serialized` (which propagates
+// recursively) is what keeps that mutation from interleaving with the other env-mutating
+// suites.
+extension AppSupportEnvSuites {
+
+@Suite("WarmStart Composed Pipeline Tests")
 struct WarmStartComposedPipelineTests {
 
     /// Drives the real warm-start pipeline end to end — cold scan, cache save,
@@ -266,3 +271,5 @@ struct WarmStartComposedPipelineTests {
         }
     }
 }
+
+} // extension AppSupportEnvSuites

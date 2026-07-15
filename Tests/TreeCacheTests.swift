@@ -97,7 +97,12 @@ private func patchUInt32(_ data: inout Data, at offset: Int, to value: UInt32) {
 
 // MARK: - Tests
 
-@Suite("TreeCache Tests", .serialized)
+// Nested under `AppSupportEnvSuites` (TestHelpers.swift): that parent's `.serialized`
+// propagates recursively, which is what actually keeps this suite's env mutations from
+// interleaving with `WarmStartComposedPipelineTests` / `TemporalDiffTests`.
+extension AppSupportEnvSuites {
+
+@Suite("TreeCache Tests")
 struct TreeCacheTests {
 
     // MARK: 1. Round-trip on a real scan
@@ -365,3 +370,5 @@ struct TreeCacheTests {
         }
     }
 }
+
+} // extension AppSupportEnvSuites

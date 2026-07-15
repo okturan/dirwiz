@@ -28,9 +28,27 @@ func createTempTree(_ layout: [String: UInt64]) throws -> (path: String, cleanup
 
 // MARK: - App Support Override
 
+/// All suites that mutate the process-global `DIRWIZ_APP_SUPPORT_DIR` env var — currently
+/// `TreeCacheTests`, `WarmStartComposedPipelineTests`, and `TemporalDiffTests` — live nested
+/// under this serialized parent. swift-testing parallelizes across top-level suites, and
+/// `.serialized` on a suite only serializes ITS OWN children against each other — it does
+/// nothing to prevent a *different* top-level `.serialized` suite from interleaving with it.
+/// `.serialized` DOES propagate recursively to nested suites, though, so nesting every
+/// env-mutating suite under one serialized parent is the only construct that keeps them from
+/// racing each other (empirically verified for plan 032 with a throwaway pair of nested probe
+/// suites + timestamps: zero overlap between them once nested here).
+///
+/// Rule for future suites: anything that touches `DIRWIZ_APP_SUPPORT_DIR` — via
+/// `withTemporaryAppSupportDir` or inline `setenv` — must be declared as
+/// `extension AppSupportEnvSuites { @Suite(...) struct Foo { ... } }`, never as a bare
+/// top-level `@Suite`.
+@Suite(.serialized) enum AppSupportEnvSuites {}
+
 /// Point DIRWIZ_APP_SUPPORT_DIR at a scratch directory for the duration of a test,
-/// restoring the previous value (or unsetting it) afterward. Shared by `TreeCacheTests`
-/// and `WarmStartTests` — both need an isolated `TreeCache` location.
+/// restoring the previous value (or unsetting it) afterward. Shared by `TreeCacheTests`,
+/// `WarmStartComposedPipelineTests`, and `TemporalDiffTests` — all nested under
+/// `AppSupportEnvSuites` above, which is what actually keeps their env mutations from
+/// interleaving with each other.
 func withTemporaryAppSupportDir<T>(_ body: () async throws -> T) async rethrows -> T {
     let tempSupportRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("DirWizAppSupport_\(UUID().uuidString)", isDirectory: true)
