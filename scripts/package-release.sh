@@ -13,12 +13,21 @@ APP="$DIST_DIR/$APP_NAME.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
 ZIP="$DIST_DIR/$APP_NAME-$VERSION-macos.zip"
 
-swift build -c release --product "$PRODUCT_NAME"
+swift build --arch arm64 --arch x86_64 -c release --product "$PRODUCT_NAME"
+BIN_PATH="$(swift build --arch arm64 --arch x86_64 -c release --show-bin-path)"
 
 rm -rf "$APP" "$ZIP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-cp "$ROOT/.build/release/$PRODUCT_NAME" "$APP/Contents/MacOS/$APP_NAME"
+cp "$BIN_PATH/$PRODUCT_NAME" "$APP/Contents/MacOS/$APP_NAME"
+
+ARCHS="$(lipo -archs "$APP/Contents/MacOS/$APP_NAME")"
+if [[ "$ARCHS" != *arm64* || "$ARCHS" != *x86_64* ]]; then
+  echo "Universal build check failed: expected arm64 and x86_64, got: $ARCHS" >&2
+  exit 1
+fi
+echo "Universal binary verified: $ARCHS"
+
 cp "$PLIST" "$APP/Contents/Info.plist"
 cp "$ICON" "$APP/Contents/Resources/DirWiz.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
