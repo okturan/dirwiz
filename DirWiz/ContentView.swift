@@ -192,6 +192,11 @@ struct ContentView: View {
                         .font(.callout.bold())
                 }
             }
+            if let summary = appState.lastScanSummary {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let tree = appState.fileTree {
                 Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
                     .font(.caption)

@@ -106,4 +106,45 @@ struct AnalysisCoordinationTests {
         #expect(hardlink.hardlinkProgress.total == 0)
         #expect(!hardlink.isHardlinkScanRunning)
     }
+
+    @MainActor
+    @Test("reset clears the last-scan summary")
+    func resetClearsLastScanSummary() {
+        let state = AppState()
+        state.fileTree = FileTree()
+        state.lastScanSummary = "Refreshed 3 folders from last scan in 0.4s"
+
+        state.resetForNewScan()
+
+        #expect(state.lastScanSummary == nil)
+    }
+}
+
+// MARK: - ScanSummaryComposer (pure formatting, plan 031)
+
+@Suite("Scan Summary Composer Tests")
+struct ScanSummaryComposerTests {
+    @Test("Warm summary reports refreshed folder count and elapsed seconds")
+    func warmSummaryFormatsFoldersAndSeconds() {
+        #expect(
+            ScanSummaryComposer.warm(foldersRefreshed: 3, seconds: 0.4) ==
+            "Refreshed 3 folders from last scan in 0.4s"
+        )
+        #expect(
+            ScanSummaryComposer.warm(foldersRefreshed: 0, seconds: 1.25) ==
+            "Refreshed 0 folders from last scan in 1.2s"
+        )
+    }
+
+    @Test("Cold summary reports item count and elapsed seconds")
+    func coldSummaryFormatsItemsAndSeconds() {
+        #expect(
+            ScanSummaryComposer.cold(items: 12345, seconds: 2.1) ==
+            "Scanned 12345 items in 2.1s"
+        )
+        #expect(
+            ScanSummaryComposer.cold(items: 0, seconds: 0.05) ==
+            "Scanned 0 items in 0.1s"
+        )
+    }
 }

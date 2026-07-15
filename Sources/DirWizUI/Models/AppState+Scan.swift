@@ -4,6 +4,19 @@ import OSLog
 
 private let log = Logger(subsystem: "com.dirwiz", category: "AppState")
 
+/// Pure formatting for `AppState.lastScanSummary`, the one-line summary shown in
+/// the sidebar's completed-scan block. Factored out so both variants (warm/cold)
+/// are unit-testable without driving the full async scan pipeline.
+enum ScanSummaryComposer {
+    static func warm(foldersRefreshed: Int, seconds: TimeInterval) -> String {
+        "Refreshed \(foldersRefreshed) folders from last scan in \(String(format: "%.1f", seconds))s"
+    }
+
+    static func cold(items: Int, seconds: TimeInterval) -> String {
+        "Scanned \(items) items in \(String(format: "%.1f", seconds))s"
+    }
+}
+
 extension AppState {
     public func startSelectedVolumeScan() {
         guard let volumeURL = selectedVolume else { return }
@@ -134,9 +147,11 @@ extension AppState {
         scanProgress.publishCounters(forceLayoutRevision: true)
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let summary = ScanSummaryComposer.warm(foldersRefreshed: report.rescannedRoots.count, seconds: elapsed)
         scanProgress.isScanning = false
         scanProgress.scanComplete = true
-        scanProgress.currentPath = "Refreshed \(report.rescannedRoots.count) folders from last scan in \(String(format: "%.1f", elapsed))s"
+        scanProgress.currentPath = summary
+        lastScanSummary = summary
 
         do {
             try TreeCache.save(tree: tree, lastEventId: newEventId)
@@ -174,6 +189,7 @@ extension AppState {
                 guard !self.scanProgress.isCancelled else { return (false, nil) }
                 self.setTreemapRoot(0, recordHistory: false)
                 self.computeExtensionStats()
+                self.lastScanSummary = ScanSummaryComposer.cold(items: tree.count, seconds: self.scanProgress.elapsedTime)
                 self.beginDeferredBundleSizing(
                     scanner: scanner, tree: tree, token: token, eventIdAtScanStart: eventIdAtScanStart
                 )

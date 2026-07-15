@@ -137,6 +137,12 @@ public final class AppState {
         set { scanSession.duration = newValue }
     }
 
+    /// One-line human-readable summary of the most recently completed scan (warm
+    /// or cold) — e.g. "Refreshed 3 folders from last scan in 0.4s" or "Scanned
+    /// 12,345 items in 2.1s". Rendered in the sidebar's completed-scan block. Nil
+    /// until a scan completes; cleared by `resetForNewScan()`.
+    public var lastScanSummary: String?
+
     /// Whether Full Disk Access is granted.
     public var hasFullDiskAccess: Bool = false
 
@@ -296,6 +302,7 @@ public final class AppState {
         // Create a fresh ScanProgress so old scanner finalizations write to the
         // abandoned instance and cannot corrupt the new scan's counters.
         scanProgress = ScanProgress()
+        lastScanSummary = nil
     }
 }
 
