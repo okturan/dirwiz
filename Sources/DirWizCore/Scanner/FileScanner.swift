@@ -385,7 +385,7 @@ public final class FileScanner: @unchecked Sendable {
             resolvedPaths.append(resolved)
         }
 
-        let rescannedRoots = Self.outermostPaths(resolvedPaths)
+        let rescannedRoots = PathCollapse.outermostRoots(resolvedPaths)
 
         // One instance shared across every target in this batch — matches cold scan's
         // single firmlink/hardlink guard for the whole operation, not one per target.
@@ -540,39 +540,6 @@ public final class FileScanner: @unchecked Sendable {
         let suffix = components.joined(separator: "/")
         if normalizedRoot == "/" { return "/" + suffix }
         return normalizedRoot + "/" + suffix
-    }
-
-    /// Drop any path nested inside another path in the set (including exact duplicates),
-    /// keeping only the outermost survivors in first-seen order. Same shallowest-first
-    /// claim discipline as `SpaceAnalyzer.isDescendantOfClaimed`, but string-prefix based
-    /// since this runs before any index-invalidating mutation — resolved targets are
-    /// still plain paths here, not tree indices.
-    private static func outermostPaths(_ paths: [String]) -> [String] {
-        var uniqueInOrder: [String] = []
-        var seen = Set<String>()
-        for path in paths where seen.insert(path).inserted {
-            uniqueInOrder.append(path)
-        }
-
-        let shallowestFirst = uniqueInOrder.enumerated().sorted { a, b in
-            let depthA = a.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
-            let depthB = b.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
-            if depthA != depthB { return depthA < depthB }
-            return a.offset < b.offset
-        }
-
-        var claimed: [String] = []
-        for (_, path) in shallowestFirst {
-            let nested = claimed.contains { ancestor in
-                path.hasPrefix(ancestor.hasSuffix("/") ? ancestor : ancestor + "/")
-            }
-            if !nested {
-                claimed.append(path)
-            }
-        }
-
-        let claimedSet = Set(claimed)
-        return uniqueInOrder.filter { claimedSet.contains($0) }
     }
 
     /// One-off `lstat` for the mtime refresh after a splice. Bypasses `FilesystemProvider`

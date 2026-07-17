@@ -15,6 +15,13 @@ enum ScanSummaryComposer {
     static func cold(items: Int, seconds: TimeInterval) -> String {
         "Scanned \(items) items in \(String(format: "%.1f", seconds))s"
     }
+
+    /// The cold flavor, with the human-readable reason a warm start didn't happen
+    /// appended — so a fallback still reads as an answer ("why was this slow?") rather
+    /// than silence in the logs.
+    static func coldWithReason(items: Int, seconds: TimeInterval, reason: String) -> String {
+        cold(items: items, seconds: seconds) + " — full scan: \(reason)"
+    }
 }
 
 extension AppState {
@@ -74,15 +81,13 @@ extension AppState {
 
         Task {
             let replay = await FSEventsJournal.replay(root: path, since: cached.lastEventId)
-            let changedCount: Int?
-            switch replay.outcome {
-            case .changes(let paths): changedCount = paths.count
-            case .poisoned: changedCount = nil
-            }
+            // A true folder count for the threshold, not the cache's raw node count —
+            // computed fresh each attempt since the cached tree itself never changes here.
+            let cachedDirectoryCount = Self.directoryCount(in: cached.tree)
             let decision = WarmStartPlanner.decide(
                 cacheAvailable: true,
                 replay: replay.outcome,
-                changedCount: changedCount
+                cachedDirectoryCount: cachedDirectoryCount
             )
 
             guard self.scanSession.token == attemptToken else { return }
@@ -90,7 +95,7 @@ extension AppState {
             switch decision {
             case .coldFallback(let reason):
                 log.info("Warm start fallback for \(path, privacy: .public): \(reason, privacy: .public)")
-                self.beginColdScan(path: path, runPostScanAnalyses: shouldRunPostScanAnalyses)
+                self.beginColdScan(path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason)
             case .warm(let targets):
                 await self.commitWarmStart(
                     cached: cached,
@@ -166,8 +171,14 @@ extension AppState {
 
     /// Today's full enumeration — byte-for-byte the pre-warm-start flow. Reused both as
     /// the direct path (no cache, or "Full Rescan") and as the fallback whenever a warm
-    /// attempt can't be trusted.
-    private func beginColdScan(path: String, runPostScanAnalyses shouldRunPostScanAnalyses: Bool) {
+    /// attempt can't be trusted. `coldFallbackReason` is only set when this cold scan
+    /// replaces a warm attempt the planner declined — surfaced in the completion summary
+    /// so the fallback is legible instead of only a log line.
+    private func beginColdScan(
+        path: String,
+        runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
+        coldFallbackReason: String? = nil
+    ) {
         // Captured before the scan starts: any filesystem activity on this volume from
         // here on is exactly what the *next* warm start needs to replay.
         let eventIdAtScanStart = FSEventsJournal.currentEventId()
@@ -189,7 +200,13 @@ extension AppState {
                 guard !self.scanProgress.isCancelled else { return (false, nil) }
                 self.setTreemapRoot(0, recordHistory: false)
                 self.computeExtensionStats()
-                self.lastScanSummary = ScanSummaryComposer.cold(items: tree.count, seconds: self.scanProgress.elapsedTime)
+                if let coldFallbackReason {
+                    self.lastScanSummary = ScanSummaryComposer.coldWithReason(
+                        items: tree.count, seconds: self.scanProgress.elapsedTime, reason: coldFallbackReason
+                    )
+                } else {
+                    self.lastScanSummary = ScanSummaryComposer.cold(items: tree.count, seconds: self.scanProgress.elapsedTime)
+                }
                 self.beginDeferredBundleSizing(
                     scanner: scanner, tree: tree, token: token, eventIdAtScanStart: eventIdAtScanStart
                 )
@@ -201,6 +218,14 @@ extension AppState {
                 await self.runPostScanAnalyses(tree: tree, volumePath: path, token: token)
             }
         }
+    }
+
+    /// One O(n) pass over the cached tree's snapshot counting directory nodes — the
+    /// denominator for `WarmStartPlanner`'s percentage threshold. Not stored in the
+    /// `TreeCache` header (that's a format change, out of scope here); cheap enough
+    /// (~ms at millions of nodes) to recompute per warm-start attempt instead.
+    private static func directoryCount(in tree: FileTree) -> Int {
+        tree.nodesSnapshot().reduce(0) { $0 + ($1.isDirectory ? 1 : 0) }
     }
 
     private func beginDeferredBundleSizing(

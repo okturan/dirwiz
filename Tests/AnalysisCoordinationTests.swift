@@ -147,4 +147,18 @@ struct ScanSummaryComposerTests {
             "Scanned 0 items in 0.1s"
         )
     }
+
+    @Test("Cold-with-reason summary appends the human-readable fallback reason")
+    func coldWithReasonAppendsReason() {
+        #expect(
+            ScanSummaryComposer.coldWithReason(
+                items: 12345, seconds: 2.1, reason: "312 folders (38%) changed since last scan"
+            ) ==
+            "Scanned 12345 items in 2.1s — full scan: 312 folders (38%) changed since last scan"
+        )
+        #expect(
+            ScanSummaryComposer.coldWithReason(items: 0, seconds: 0.05, reason: "change journal unavailable") ==
+            "Scanned 0 items in 0.1s — full scan: change journal unavailable"
+        )
+    }
 }

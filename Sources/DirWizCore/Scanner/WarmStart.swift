@@ -222,6 +222,45 @@ private let journalCollectorCallback: FSEventStreamCallback = {
     collector.handleEvents(paths: paths, flags: flagsCopy)
 }
 
+/// Collapses a set of changed-directory paths down to their outermost roots — drops any
+/// path nested inside another path in the set (including exact duplicates), keeping only
+/// the outermost survivors in first-seen order. Shared between `WarmStartPlanner` (which
+/// needs a true folder count for the threshold decision — thousands of raw FSEvents paths
+/// under a handful of real folders should count as a handful) and
+/// `FileScanner.rescanSubtrees` (which needs to avoid re-enumerating a directory it's
+/// about to re-enumerate anyway because a child was also reported changed). String-prefix
+/// based since this runs before any index-invalidating mutation — same shallowest-first
+/// claim discipline as `SpaceAnalyzer.isDescendantOfClaimed`.
+enum PathCollapse {
+    static func outermostRoots(_ paths: [String]) -> [String] {
+        var uniqueInOrder: [String] = []
+        var seen = Set<String>()
+        for path in paths where seen.insert(path).inserted {
+            uniqueInOrder.append(path)
+        }
+
+        let shallowestFirst = uniqueInOrder.enumerated().sorted { a, b in
+            let depthA = a.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
+            let depthB = b.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
+            if depthA != depthB { return depthA < depthB }
+            return a.offset < b.offset
+        }
+
+        var claimed: [String] = []
+        for (_, path) in shallowestFirst {
+            let nested = claimed.contains { ancestor in
+                path.hasPrefix(ancestor.hasSuffix("/") ? ancestor : ancestor + "/")
+            }
+            if !nested {
+                claimed.append(path)
+            }
+        }
+
+        let claimedSet = Set(claimed)
+        return uniqueInOrder.filter { claimedSet.contains($0) }
+    }
+}
+
 /// Pure decision logic for whether to attempt a warm start — unit-testable without
 /// touching FSEvents at all.
 public enum WarmStartPlanner {
@@ -230,13 +269,30 @@ public enum WarmStartPlanner {
         case coldFallback(reason: String)
     }
 
-    /// `maxChangedDirs` default 5_000: above that, enumeration cost approaches cold and
-    /// patch bookkeeping dominates — cold is simpler and honest.
+    /// Backstop when the caller can't tell us the cached tree's directory count (should
+    /// only happen on a malformed/defensive call): above this many collapsed roots,
+    /// enumeration cost approaches cold and patch bookkeeping dominates anyway, so refuse
+    /// to warm unboundedly rather than trust an unbounded root count blind.
+    private static let unknownDirectoryCountBackstop = 5_000
+
+    /// `maxChangedFraction` default 0.20: warm iff the collapsed changed-root count is at
+    /// most this fraction of the cached tree's known directory count. Replaces an earlier
+    /// absolute cap on raw (pre-collapse) FSEvents paths, which over-triggered cold
+    /// fallback — whole-volume roots accumulate thousands of raw events from background
+    /// churn within hours even when only a handful of real folders changed.
+    ///
+    /// A percentage threshold means a tiny cached tree (few known directories) can fall
+    /// back to cold from a small absolute number of changed roots — e.g. 2 of 4 directories
+    /// reads as 50% churn. That's by design, not a bug to work around: cold scans are
+    /// cheapest exactly when the tree is small, so there's nothing to protect by warming.
+    /// The `max(1, …)` floor below is deliberate for the same reason — it guarantees at
+    /// least one changed root is always tolerated, so an empty or near-empty tree isn't
+    /// permanently locked out of ever warming.
     public static func decide(
         cacheAvailable: Bool,
         replay: JournalReplay.Outcome?,
-        changedCount: Int?,
-        maxChangedDirs: Int = 5_000
+        cachedDirectoryCount: Int?,
+        maxChangedFraction: Double = 0.20
     ) -> Decision {
         guard cacheAvailable else {
             return .coldFallback(reason: "no cache available")
@@ -246,13 +302,36 @@ public enum WarmStartPlanner {
         }
         switch replay {
         case .poisoned(let reason):
-            return .coldFallback(reason: reason)
+            return .coldFallback(reason: userFacingPoisonReason(reason))
         case .changes(let targets):
-            let count = changedCount ?? targets.count
-            guard count <= maxChangedDirs else {
-                return .coldFallback(reason: "too many changed directories (\(count) > \(maxChangedDirs))")
+            let roots = PathCollapse.outermostRoots(targets)
+            guard let cachedDirectoryCount else {
+                guard roots.count <= unknownDirectoryCountBackstop else {
+                    return .coldFallback(
+                        reason: "too many changed directories (\(roots.count) > \(unknownDirectoryCountBackstop))"
+                    )
+                }
+                return .warm(targets: roots)
             }
-            return .warm(targets: targets)
+            let threshold = max(1, Int(Double(cachedDirectoryCount) * maxChangedFraction))
+            guard roots.count <= threshold else {
+                let percent = percentage(roots.count, of: cachedDirectoryCount)
+                return .coldFallback(reason: "\(roots.count) folders (\(percent)%) changed since last scan")
+            }
+            return .warm(targets: roots)
         }
+    }
+
+    private static func percentage(_ count: Int, of total: Int) -> Int {
+        guard total > 0 else { return 100 }
+        return Int((Double(count) / Double(total) * 100).rounded())
+    }
+
+    /// Poison reasons from `JournalCollector` (e.g. "MustScanSubDirs,RootChanged",
+    /// "failed to create FSEventStream") are diagnostic jargon meant for logs, not the
+    /// people using the app. Collapse them to the two sentences worth showing: a
+    /// distinguishable "timed out" case, and a catch-all for everything else.
+    private static func userFacingPoisonReason(_ reason: String) -> String {
+        reason.contains("timed out") ? "change journal timed out" : "change journal unavailable"
     }
 }

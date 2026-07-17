@@ -9,7 +9,7 @@ struct WarmStartPlannerTests {
 
     @Test("No cache available falls back to cold")
     func noCacheFallsBackToCold() {
-        let decision = WarmStartPlanner.decide(cacheAvailable: false, replay: nil, changedCount: nil)
+        let decision = WarmStartPlanner.decide(cacheAvailable: false, replay: nil, cachedDirectoryCount: nil)
         guard case .coldFallback = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
@@ -18,42 +18,53 @@ struct WarmStartPlannerTests {
 
     @Test("Missing replay result falls back to cold")
     func missingReplayFallsBackToCold() {
-        let decision = WarmStartPlanner.decide(cacheAvailable: true, replay: nil, changedCount: nil)
+        let decision = WarmStartPlanner.decide(cacheAvailable: true, replay: nil, cachedDirectoryCount: nil)
         guard case .coldFallback = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
         }
     }
 
-    @Test("Poisoned replay falls back to cold, carrying the reason")
+    @Test("Poisoned replay falls back to cold, worded for a human rather than the raw FSEvents flag")
     func poisonedFallsBackToCold() {
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .poisoned("MustScanSubDirs"),
-            changedCount: nil
+            cachedDirectoryCount: nil
         )
-        #expect(decision == .coldFallback(reason: "MustScanSubDirs"))
+        #expect(decision == .coldFallback(reason: "change journal unavailable"))
     }
 
-    @Test("Changed directory count over the cap falls back to cold")
+    @Test("A replay timeout is worded distinctly from other poison reasons")
+    func timeoutPoisonWordedDistinctly() {
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .poisoned("timed out waiting for HistoryDone"),
+            cachedDirectoryCount: nil
+        )
+        #expect(decision == .coldFallback(reason: "change journal timed out"))
+    }
+
+    @Test("Changed roots over the fraction of cached directories fall back to cold, reason names the percentage")
     func tooManyChangesFallsBackToCold() {
         let manyPaths = (0..<10).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(manyPaths),
-            changedCount: manyPaths.count,
-            maxChangedDirs: 5
+            cachedDirectoryCount: 20,
+            maxChangedFraction: 0.20
         )
         guard case .coldFallback(let reason) = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
         }
-        #expect(reason.contains("10"), "reason should mention the offending count: \(reason)")
+        #expect(reason.contains("10"), "reason should mention the changed root count: \(reason)")
+        #expect(reason.contains("50"), "reason should mention the percentage (10/20 = 50%): \(reason)")
     }
 
     @Test("Zero actual changes still warms, with an empty target list")
     func zeroChangesWarmsWithEmptyTargets() {
-        let decision = WarmStartPlanner.decide(cacheAvailable: true, replay: .changes([]), changedCount: 0)
+        let decision = WarmStartPlanner.decide(cacheAvailable: true, replay: .changes([]), cachedDirectoryCount: 500)
         #expect(decision == .warm(targets: []))
     }
 
@@ -63,21 +74,117 @@ struct WarmStartPlannerTests {
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(targets),
-            changedCount: targets.count
+            cachedDirectoryCount: 100
         )
         #expect(decision == .warm(targets: targets))
     }
 
-    @Test("Changed count at exactly the cap still warms")
-    func changesAtCapStillWarms() {
-        let paths = (0..<5).map { "/root/dir\($0)" }
+    @Test("Roots at exactly the threshold boundary still warm")
+    func rootsAtThresholdBoundaryStillWarm() {
+        // 100 cached dirs, 20% fraction → threshold 20; exactly 20 disjoint roots.
+        let paths = (0..<20).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            changedCount: paths.count,
-            maxChangedDirs: 5
+            cachedDirectoryCount: 100,
+            maxChangedFraction: 0.20
         )
         #expect(decision == .warm(targets: paths))
+    }
+
+    @Test("One root past the threshold boundary falls back to cold")
+    func oneRootPastThresholdBoundaryFallsBackToCold() {
+        // Same setup as the boundary test, one more root tips it over.
+        let paths = (0..<21).map { "/root/dir\($0)" }
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(paths),
+            cachedDirectoryCount: 100,
+            maxChangedFraction: 0.20
+        )
+        guard case .coldFallback = decision else {
+            Issue.record("expected coldFallback, got \(decision)")
+            return
+        }
+    }
+
+    @Test("Unknown directory count still warms under the defensive backstop")
+    func nilDirectoryCountWarmsUnderBackstop() {
+        let paths = (0..<100).map { "/root/dir\($0)" }
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(paths),
+            cachedDirectoryCount: nil
+        )
+        #expect(decision == .warm(targets: paths))
+    }
+
+    @Test("Unknown directory count falls back to cold once the defensive backstop is exceeded")
+    func nilDirectoryCountFallsBackOverBackstop() {
+        let paths = (0..<5_001).map { "/root/dir\($0)" }
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(paths),
+            cachedDirectoryCount: nil
+        )
+        guard case .coldFallback = decision else {
+            Issue.record("expected coldFallback, got \(decision)")
+            return
+        }
+    }
+
+    @Test("1000+ raw events collapsing to 3 real folders still warms — the bug this fixes")
+    func manyRawEventsCollapsingToFewRootsWarms() {
+        // Deep churn under three real folders produces a raw FSEvents path per touched
+        // file, but they all nest under the same 3 outermost roots — the planner must
+        // judge the collapsed count against the threshold, not the raw one.
+        var rawPaths: [String] = []
+        for folder in ["/root/a", "/root/b", "/root/c"] {
+            rawPaths.append(folder)
+            for i in 0..<333 {
+                rawPaths.append("\(folder)/sub\(i)")
+            }
+        }
+        #expect(rawPaths.count > 1_000)
+
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(rawPaths),
+            cachedDirectoryCount: 1_000
+        )
+        #expect(decision == .warm(targets: ["/root/a", "/root/b", "/root/c"]))
+    }
+}
+
+// MARK: - PathCollapse (shared outermost-root collapsing, plan 035)
+
+@Suite("PathCollapse Tests")
+struct PathCollapseTests {
+
+    @Test("A nested path collapses into its outermost ancestor")
+    func nestedCollapsesToOutermost() {
+        let result = PathCollapse.outermostRoots(["/root/a", "/root/a/b", "/root/a/b/c"])
+        #expect(result == ["/root/a"])
+    }
+
+    @Test("Disjoint paths all survive")
+    func disjointPathsStay() {
+        let result = PathCollapse.outermostRoots(["/root/a", "/root/b", "/root/c"])
+        #expect(result == ["/root/a", "/root/b", "/root/c"])
+    }
+
+    @Test("Exact duplicates collapse to a single entry")
+    func duplicatesCollapse() {
+        let result = PathCollapse.outermostRoots(["/root/a", "/root/a", "/root/a"])
+        #expect(result == ["/root/a"])
+    }
+
+    @Test("The surviving set doesn't depend on whether a parent or its child appears first")
+    func orderIndependent() {
+        let childBeforeParent = PathCollapse.outermostRoots(["/root/a/b", "/root/a", "/root/c"])
+        let parentBeforeChild = PathCollapse.outermostRoots(["/root/a", "/root/a/b", "/root/c"])
+        #expect(Set(childBeforeParent) == Set(["/root/a", "/root/c"]))
+        #expect(Set(childBeforeParent) == Set(parentBeforeChild))
     }
 }
 
@@ -200,12 +307,24 @@ struct WarmStartComposedPipelineTests {
     @Test("Warm start reproduces a fresh cold scan after mixed on-disk changes")
     func composedWarmStartMatchesColdScan() async throws {
         try await withTemporaryAppSupportDir {
-            let (rawRoot, cleanup) = try createTempTree([
+            var layout: [String: UInt64] = [
                 "docs/readme.txt": 100,
                 "docs/notes.md": 200,
                 "images/photo.jpg": 300,
                 "MyApp.app/Contents/Resources/data.bin": 500,
-            ])
+            ]
+            // Padding directories: the planner's threshold is a *percentage* of the cached
+            // tree's directory count, so the denominator needs to look like a real tree.
+            // Without this, the fixture has only 4 directories total, and the two areas
+            // this test mutates below (docs + the bundle) collapse to 2 changed roots —
+            // 50% "churn" that correctly (if misleadingly, for a test) falls back to cold.
+            // ~30 cheap, untouched directories bring the denominator to ~34, so the same
+            // 2 changed roots read as ~6% and the warm path — including the bundle-recompute
+            // branch this test exists to cover — actually gets exercised.
+            for i in 0..<30 {
+                layout[String(format: "pad%02d/file.txt", i)] = 10
+            }
+            let (rawRoot, cleanup) = try createTempTree(layout)
             defer { cleanup() }
             // See `realDirectoryPath` above: keeps the scanned root and the root FSEvents
             // reports changes under identical, avoiding a spurious /var-vs-/private/var split.
@@ -236,16 +355,15 @@ struct WarmStartComposedPipelineTests {
             try await settleFSEventsJournal()
 
             // Step 3: replay the journal + decide, exactly as the UI orchestration would.
+            // `cachedDirectoryCount` comes from `bootstrapTree` — the same tree just saved
+            // to cache in step 1 — since the real caller computes it from the loaded
+            // cache's tree before deciding (AppState+Scan.swift's `directoryCount(in:)`).
             let replay = await FSEventsJournal.replay(root: root, since: savedEventId, timeout: 10)
-            let changedCount: Int?
-            switch replay.outcome {
-            case .changes(let paths): changedCount = paths.count
-            case .poisoned: changedCount = nil
-            }
+            let cachedDirectoryCount = bootstrapTree.nodesSnapshot().reduce(0) { $0 + ($1.isDirectory ? 1 : 0) }
             let decision = WarmStartPlanner.decide(
                 cacheAvailable: true,
                 replay: replay.outcome,
-                changedCount: changedCount
+                cachedDirectoryCount: cachedDirectoryCount
             )
             guard case .warm(let targets) = decision else {
                 Issue.record("expected a warm decision for a small, non-poisoned change set, got \(decision)")
