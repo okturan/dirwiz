@@ -19,6 +19,7 @@ extension AppState {
 
         navigation.treemapRootIndex = nodeIndex
         navigation.treemapPath = Self.buildPath(to: nodeIndex, nodes: nodes)
+        saveSelectionAndRootSession()
     }
 
     /// Navigate up one level in treemap.

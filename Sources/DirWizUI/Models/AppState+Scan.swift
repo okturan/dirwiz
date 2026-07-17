@@ -116,7 +116,22 @@ extension AppState {
         let volumeURL = URL(fileURLWithPath: path)
         selectedVolume = volumeURL
         fileTree = cached.tree
-        setTreemapRoot(0, recordHistory: false)
+
+        // Restore where the user left off (033/038): resolve the saved session's
+        // selection and treemap root through `resolveOrAncestor` so a folder deleted
+        // since last launch degrades to its nearest surviving ancestor instead of
+        // restoring nothing. TreeTableView seeds its own `expandedPaths` from the same
+        // session on appear (`seedExpansionFromSessionIfNeeded`) — nothing to do here for
+        // expansion, which is view-local state AppState doesn't own.
+        let session = sessionStore.load(forVolume: path)
+        selectedNodeIndex = session?.selectedPath.flatMap {
+            ExplorationCapture.resolveOrAncestor($0, tree: cached.tree)
+        }
+        let resolvedRoot = session?.treemapRootPath.flatMap {
+            ExplorationCapture.resolveOrAncestor($0, tree: cached.tree)
+        } ?? 0
+        setTreemapRoot(resolvedRoot, recordHistory: false)
+
         computeExtensionStats()
         scanProgress.publishCounters(forceLayoutRevision: true)
         staleViewAsOf = cached.savedAt
@@ -215,6 +230,41 @@ extension AppState {
     /// write just means the next launch opens empty, i.e. today's behavior.
     private func persistLastScannedVolume(path: String) {
         defaults.set(path, forKey: Self.lastScannedVolumePathKey)
+    }
+
+    // MARK: - Session State (plan 038)
+
+    /// Merges the current selection + treemap-root paths into whatever session snapshot
+    /// is already stored for `selectedVolume` — preserving `expandedPaths`, which this
+    /// method doesn't touch (`TreeTableView` owns that field; see
+    /// `saveExpandedPathsSession(_:)`) — and re-saves. Called from `selectedNodeIndex`'s
+    /// `didSet` (AppState.swift) and from `setTreemapRoot` (AppState+Navigation.swift) —
+    /// the two AppState-owned actions that change "where you are"; every other treemap
+    /// navigation helper (`navigateUp`/`navigateBack`/`navigateForward`/`navigateHome`/
+    /// `navigateTo`) goes through `navigation.treemapRootIndex` directly rather than
+    /// `setTreemapRoot` and so isn't separately persisted here — same tradeoff 033 already
+    /// made for those stacks (dropped by design; see plan's "out of scope"). No-op without
+    /// a selected, non-empty tree: nothing meaningful to persist during the brief
+    /// empty-tree window at the start of a scan reset.
+    func saveSelectionAndRootSession() {
+        guard let tree = fileTree, !tree.isEmpty, let root = selectedVolume?.path else { return }
+        var snapshot = sessionStore.load(forVolume: root)
+            ?? SessionSnapshot(expandedPaths: [], selectedPath: nil, treemapRootPath: nil)
+        snapshot.selectedPath = selectedNodeIndex.map { tree.path(at: $0) }
+        snapshot.treemapRootPath = tree.path(at: navigation.treemapRootIndex)
+        sessionStore.save(snapshot, forVolume: root)
+    }
+
+    /// Merges `paths` into the stored session's `expandedPaths` field for
+    /// `selectedVolume`, preserving whatever selection/root are already there. Called by
+    /// `TreeTableView` (which owns expansion state as view-local `@State`) on every
+    /// expand/collapse. No-op without a selected volume.
+    func saveExpandedPathsSession(_ paths: Set<String>) {
+        guard let root = selectedVolume?.path else { return }
+        var snapshot = sessionStore.load(forVolume: root)
+            ?? SessionSnapshot(expandedPaths: [], selectedPath: nil, treemapRootPath: nil)
+        snapshot.expandedPaths = Array(paths)
+        sessionStore.save(snapshot, forVolume: root)
     }
 
     /// Publishes the cached tree, patches only the directories the journal says changed,

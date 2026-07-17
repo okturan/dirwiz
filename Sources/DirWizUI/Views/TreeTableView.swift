@@ -78,7 +78,10 @@ public struct TreeTableView: View {
                     expandOrGoFirstChild(tree: tree, proxy: proxy)
                     return .handled
                 }
-                .onAppear { cachedItems = flattenedVisibleItems(tree: tree) }
+                .onAppear {
+                    seedExpansionFromSessionIfNeeded(tree: tree)
+                    cachedItems = flattenedVisibleItems(tree: tree)
+                }
                 .onChange(of: sortKey) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onChange(of: sortAscending) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onChange(of: minSizeFilter) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
@@ -91,6 +94,11 @@ public struct TreeTableView: View {
                     cachedItems = flattenedVisibleItems(tree: tree)
                 }
                 .onChange(of: expandedFolders) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
+                .onChange(of: expandedPaths) { _, newValue in
+                    // Cheap, no debouncing needed — UserDefaults coalesces writes itself
+                    // (plan 038's session persistence; see AppState.saveExpandedPathsSession).
+                    appState.saveExpandedPathsSession(newValue)
+                }
                 .onKeyPress(.space) {
                     guard let sel = appState.selectedNodeIndex,
                           let tree = appState.fileTree else { return .ignored }
@@ -492,6 +500,20 @@ public struct TreeTableView: View {
     /// that renumbers indices. Resolves each path strictly (no ancestor fallback, unlike
     /// `ExplorationCapture.resolveOrAncestor`) — a folder that no longer exists simply
     /// drops out of the result, which is exactly "collapsed because it's gone".
+    /// Seeds `expandedPaths`/`expandedFolders` from the persisted session (plan 038) the
+    /// first time this view appears with a tree and nothing already expanded — e.g. right
+    /// after `restoreOnLaunch` publishes a cached tree. Guarded on `expandedPaths.isEmpty`
+    /// so it never clobbers expansion state already built up in this view's lifetime.
+    private func seedExpansionFromSessionIfNeeded(tree: FileTree) {
+        guard expandedPaths.isEmpty,
+              let root = appState.selectedVolume?.path,
+              let session = appState.sessionStore.load(forVolume: root),
+              !session.expandedPaths.isEmpty
+        else { return }
+        expandedPaths = Set(session.expandedPaths)
+        expandedFolders = Self.remapExpansion(paths: expandedPaths, tree: tree)
+    }
+
     static func remapExpansion(paths: Set<String>, tree: FileTree) -> Set<UInt32> {
         let snapshot = tree.pathBuildingSnapshot()
         var result: Set<UInt32> = []

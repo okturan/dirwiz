@@ -15,8 +15,15 @@ public final class AppState {
     /// Scan progress state.
     public var scanProgress = ScanProgress()
 
-    /// Currently selected node in tree view / treemap.
-    public var selectedNodeIndex: UInt32?
+    /// Currently selected node in tree view / treemap. `didSet` persists the current
+    /// selection + treemap root into the per-volume session (plan 038, `AppState+Scan.swift`)
+    /// so the next launch can restore "where you were" — every call site across the app
+    /// (tree clicks, keyboard nav, search, treemap, trash-restore) assigns this property
+    /// directly rather than through a single function, so `didSet` is the one choke point
+    /// that sees them all.
+    public var selectedNodeIndex: UInt32? {
+        didSet { saveSelectionAndRootSession() }
+    }
 
     /// Coordinator for Quick Look panel — holds data source / controller conformance.
     public let quickLookCoordinator = QLPreviewCoordinator()
@@ -212,8 +219,17 @@ public final class AppState {
     /// suite instead of the app's real `UserDefaults.standard`.
     @ObservationIgnored let defaults: UserDefaults
 
+    /// Per-volume, path-keyed exploration session (selection, treemap root, expansion)
+    /// persisted across launches — plan 038. Restored by `restoreOnLaunch()`; saved by
+    /// `saveSelectionAndRootSession()`/`saveExpandedPathsSession(_:)` (`AppState+Scan.swift`)
+    /// and read/written directly by `TreeTableView` for its view-local expansion state.
+    /// Shares `defaults` with `lastScannedVolumePath` so injecting one isolated suite in
+    /// tests isolates both.
+    @ObservationIgnored let sessionStore: SessionStateStore
+
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.sessionStore = SessionStateStore(defaults: defaults)
     }
 
     public enum HeavyTaskKind: String, Sendable, CaseIterable {
