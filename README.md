@@ -9,6 +9,10 @@ macOS disk usage analyzer with a Metal cushion treemap, fast filesystem scans, d
 ![macOS](https://img.shields.io/badge/macOS-15%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 
+![DirWiz tree table and Metal treemap scanning a synthetic showcase volume](docs/assets/dirwiz-showcase.png)
+
+<p align="center"><em>A real DirWiz scan of a synthetic showcase volume: the selected file stays synchronized across the sortable tree, Metal treemap, path bar, and extension legend.</em></p>
+
 ## What It Does
 
 DirWiz scans a volume or folder and builds a compact file tree using on-disk sizes, not just logical file lengths. The app is built for large local volumes where Finder size calculation is too slow or too shallow.
