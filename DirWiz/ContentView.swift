@@ -133,7 +133,9 @@ struct ContentView: View {
 
             Spacer()
 
-            if appState.scanProgress.scanComplete {
+            if let badge = appState.staleBadgeText {
+                staleBadge(text: badge)
+            } else if appState.scanProgress.scanComplete {
                 scanSummary
             }
         }
@@ -224,6 +226,24 @@ struct ContentView: View {
         .padding(.bottom, 10)
     }
 
+    /// Shown in place of `scanSummary` while a restored cache is on screen and not yet
+    /// freshened — the tree/treemap below stay fully interactive the whole time (see the
+    /// `isScanning && staleViewAsOf == nil` gate on `detailContent`).
+    private func staleBadge(text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(.secondary)
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
     // MARK: - Footer
 
     private var footerBar: some View {
@@ -271,7 +291,10 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         // Top: table or scanning placeholder.
                         Group {
-                            if appState.scanProgress.isScanning {
+                            // A restored stale view has real content to show even while
+                            // the background refresh runs — only the ordinary empty-start
+                            // scan (no `staleViewAsOf`) blanks the pane for the placeholder.
+                            if appState.scanProgress.isScanning && appState.staleViewAsOf == nil {
                                 scanningPlaceholder
                             } else {
                                 switch appState.activeTab {

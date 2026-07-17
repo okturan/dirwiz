@@ -161,4 +161,61 @@ struct ScanSummaryComposerTests {
             "Scanned 0 items in 0.1s — full scan: change journal unavailable"
         )
     }
+
+    // MARK: - stale / staleBadge (plan 036)
+
+    @Test("Sub-minute ages read as \"just now\", same discipline as the CLI diff report (plan 016)")
+    func staleSubMinuteAgeReadsAsJustNow() {
+        let now = Date()
+        #expect(ScanSummaryComposer.stale(savedAt: now, now: now) == "Showing last scan · just now")
+        #expect(
+            ScanSummaryComposer.stale(savedAt: now.addingTimeInterval(-59), now: now) ==
+            "Showing last scan · just now"
+        )
+    }
+
+    @Test("Ages of a minute or more defer to RelativeDateTimeFormatter, not \"just now\"")
+    func staleOlderAgeUsesRelativeFormatter() {
+        let now = Date()
+        let anHourAgo = now.addingTimeInterval(-3600)
+        let result = ScanSummaryComposer.stale(savedAt: anHourAgo, now: now)
+        #expect(result.hasPrefix("Showing last scan · "))
+        #expect(!result.contains("just now"))
+    }
+
+    @Test("staleBadge appends an updating suffix while a refresh is in flight")
+    func staleBadgeAppendsUpdatingSuffixWhileRefreshing() {
+        let now = Date()
+        #expect(
+            ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: true, wasCancelled: false, now: now) ==
+            "Showing last scan · just now — updating…"
+        )
+    }
+
+    @Test("staleBadge appends a cancelled suffix once a refresh was cancelled")
+    func staleBadgeAppendsCancelledSuffixAfterCancellation() {
+        let now = Date()
+        #expect(
+            ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: false, wasCancelled: true, now: now) ==
+            "Showing last scan · just now — refresh cancelled"
+        )
+    }
+
+    @Test("staleBadge has no suffix when neither refreshing nor cancelled")
+    func staleBadgeHasNoSuffixWhenIdle() {
+        let now = Date()
+        #expect(
+            ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: false, wasCancelled: false, now: now) ==
+            "Showing last scan · just now"
+        )
+    }
+
+    @Test("staleBadge prefers the updating suffix if both flags are somehow true")
+    func staleBadgePrefersUpdatingWhenBothFlagsTrue() {
+        let now = Date()
+        #expect(
+            ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: true, wasCancelled: true, now: now) ==
+            "Showing last scan · just now — updating…"
+        )
+    }
 }

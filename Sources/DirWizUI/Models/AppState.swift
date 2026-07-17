@@ -143,6 +143,14 @@ public final class AppState {
     /// until a scan completes; cleared by `resetForNewScan()`.
     public var lastScanSummary: String?
 
+    /// Non-nil while the displayed tree is a restored cache not yet freshened by a
+    /// warm patch or cold rescan — drives the "Showing last scan · X ago" badge
+    /// (`staleBadgeText`) and tells the scan flow to keep the displayed tree browsable
+    /// instead of blanking it while a refresh runs behind it. Set by `restoreOnLaunch()`;
+    /// cleared once any refresh (warm or cold) completes. NOT cleared on cancellation —
+    /// the stale view and its badge stay put since nothing newer replaced them.
+    public var staleViewAsOf: Date?
+
     /// Whether Full Disk Access is granted.
     public var hasFullDiskAccess: Bool = false
 
@@ -191,7 +199,14 @@ public final class AppState {
         set { analysisCoordinator.bundleSizingTask = newValue }
     }
 
-    public init() {}
+    /// Backing store for `lastScannedVolumePath` persistence (`restoreOnLaunch`,
+    /// `AppState+Scan.swift`). Injectable so tests can round-trip against an isolated
+    /// suite instead of the app's real `UserDefaults.standard`.
+    @ObservationIgnored let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     public enum HeavyTaskKind: String, Sendable, CaseIterable {
         case duplicateScan
@@ -255,6 +270,26 @@ public final class AppState {
 
     /// Reset navigation state for a new scan.
     public func resetForNewScan() {
+        resetTreeDerivedState()
+        scanSession.invalidate()
+        scanSession.resetTiming()
+        // Create a fresh ScanProgress so old scanner finalizations write to the
+        // abandoned instance and cannot corrupt the new scan's counters.
+        scanProgress = ScanProgress()
+        lastScanSummary = nil
+    }
+
+    /// Clears every piece of state derived from the PREVIOUS tree's contents — index-keyed
+    /// overlays (search, recency, temporal diff), per-run analysis results, extension
+    /// stats — so a freshly assigned `fileTree` starts from a clean slate. Deliberately
+    /// does NOT touch `scanSession`/`scanProgress`/`lastScanSummary`: those track the scan
+    /// itself rather than the tree's content, and the cold-refresh-behind-stale completion
+    /// swap (`AppState+Scan.swift`) needs to keep tracking its already-in-flight scan across
+    /// this reset rather than have it clobbered mid-flight. Shared by `resetForNewScan()`
+    /// (called at the START of an ordinary scan, before anything is displayed) and that
+    /// swap (called once the background scan is done, so the previously-displayed stale
+    /// tree isn't disturbed while it runs).
+    func resetTreeDerivedState() {
         navigation.reset()
         search.reset()
         duplicate.reset()
@@ -268,7 +303,6 @@ public final class AppState {
         recencyGeneration = 0
         isRecencyOverlayEnabled = false
         isRecencyQueryRunning = false
-        scanSession.invalidate()
         duplicateToken &+= 1
         recencyToken &+= 1
         recencyTask?.cancel()
@@ -298,11 +332,6 @@ public final class AppState {
         fsEventsMonitor = nil
         fsChanges = []
         isFSMonitoringActive = false
-        scanSession.resetTiming()
-        // Create a fresh ScanProgress so old scanner finalizations write to the
-        // abandoned instance and cannot corrupt the new scan's counters.
-        scanProgress = ScanProgress()
-        lastScanSummary = nil
     }
 }
 

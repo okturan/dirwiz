@@ -22,6 +22,7 @@ struct DirWizApp: App {
                     if !appState.hasFullDiskAccess {
                         showFullDiskAccessAlert = true
                     }
+                    appState.restoreOnLaunch()
                 }
                 .alert(
                     "Full Disk Access Required",
