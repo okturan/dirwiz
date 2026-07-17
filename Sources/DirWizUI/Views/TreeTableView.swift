@@ -52,6 +52,7 @@ public struct TreeTableView: View {
                     }
                 }
                 .focusable()
+                .focusEffectDisabled()
                 .focused($isFocused)
                 .onChange(of: appState.selectedNodeIndex) { _, newValue in
                     revealAndScroll(to: newValue, nodes: tree.nodesSnapshot(), proxy: proxy)

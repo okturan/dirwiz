@@ -277,6 +277,7 @@ public struct SearchView: View {
                 }
             }
             .focusable()
+            .focusEffectDisabled()
             .focused($focusedField, equals: .resultsList)
             .onKeyPress(.upArrow) {
                 moveResultSelection(by: -1, proxy: proxy)
