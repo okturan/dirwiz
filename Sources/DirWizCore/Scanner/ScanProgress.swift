@@ -142,7 +142,16 @@ public final class ScanProgress: @unchecked Sendable {
         currentPath = snapshot.path
 
         // Bump layout revision every 10 publishes (≈2.5s) or when forced at scan end.
-        if snapshot.publishCount % 10 == 0 || forceLayoutRevision {
+        // Early-churn guard (plan 039): with live tree building, the first bumps would
+        // otherwise lay out a near-empty tree whose rectangles then violently reshuffle
+        // as real content arrives. Suppress the periodic bump until the scan has *some*
+        // shape to show — 1,000 files scanned (fast, file-dense volumes get a live map
+        // almost immediately) or 20 publishes/≈5s elapsed (slow scans still get a bump
+        // once something exists, rather than waiting on a files count that may never
+        // arrive quickly). The completion force-bump is untouched so the final layout
+        // always reflects the finished tree.
+        let hasMeaningfulContent = snapshot.files >= 1_000 || snapshot.publishCount >= 20
+        if (snapshot.publishCount % 10 == 0 && hasMeaningfulContent) || forceLayoutRevision {
             treeLayoutRevision &+= 1
         }
     }

@@ -351,6 +351,19 @@ extension AppState {
         }
     }
 
+    /// The app's default materialization strategy for a cold, whole-volume scan (plan
+    /// 039): build the shared tree live (immediate) so the treemap/tree table fill in as
+    /// the scan runs, instead of appearing all at once at the end (deferred). This
+    /// inverts `FileScanner.init`'s own default, which favors deferred for callers (the
+    /// CLI) that don't materialize incrementally into a displayed tree. `DIRWIZ_DEFER_TREE`
+    /// still wins when set explicitly, in both directions: `0` is immediate (matching the
+    /// app default, so it's a no-op here) and anything else forces deferred — the instant
+    /// rollback for A/B debugging if immediate ever misbehaves on an exotic volume.
+    private static var appDefersTreeMaterialization: Bool {
+        guard let envValue = ProcessInfo.processInfo.environment["DIRWIZ_DEFER_TREE"] else { return false }
+        return envValue != "0"
+    }
+
     /// Today's full enumeration — byte-for-byte the pre-warm-start flow. Reused both as
     /// the direct path (no cache, or "Full Rescan") and as the fallback whenever a warm
     /// attempt can't be trusted. `coldFallbackReason` is only set when this cold scan
@@ -366,7 +379,10 @@ extension AppState {
         // here on is exactly what the *next* warm start needs to replay.
         let eventIdAtScanStart = FSEventsJournal.currentEventId()
 
-        let scanner = FileScanner(computeBundleSizes: false)
+        let scanner = FileScanner(
+            computeBundleSizes: false,
+            deferTreeMaterialization: Self.appDefersTreeMaterialization
+        )
         let tree = FileTree()
         let preservingStaleView = staleViewAsOf != nil
 

@@ -95,13 +95,15 @@ DirWiz stores scan results in a flat array tree with a shared string pool. This 
 
 The app path favors quick first results. It skips inline recursive sizing for bundles, renders the tree, then computes bundle sizes as a bounded background task. The CLI defaults to exact inline bundle sizing unless `DIRWIZ_SKIP_BUNDLE_SIZES=1` is set.
 
+The app also builds the tree live during a cold scan (immediate materialization): the treemap and tree table fill in as directories are scanned instead of appearing all at once at the end. The CLI scans deferred by default (nodes accumulate off to the side and the tree is installed in one shot at the end) since it has no live view to fill in. `DIRWIZ_DEFER_TREE` overrides either default explicitly — `0` forces immediate, anything else forces deferred — so it doubles as the app's instant rollback to the old all-at-once behavior if immediate mode ever misbehaves on an exotic volume.
+
 After a scan completes, the app saves the tree to a small on-disk cache keyed by the scanned root path. The next time you scan that same volume, if the cache is still valid it replays the FSEvents journal since the cache was saved, patches just the directories that actually changed, and republishes the tree in a fraction of the time a full scan would take. Anything that makes the replay untrustworthy — a poisoned journal (e.g. the volume was unmounted, or too much changed to enumerate cheaply), a stale/corrupt cache, or a changed path that can't be resolved — falls back to an ordinary cold scan automatically; nothing about the cold path changes. Use the "Full Rescan" button next to "Scan Volume" to bypass the cache and force a cold scan on demand (shown only when a cache exists), or set `DIRWIZ_NO_WARM_START=1` to disable warm start entirely. This is app-only; the CLI's `scan` subcommand always scans cold.
 
 Useful scan toggles:
 
 ```bash
 DIRWIZ_SCAN_WORKERS=6
-DIRWIZ_DEFER_TREE=0
+DIRWIZ_DEFER_TREE=1   # app: force deferred (default is immediate); CLI: force immediate (default is deferred)
 DIRWIZ_SKIP_BUNDLE_SIZES=1
 DIRWIZ_BUNDLE_WORKERS=4
 DIRWIZ_BULK_BUFFER_BYTES=262144
