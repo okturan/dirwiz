@@ -199,6 +199,9 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if !appState.fsChanges.isEmpty {
+                changeBadge
+            }
             if let tree = appState.fileTree {
                 Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
                     .font(.caption)
@@ -242,6 +245,35 @@ struct ContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
+    }
+
+    /// Live "N folders changed · Refresh" row shown inside `scanSummary` once
+    /// `FSEventsMonitor` (started via Insights' "Watch Changes") has accumulated changes.
+    /// One click applies them in place via `AppState.applyAccumulatedChanges()` — never
+    /// automatic (plan 037, decision 3a). Count = `fsChanges.count`, the per-directory
+    /// summaries the monitor tracks — the same set `applyAccumulatedChanges` feeds into
+    /// its splice before any outermost-root collapsing.
+    private var changeBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.caption)
+                .foregroundStyle(.blue)
+            Text("\(appState.fsChanges.count) folders changed")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if appState.isApplyingChanges {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Button("Refresh") {
+                    Task { await appState.applyAccumulatedChanges() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(!appState.canStartHeavyTask(.applyChanges))
+            }
+        }
     }
 
     // MARK: - Footer

@@ -18,6 +18,7 @@ struct AnalysisCoordinationTests {
         #expect(state.canStartHeavyTask(.apfsQuery))
         #expect(state.canStartHeavyTask(.cloneCheck))
         #expect(state.canStartHeavyTask(.bundleSizing))
+        #expect(state.canStartHeavyTask(.applyChanges))
 
         state.hardlink.isHardlinkScanRunning = true
         #expect(!state.canStartHeavyTask(.hardlinkScan))
@@ -27,6 +28,7 @@ struct AnalysisCoordinationTests {
         #expect(!state.canStartHeavyTask(.apfsQuery))
         #expect(!state.canStartHeavyTask(.cloneCheck))
         #expect(!state.canStartHeavyTask(.bundleSizing))
+        #expect(!state.canStartHeavyTask(.applyChanges))
 
         state.hardlink.isHardlinkScanRunning = false
         state.isAPFSQueryRunning = true
@@ -36,6 +38,18 @@ struct AnalysisCoordinationTests {
         #expect(!state.canStartHeavyTask(.iCloudAnalysis))
         #expect(!state.canStartHeavyTask(.cloneCheck))
         #expect(!state.canStartHeavyTask(.bundleSizing))
+        #expect(!state.canStartHeavyTask(.applyChanges))
+
+        state.isAPFSQueryRunning = false
+        state.isApplyingChanges = true
+        #expect(!state.canStartHeavyTask(.duplicateScan))
+        #expect(!state.canStartHeavyTask(.hardlinkScan))
+        #expect(!state.canStartHeavyTask(.spaceAnalysis))
+        #expect(!state.canStartHeavyTask(.iCloudAnalysis))
+        #expect(!state.canStartHeavyTask(.apfsQuery))
+        #expect(!state.canStartHeavyTask(.cloneCheck))
+        #expect(!state.canStartHeavyTask(.bundleSizing))
+        #expect(!state.canStartHeavyTask(.applyChanges))
     }
 
     @MainActor
@@ -68,6 +82,7 @@ struct AnalysisCoordinationTests {
         state.isAPFSQueryRunning = true
         state.isCloneCheckRunning = true
         state.isBundleSizingRunning = true
+        state.isApplyingChanges = true
 
         state.resetForNewScan()
 
@@ -86,6 +101,7 @@ struct AnalysisCoordinationTests {
         #expect(!state.isAPFSQueryRunning)
         #expect(!state.isCloneCheckRunning)
         #expect(!state.isBundleSizingRunning)
+        #expect(!state.isApplyingChanges)
         #expect(state.activeHeavyTask == nil)
     }
 

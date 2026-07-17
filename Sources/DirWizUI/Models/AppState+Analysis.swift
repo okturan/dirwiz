@@ -1,5 +1,8 @@
 import Foundation
 import DirWizCore
+import OSLog
+
+private let log = Logger(subsystem: "com.dirwiz", category: "AppState")
 
 extension AppState {
     private enum SpaceAnalysisStepResult {
@@ -146,6 +149,74 @@ extension AppState {
             fsEventsMonitor = monitor
             isFSMonitoringActive = true
         }
+    }
+
+    /// Apply the accumulated FSEvents changes to the displayed tree incrementally — the
+    /// "N folders changed · Refresh" badge's action (plan 037, user decision 3a: no
+    /// auto-apply/debounced live mode, ever — the view only changes on an explicit click).
+    /// Reuses the same `rescanSubtrees` splice engine `commitWarmStart` (AppState+Scan.swift)
+    /// uses for warm start, but deliberately skips that flow's `scanProgress.isScanning` /
+    /// `staleViewAsOf` plumbing: this patch is meant to feel instantaneous, and blanking the
+    /// detail pane while it runs would defeat that. `isApplyingChanges` is the one honest
+    /// signal it needs — it drives the badge's spinner and slots into the existing
+    /// `HeavyTaskKind` exclusivity matrix via `.applyChanges`.
+    ///
+    /// No threshold gating: this is user-initiated and bounded by their own click, so an
+    /// unusually large accumulated set just makes this one splice slower rather than being
+    /// refused outright (unlike warm start's percentage-of-tree cold-fallback threshold).
+    public func applyAccumulatedChanges() async {
+        guard canStartHeavyTask(.applyChanges), !fsChanges.isEmpty, let tree = fileTree else { return }
+
+        let token = scanToken
+        isApplyingChanges = true
+
+        let capture = ExplorationCapture.capture(
+            tree: tree, selectedIndex: selectedNodeIndex, treemapRootIndex: navigation.treemapRootIndex
+        )
+        let rootPath = tree.path(at: 0)
+        let targets = fsChanges.map(\.path)
+
+        // Captured BEFORE the splice — same discipline as the cold-scan cache write-back
+        // (AppState+Scan.swift): any change landing during the splice below is covered by
+        // the *next* refresh's replay/monitor window rather than lost (029's
+        // overlap-is-idempotent rationale).
+        let eventIdBeforeSplice = FSEventsJournal.currentEventId()
+
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let report = await scanner.rescanSubtrees(targets, tree: tree, progress: progress)
+
+        // A new scan (warm or cold) superseded this apply while the splice was running —
+        // its own reset already cleared fsChanges/isApplyingChanges, so just step aside.
+        guard scanToken == token else { return }
+
+        // Failure honesty (same rule `commitWarmStart` applies to its own patch): an
+        // unresolved path, or every target collapsing to the tree root because nothing
+        // narrower survived resolution, means the patch can't be trusted — prefer a full
+        // refresh over publishing a half-applied tree. `startFullRescan()` is 036-safe.
+        guard report.unresolvedPaths.isEmpty, !report.rescannedRoots.contains(rootPath) else {
+            isApplyingChanges = false
+            startFullRescan()
+            return
+        }
+
+        invalidateAfterTreeMutation(restoring: capture)
+        computeExtensionStats()
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        lastScanSummary = ScanSummaryComposer.warm(foldersRefreshed: report.rescannedRoots.count, seconds: elapsed)
+
+        fsChanges = []
+        fsEventsMonitor?.clearChanges()
+
+        do {
+            try TreeCache.save(tree: tree, lastEventId: eventIdBeforeSplice)
+        } catch {
+            log.error("TreeCache save failed after applying accumulated changes: \(error.localizedDescription, privacy: .public)")
+        }
+
+        isApplyingChanges = false
     }
 
     // MARK: - Storage Trends

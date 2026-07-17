@@ -118,6 +118,14 @@ public final class AppState {
     public var fsChanges: [DirectoryChangeSummary] = []
     public var isFSMonitoringActive: Bool = false
 
+    /// True while `applyAccumulatedChanges()` (AppState+Analysis.swift) is splicing the
+    /// accumulated `fsChanges` into the displayed tree — drives the change badge's spinner
+    /// and slots into `HeavyTaskKind.applyChanges` for the shared exclusivity matrix.
+    /// Deliberately NOT `scanProgress.isScanning`: that flag also blanks the detail pane
+    /// (`ContentView`'s `isScanning && staleViewAsOf == nil` gate), which would defeat the
+    /// point of a patch meant to feel instantaneous and keep the tree browsable throughout.
+    public var isApplyingChanges: Bool = false
+
     // MARK: - Storage Trends
 
     /// Historical scan summaries.
@@ -216,6 +224,7 @@ public final class AppState {
         case apfsQuery
         case cloneCheck
         case bundleSizing
+        case applyChanges
 
         var statusText: String {
             switch self {
@@ -233,6 +242,8 @@ public final class AppState {
                 return "Checking APFS clones"
             case .bundleSizing:
                 return "Resolving app bundle sizes"
+            case .applyChanges:
+                return "Applying filesystem changes"
             }
         }
 
@@ -247,6 +258,7 @@ public final class AppState {
             case .apfsQuery: return state.isAPFSQueryRunning
             case .cloneCheck: return state.isCloneCheckRunning
             case .bundleSizing: return state.isBundleSizingRunning
+            case .applyChanges: return state.isApplyingChanges
             }
         }
     }
@@ -332,6 +344,7 @@ public final class AppState {
         fsEventsMonitor = nil
         fsChanges = []
         isFSMonitoringActive = false
+        isApplyingChanges = false
     }
 }
 
