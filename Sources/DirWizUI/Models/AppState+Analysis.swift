@@ -210,9 +210,12 @@ extension AppState {
                 freedSize: 0, success: false, error: "No tree"
             )
         }
+        let capture = ExplorationCapture.capture(
+            tree: tree, selectedIndex: selectedNodeIndex, treemapRootIndex: navigation.treemapRootIndex
+        )
         let result = await TreeActions().trash(nodeIndex: index, tree: tree)
         if result.success {
-            invalidateAfterTreeMutation()
+            invalidateAfterTreeMutation(restoring: capture)
         }
         return result
     }
@@ -220,26 +223,47 @@ extension AppState {
     /// Batch-trash by path with ONE invalidation pass at the end.
     public func batchTrashPaths(_ paths: [String]) async -> BatchTrashResult {
         guard let tree = fileTree else { return BatchTrashResult(results: []) }
+        let capture = ExplorationCapture.capture(
+            tree: tree, selectedIndex: selectedNodeIndex, treemapRootIndex: navigation.treemapRootIndex
+        )
         let result = await TreeActions().batchTrash(paths: paths, tree: tree)
         if result.successCount > 0 {
-            invalidateAfterTreeMutation()
+            invalidateAfterTreeMutation(restoring: capture)
         }
         return result
     }
 
-    /// Reset all index-keyed overlay state and bump the layout revision after a
-    /// tree mutation. `removeSubtree` renumbers every node index, so anything
-    /// index-keyed (search results, recency factors, temporal diff arrays) is stale
-    /// and must be cleared. Shared by every tree-mutating action so the reset list
-    /// can't drift between callers.
-    private func invalidateAfterTreeMutation() {
-        selectedNodeIndex = nil
-        navigation.reset()
+    /// Reset all index-keyed OVERLAY state (search results, recency factors, temporal
+    /// diff arrays — all recomputable, not part of "where was I") and bump the layout
+    /// revision after a tree mutation. When `capture` was taken (via `ExplorationCapture`)
+    /// BEFORE the mutation, also restores the user's interactive position — selection and
+    /// treemap root/path — by re-resolving the captured paths against the post-mutation
+    /// tree: paths survive `removeSubtree`'s index renumbering, indices don't. A surviving
+    /// node keeps its (remapped) index; a deleted node's nearest surviving ancestor takes
+    /// its place. Back/forward navigation stacks always clear — they're index histories
+    /// with no path equivalent, and preserving them is complexity without user value.
+    /// Shared by every tree-mutating action so the reset+restore list can't drift between
+    /// callers.
+    private func invalidateAfterTreeMutation(restoring capture: ExplorationCapture? = nil) {
         search.reset()
         temporalDiff.reset()
         recencyFactors = []
         recencyGeneration &+= 1
         isRecencyOverlayEnabled = false
+
+        navigation.backStack.removeAll()
+        navigation.forwardStack.removeAll()
+
+        if let tree = fileTree {
+            selectedNodeIndex = capture?.selectedPath.flatMap { ExplorationCapture.resolveOrAncestor($0, tree: tree) }
+            let resolvedRoot = capture?.treemapRootPath.flatMap { ExplorationCapture.resolveOrAncestor($0, tree: tree) } ?? 0
+            setTreemapRoot(resolvedRoot, recordHistory: false)
+        } else {
+            selectedNodeIndex = nil
+            navigation.treemapRootIndex = 0
+            navigation.treemapPath = [0]
+        }
+
         scanProgress.publishCounters(forceLayoutRevision: true)
     }
 

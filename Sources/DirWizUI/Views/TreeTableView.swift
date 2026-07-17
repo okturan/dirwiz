@@ -9,6 +9,11 @@ public struct TreeTableView: View {
     @State private var sortKey: TreeSortKey = .size
     @State private var sortAscending: Bool = false
     @State private var expandedFolders: Set<UInt32> = []
+    /// Path-keyed mirror of `expandedFolders`, kept in sync on every user-initiated
+    /// expand/collapse. Paths survive `removeSubtree`'s index renumbering, so after any
+    /// tree mutation (trash, warm-start splice, ...) `expandedFolders` is rebuilt from this
+    /// set — see the `treeLayoutRevision` handler below — instead of being wiped wholesale.
+    @State private var expandedPaths: Set<String> = []
     @State private var scrollGeneration: UInt64 = 0
     @State private var minSizeFilter: UInt64 = 0
     @State private var columnStore = ColumnWidthsStore(specs: TreeTableColumns.specs, storageKey: TreeTableColumns.storageKey)
@@ -77,7 +82,14 @@ public struct TreeTableView: View {
                 .onChange(of: sortKey) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onChange(of: sortAscending) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onChange(of: minSizeFilter) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
-                .onChange(of: appState.scanProgress.treeLayoutRevision) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
+                .onChange(of: appState.scanProgress.treeLayoutRevision) { _, _ in
+                    // Every tree mutation (trash, warm-start splice, ...) bumps this revision
+                    // and renumbers indices. Rebuild expandedFolders from the path-keyed
+                    // expandedPaths rather than wiping it: survivors stay expanded, deleted
+                    // folders drop out (descendPath just fails to find them).
+                    expandedFolders = Self.remapExpansion(paths: expandedPaths, tree: tree)
+                    cachedItems = flattenedVisibleItems(tree: tree)
+                }
                 .onChange(of: expandedFolders) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onKeyPress(.space) {
                     guard let sel = appState.selectedNodeIndex,
@@ -131,8 +143,10 @@ public struct TreeTableView: View {
                 withAnimation(.easeInOut(duration: 0.12)) {
                     if expandedFolders.contains(item.id) {
                         expandedFolders.remove(item.id)
+                        expandedPaths.remove(tree.path(at: item.id))
                     } else {
                         expandedFolders.insert(item.id)
+                        expandedPaths.insert(tree.path(at: item.id))
                     }
                 }
             }
@@ -163,13 +177,10 @@ public struct TreeTableView: View {
                     let size = tree.node(at: item.id)?.displaySize ?? 0
                     confirmTrash(name: item.name, size: size) {
                         Task {
-                            let result = await appState.trashNode(at: item.id)
-                            if result.success {
-                                // Node indices are rebuilt after subtree removal, so reset the
-                                // local expansion cache before rebuilding visible items.
-                                expandedFolders.removeAll()
-                                cachedItems = flattenedVisibleItems(tree: tree)
-                            }
+                            // On success, AppState bumps treeLayoutRevision, which the
+                            // .onChange handler above uses to remap expandedFolders and
+                            // rebuild cachedItems — nothing to do here on either outcome.
+                            _ = await appState.trashNode(at: item.id)
                         }
                     }
                 }
@@ -439,7 +450,8 @@ public struct TreeTableView: View {
         guard let selected = appState.selectedNodeIndex else { return }
         if expandedFolders.contains(selected) {
             withAnimation(.easeInOut(duration: 0.12)) {
-                _ = expandedFolders.remove(selected)
+                expandedFolders.remove(selected)
+                expandedPaths.remove(tree.path(at: selected))
             }
             return
         }
@@ -461,7 +473,8 @@ public struct TreeTableView: View {
         guard !nodes[i].isBundle else { return }
         if !expandedFolders.contains(selected) {
             withAnimation(.easeInOut(duration: 0.12)) {
-                _ = expandedFolders.insert(selected)
+                expandedFolders.insert(selected)
+                expandedPaths.insert(tree.path(at: selected))
             }
         } else {
             let items = cachedItems.isEmpty ? flattenedVisibleItems(tree: tree) : cachedItems
@@ -474,6 +487,23 @@ public struct TreeTableView: View {
     }
 
     // MARK: - Helpers
+
+    /// Rebuild an index-keyed expansion set from path-keyed state after a tree mutation
+    /// that renumbers indices. Resolves each path strictly (no ancestor fallback, unlike
+    /// `ExplorationCapture.resolveOrAncestor`) — a folder that no longer exists simply
+    /// drops out of the result, which is exactly "collapsed because it's gone".
+    static func remapExpansion(paths: Set<String>, tree: FileTree) -> Set<UInt32> {
+        let snapshot = tree.pathBuildingSnapshot()
+        var result: Set<UInt32> = []
+        result.reserveCapacity(paths.count)
+        for path in paths {
+            guard let components = PathResolution.relativeComponents(of: path, rootPath: snapshot.rootPath),
+                  let index = FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool)
+            else { continue }
+            result.insert(index)
+        }
+        return result
+    }
 
     private func rootChildren(tree: FileTree, nodes: [FileNode]) -> [TreeNodeItem] {
         // depth: -1 so children are created at depth 0.

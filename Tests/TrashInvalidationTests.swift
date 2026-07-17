@@ -7,6 +7,10 @@ import Foundation
 /// renumbers every node index, so `trashNode` must invalidate all index-keyed
 /// overlay state (search results, recency factors, temporal diff arrays) and
 /// force a treemap layout revision bump.
+///
+/// Also pins the "preserve exploration on delete" contract: selection and treemap root
+/// are path-captured before the mutation and restored (remapped, or moved to the nearest
+/// surviving ancestor) afterward, while back/forward navigation stacks always clear.
 @MainActor
 @Suite("Trash Invalidation Tests")
 struct TrashInvalidationTests {
@@ -39,6 +43,15 @@ struct TrashInvalidationTests {
         return UInt32(idx)
     }
 
+    /// Index of the node whose path ends with `suffix` (e.g. "/docs" or "/images/photo.jpg").
+    private func nodeIndex(in tree: FileTree, pathSuffix suffix: String) -> UInt32? {
+        let nodes = tree.nodesSnapshot()
+        for i in nodes.indices where tree.path(at: UInt32(i)).hasSuffix(suffix) {
+            return UInt32(i)
+        }
+        return nil
+    }
+
     @Test("Successful trash bumps layout revision and clears index-keyed overlays")
     func successfulTrashInvalidatesOverlays() async throws {
         let (cleanup, state) = try await makeScannedFixture()
@@ -67,6 +80,7 @@ struct TrashInvalidationTests {
         #expect(!state.isRecencyOverlayEnabled)
         #expect(state.temporalDiff.temporalDiffKinds.isEmpty)
         #expect(state.temporalDiff.temporalDiffStrengths.isEmpty)
+        // No selection was captured (none was set before trashing), so none is restored.
         #expect(state.selectedNodeIndex == nil)
     }
 
@@ -143,5 +157,125 @@ struct TrashInvalidationTests {
             #expect(state.recencyGeneration == generationBefore)
             #expect(state.isRecencyOverlayEnabled)
         }
+    }
+
+    // MARK: - Exploration Preservation Contract
+
+    @Test("Selection on a surviving node is preserved (remapped) across an unrelated trash")
+    func selectionPreservedAfterTrash() async throws {
+        let (cleanup, state) = try await makeScannedFixture()
+        defer { cleanup() }
+
+        guard let tree = state.fileTree,
+              let notesIndex = nodeIndex(in: tree, pathSuffix: "/docs/notes.md"),
+              let photoIndex = nodeIndex(in: tree, pathSuffix: "/images/photo.jpg") else {
+            Issue.record("Expected docs/notes.md and images/photo.jpg in the scanned tree")
+            return
+        }
+        let notesPath = tree.path(at: notesIndex)
+        state.selectedNodeIndex = notesIndex
+
+        let result = await state.trashNode(at: photoIndex)
+        #expect(result.success, "Trash of a real temp file should succeed: \(result.error ?? "")")
+
+        let selected = try #require(state.selectedNodeIndex, "Selection should survive an unrelated trash")
+        #expect(tree.path(at: selected) == notesPath)
+    }
+
+    @Test("Selecting the node that gets trashed moves selection to its surviving parent")
+    func selectionMovesToAncestorWhenSelectedNodeIsTrashed() async throws {
+        let (cleanup, state) = try await makeScannedFixture()
+        defer { cleanup() }
+
+        guard let tree = state.fileTree,
+              let photoIndex = nodeIndex(in: tree, pathSuffix: "/images/photo.jpg"),
+              let imagesIndex = nodeIndex(in: tree, pathSuffix: "/images") else {
+            Issue.record("Expected images/photo.jpg in the scanned tree")
+            return
+        }
+        let imagesPath = tree.path(at: imagesIndex)
+        state.selectedNodeIndex = photoIndex
+
+        let result = await state.trashNode(at: photoIndex)
+        #expect(result.success, "Trash of a real temp file should succeed: \(result.error ?? "")")
+
+        let selected = try #require(state.selectedNodeIndex, "Selection should fall back to the surviving parent")
+        #expect(tree.path(at: selected) == imagesPath)
+    }
+
+    @Test("Treemap root on a surviving directory is preserved (remapped) across an unrelated trash, and back/forward stacks clear")
+    func treemapRootPreservedAfterTrash() async throws {
+        let (cleanup, state) = try await makeScannedFixture()
+        defer { cleanup() }
+
+        guard let tree = state.fileTree,
+              let docsIndex = nodeIndex(in: tree, pathSuffix: "/docs"),
+              let imagesIndex = nodeIndex(in: tree, pathSuffix: "/images"),
+              let photoIndex = nodeIndex(in: tree, pathSuffix: "/images/photo.jpg") else {
+            Issue.record("Expected docs and images in the scanned tree")
+            return
+        }
+        let docsPath = tree.path(at: docsIndex)
+
+        // Two navigations populate backStack, so we can assert it's cleared afterward.
+        state.setTreemapRoot(imagesIndex)
+        state.setTreemapRoot(docsIndex)
+        #expect(!state.navigation.backStack.isEmpty)
+
+        let result = await state.trashNode(at: photoIndex)
+        #expect(result.success, "Trash of a real temp file should succeed: \(result.error ?? "")")
+
+        #expect(tree.path(at: state.navigation.treemapRootIndex) == docsPath)
+        #expect(state.navigation.treemapPath.first == 0)
+        #expect(state.navigation.treemapPath.last == state.navigation.treemapRootIndex)
+        #expect(state.navigation.backStack.isEmpty)
+        #expect(state.navigation.forwardStack.isEmpty)
+    }
+
+    @Test("Treemap root on the trashed directory itself falls back to its surviving parent")
+    func treemapRootFallsBackToAncestorWhenRootIsTrashed() async throws {
+        let (cleanup, state) = try await makeScannedFixture()
+        defer { cleanup() }
+
+        guard let tree = state.fileTree, let docsIndex = nodeIndex(in: tree, pathSuffix: "/docs") else {
+            Issue.record("Expected docs in the scanned tree")
+            return
+        }
+        state.setTreemapRoot(docsIndex)
+
+        let result = await state.trashNode(at: docsIndex)
+        #expect(result.success, "Trash of a real temp directory should succeed: \(result.error ?? "")")
+
+        // docs' parent is the scan root itself.
+        #expect(state.navigation.treemapRootIndex == 0)
+        #expect(state.navigation.treemapPath == [0])
+        #expect(state.navigation.backStack.isEmpty)
+        #expect(state.navigation.forwardStack.isEmpty)
+    }
+
+    @Test("batchTrashPaths also preserves surviving selection and treemap root")
+    func batchTrashPathsPreservesExplorationState() async throws {
+        let (cleanup, state) = try await makeScannedFixture()
+        defer { cleanup() }
+
+        guard let tree = state.fileTree,
+              let notesIndex = nodeIndex(in: tree, pathSuffix: "/docs/notes.md"),
+              let docsIndex = nodeIndex(in: tree, pathSuffix: "/docs"),
+              let photoIndex = nodeIndex(in: tree, pathSuffix: "/images/photo.jpg") else {
+            Issue.record("Expected docs/notes.md and images/photo.jpg in the scanned tree")
+            return
+        }
+        let notesPath = tree.path(at: notesIndex)
+        let docsPath = tree.path(at: docsIndex)
+        state.selectedNodeIndex = notesIndex
+        state.setTreemapRoot(docsIndex)
+
+        let photoPath = tree.path(at: photoIndex)
+        let batch = await state.batchTrashPaths([photoPath])
+        #expect(batch.successCount == 1, "Trash of a real temp file should succeed: \(batch.results.map(\.error))")
+
+        let selected = try #require(state.selectedNodeIndex)
+        #expect(tree.path(at: selected) == notesPath)
+        #expect(tree.path(at: state.navigation.treemapRootIndex) == docsPath)
     }
 }
