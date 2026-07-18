@@ -187,9 +187,19 @@ extension AppState {
         let startTime = CFAbsoluteTimeGetCurrent()
         let report = await scanner.rescanSubtrees(targets, tree: tree, progress: progress)
 
-        // A new scan (warm or cold) superseded this apply while the splice was running —
-        // its own reset already cleared fsChanges/isApplyingChanges, so just step aside.
-        guard scanToken == token else { return }
+        // A new scan (warm or cold) superseded this apply while the splice was running.
+        // In practice this can no longer happen — `AppState+Scan.swift`'s `startScan`
+        // now declines to start any new scan while `isApplyingChanges` is true, the
+        // symmetric counterpart of `canStartHeavyTask` refusing to start this apply while
+        // a scan is running — so `scanToken` can't move during this `await`. Repairing
+        // `isApplyingChanges` here anyway is cheap insurance: without it, an unforeseen
+        // path to this guard would strand the flag true forever, permanently blocking
+        // every `HeavyTaskKind` (`.applyChanges` is one of the cases `canStartHeavyTask`
+        // checks) rather than just this one apply.
+        guard scanToken == token else {
+            isApplyingChanges = false
+            return
+        }
 
         // Failure honesty (same rule `commitWarmStart` applies to its own patch): an
         // unresolved path, or every target collapsing to the tree root because nothing

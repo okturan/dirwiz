@@ -750,6 +750,11 @@ struct FileScannerMockTests {
         // The tree must have at least the root node and no out-of-bounds parent references.
         #expect(tree.count >= 1, "Cancelled scan must still produce at least root node")
         #expect(progress.scanComplete, "Scan should be marked complete even when cancelled")
+        // Plan 040 pin: a cancelled scan must not strand `isScanning == true` — `scan()`'s
+        // finalization block runs unconditionally after the worker pool drains, cancelled
+        // or not, so this must always clear. If a future change to `scan()` adds an early
+        // return before that finalization, this is the regression it would trip.
+        #expect(!progress.isScanning, "isScanning must be cleared even when the scan was cancelled")
 
         for i in 1..<tree.count {
             let node = tree.nodes[i]

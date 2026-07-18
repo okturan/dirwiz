@@ -89,12 +89,24 @@ public struct VolumePickerView: View {
         }
     }
 
+    /// Primary "Scan Volume" + subordinate "Full Rescan" affordances. While a scan runs,
+    /// the primary button swaps its label for a live running state (a small `ProgressView`
+    /// plus text distinguishing "Checking changes…" — the FSEvents replay-wait,
+    /// `appState.isPreparingScan` — from generic "Scanning…" once real enumeration has
+    /// begun) instead of just going gray: a disabled-with-no-explanation button is exactly
+    /// what read as "does nothing" to the user this plan exists for.
     private var scanButton: some View {
         VStack(spacing: 6) {
             Button(action: onScan) {
                 HStack {
-                    Image(systemName: "magnifyingglass")
-                    Text("Scan Volume")
+                    if appState.scanProgress.isScanning {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(appState.isPreparingScan ? "Checking changes…" : "Scanning…")
+                    } else {
+                        Image(systemName: "magnifyingglass")
+                        Text("Scan Volume")
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -104,12 +116,13 @@ public struct VolumePickerView: View {
 
             if fullRescanAvailable {
                 Button(action: onFullRescan) {
-                    Text("Full Rescan")
-                        .frame(maxWidth: .infinity)
+                    Label("Full Rescan", systemImage: "arrow.clockwise")
+                        .font(.caption)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
                 .disabled(appState.scanProgress.isScanning)
-                .help("Ignore the cached scan and re-enumerate the whole volume from scratch")
+                .help("Ignore the last scan's cache and re-enumerate everything")
             }
         }
         .padding(.horizontal, 14)

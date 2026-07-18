@@ -83,6 +83,18 @@ extension AppState {
         scanSession.cancelActiveScan()
     }
 
+    /// True while a scan flow has published its "preparing" `ScanProgress` (see
+    /// `startScan`'s supervisor doc comment) but hasn't yet registered a real
+    /// `FileScanner` — i.e. mid cache-lookup or FSEvents replay-wait. Distinguishes the
+    /// sidebar/button's honest "Checking what changed…" sub-state from "Scanning…" once
+    /// real enumeration work has actually begun, using only existing bookkeeping
+    /// (`scanSession.activeScanner` is nil until `markStarted` registers one, and
+    /// `cancelActiveScan()` now clears it immediately rather than leaving a stale
+    /// reference behind).
+    public var isPreparingScan: Bool {
+        scanProgress.isScanning && scanSession.activeScanner == nil
+    }
+
     /// Cheap existence check (no decode) for whether a warm-start cache is on disk for
     /// `path` — lets the UI show the "Full Rescan" affordance without paying for a full
     /// `TreeCache.load`.
@@ -140,18 +152,52 @@ extension AppState {
         startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: false, preloadedCache: cached)
     }
 
-    /// Entry point for every scan trigger. If a cache exists for `path` and warm start
-    /// isn't disabled/forced off, attempts to replay the FSEvents journal and patch just
-    /// what changed instead of a full enumeration. Any anomaly — no cache, a poisoned or
-    /// oversized journal replay, an unresolved or root-level rescan target — falls back
-    /// to exactly the cold flow below, unmodified.
+    /// Entry point for every scan trigger (incl. `restoreOnLaunch`'s auto-refresh). If a
+    /// cache exists for `path` and warm start isn't disabled/forced off, attempts to
+    /// replay the FSEvents journal and patch just what changed instead of a full
+    /// enumeration. Any anomaly — no cache, a poisoned or oversized journal replay, an
+    /// unresolved or root-level rescan target — falls back to exactly the cold flow
+    /// below, unmodified.
+    ///
+    /// **Scan-flow supervision invariant**: after any scan flow exits by ANY path
+    /// (success, supersession, cancellation, warm→cold handoff, error), exactly one
+    /// holds — (a) a newer flow has since published its own fresh `ScanProgress`, or (b)
+    /// the currently-published `scanProgress.isScanning == false` and the sidebar
+    /// reflects a terminal state (complete / cancelled / summary). This is enforced
+    /// structurally, not per-path: entering this function ALWAYS, synchronously and
+    /// unconditionally, bumps `scanSession`'s token and publishes a brand-new
+    /// `ScanProgress` (the "preparing" state below) before doing anything else — so every
+    /// later token-mismatch guard anywhere in the scan pipeline (`commitWarmStart`,
+    /// `beginColdScan`, `beginDeferredBundleSizing`) is automatically safe: a mismatch can
+    /// only exist because a NEWER call to this same function already replaced
+    /// `scanProgress` with its own fresh instance first. New scan-adjacent flows must
+    /// preserve this pairing (never bump `scanSession.invalidate()` without republishing
+    /// `scanProgress` in the same synchronous step) and add a `ScanSupervisionTests` case.
     private func startScan(
         volumeURL: URL,
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
         forceCold: Bool,
         preloadedCache: TreeCache.Payload? = nil
     ) {
+        // Symmetric with `canStartHeavyTask(.applyChanges)` requiring `!isScanning`:
+        // `applyAccumulatedChanges` splices the live tree with its own untracked scratch
+        // scanner (not registered with `scanSession`), so rather than teaching this flow
+        // to reach in and cancel it, a scan just declines to start during that brief,
+        // user-initiated, bounded window. The user's click is simply a no-op; nothing to
+        // repair since nothing here gets published.
+        guard !isApplyingChanges else { return }
+
         scanSession.cancelActiveScan()
+        // A new scan flow always supersedes any bundle-sizing pass left over from a
+        // previous cold scan — it's scoped to that scan's own tree, which this flow is
+        // about to replace. `resetForNewScan()`/`resetTreeDerivedState()` already cancel
+        // it once a flow reaches that point, but doing it here too means a click landing
+        // during THIS flow's own replay-wait doesn't leave stale bundle-sizing state
+        // observable (and `canStartHeavyTask` blocked) for the whole wait.
+        bundleSizingTask?.cancel()
+        bundleSizingTask = nil
+        isBundleSizingRunning = false
+
         let path = volumeURL.path
 
         let cached: TreeCache.Payload?
@@ -164,6 +210,18 @@ extension AppState {
             cached = nil
         }
 
+        // Publish the "preparing" ScanProgress now, unconditionally — see the supervision
+        // invariant above. This is what makes the (possibly multi-second) FSEvents
+        // replay-wait below visible instead of silent: `isScanning` flips true and
+        // `currentPath` says what's happening immediately, before any async work has even
+        // started. `estimatedTotalItems` is left at its fresh default (0) so
+        // `fractionCompleted` reads indeterminate rather than a misleading 0%.
+        scanSession.invalidate()
+        scanProgress = ScanProgress()
+        scanProgress.isScanning = true
+        scanProgress.currentPath = cached != nil ? "Checking what changed…" : "Preparing scan…"
+        let attemptToken = scanSession.token
+
         guard let cached else {
             beginColdScan(
                 path: path,
@@ -172,12 +230,6 @@ extension AppState {
             )
             return
         }
-
-        // Bumps the session token now, before the async journal replay below, so a
-        // second startScan() call during that gap supersedes this attempt instead of
-        // racing it — the eventual commit (warm or cold) re-checks against this token.
-        scanSession.invalidate()
-        let attemptToken = scanSession.token
 
         Task {
             let replay = await FSEventsJournal.replay(root: path, since: cached.lastEventId)
