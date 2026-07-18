@@ -27,19 +27,24 @@ public struct ScanProgressView: View {
                     }
                 }
 
-                // Determinate progress bar if we have an estimate, indeterminate otherwise.
-                if let fraction = scanProgress.fractionCompleted {
+                // Determinate progress bar while the estimate is trustworthy (see
+                // `ScanProgress.fractionCompleted`), indeterminate otherwise — including
+                // mid-scan, if the estimate-undershoot latch trips. The percentage line is
+                // always present (a space when indeterminate) so that transition doesn't
+                // shift the stats grid below it.
+                let fraction = scanProgress.fractionCompleted
+                if let fraction {
                     ProgressView(value: fraction)
                         .progressViewStyle(.linear)
                         .animation(.linear(duration: 0.25), value: fraction)
-                    Text("\(Int(fraction * 100))%")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText())
                 } else {
                     ProgressView()
                         .progressViewStyle(.linear)
                 }
+                Text(fraction.map { "\(Int($0 * 100))%" } ?? " ")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
 
                 // Stats grid.
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {

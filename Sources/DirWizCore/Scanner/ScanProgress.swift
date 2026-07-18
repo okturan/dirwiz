@@ -44,6 +44,15 @@ public final class ScanProgress: @unchecked Sendable {
 
     @ObservationIgnored private let hot = Mutex(HotCounters())
 
+    /// One-way latch: set once `fractionCompleted` observes the estimate undershoot the
+    /// actual count (more items scanned than predicted). Read/written only from
+    /// `fractionCompleted` and `reset()`, both main-thread-only (see their `@MainActor`).
+    @ObservationIgnored private var estimateUndershot = false
+
+    /// Below this many items scanned, the estimate's plausibility is unknowable — matches
+    /// 039's damping spirit (wait for a meaningful sample before trusting a signal).
+    private static let minItemsForEstimate = 10_000
+
     /// Bumped every ~10 publishCounters() calls (≈2.5s) and once at scan end.
     /// Used as the treemap layout revision signal to avoid re-layout on every
     /// progress update (which would cancel in-flight layout tasks continuously).
@@ -60,13 +69,37 @@ public final class ScanProgress: @unchecked Sendable {
         filesScanned + directoriesScanned
     }
 
-    /// Progress fraction 0.0–1.0, or nil if estimate is unavailable.
-    /// Capped at 0.99 during scanning to avoid showing completion before finalization.
-    /// Shows 1.0 only after scan completes.
-    public var fractionCompleted: Double? {
+    /// Progress fraction 0.0–1.0, or nil if the estimate can't be trusted right now.
+    ///
+    /// `estimatedTotalItems` comes from volume-root inode statistics, which only loosely
+    /// correlate with the true item count on APFS — `BenchmarkTelemetry` measures this
+    /// error per run, and it is routinely large. Trusting it blindly caused a real
+    /// incident: the bar sat at "~50%" for a scan that was actually near done (the
+    /// estimate had overshot the real total), making a stranded scan look merely slow.
+    /// This computes bounded honesty instead of blind trust:
+    ///
+    /// - Below `minItemsForEstimate` items scanned, the estimate's quality is unknowable
+    ///   this early — return nil (indeterminate) rather than a number nobody can vouch for.
+    /// - While scanning, cap the result at 0.95: the bar keeps *moving* toward 95% but
+    ///   never claims near-done on estimate authority alone. Completion is signaled by the
+    ///   terminal state (`isScanning` flipping false), never by the estimate crossing 1.0.
+    /// - If the raw fraction ever exceeds 1.0 (the estimate undershot — more items turned
+    ///   up than predicted), the estimate has proven wrong for this scan: latch to
+    ///   indeterminate for the remainder so it doesn't flap back and forth as counts climb.
+    ///   `reset()` clears the latch for the next scan.
+    @MainActor public var fractionCompleted: Double? {
         guard estimatedTotalItems > 0 else { return nil }
         let raw = Double(totalItems) / Double(estimatedTotalItems)
-        return isScanning ? min(0.99, raw) : min(1.0, raw)
+
+        guard isScanning else { return min(1.0, raw) }
+        guard totalItems >= Self.minItemsForEstimate else { return nil }
+
+        if raw > 1.0 {
+            estimateUndershot = true
+        }
+        guard !estimateUndershot else { return nil }
+
+        return min(0.95, raw)
     }
 
     @MainActor public func reset() {
@@ -93,6 +126,7 @@ public final class ScanProgress: @unchecked Sendable {
         scannedAllocatedBytes = 0
         skippedDirectories = 0
         treeLayoutRevision = 0
+        estimateUndershot = false
     }
 
     /// Called from scanner background threads. Does NOT trigger @Observable.
