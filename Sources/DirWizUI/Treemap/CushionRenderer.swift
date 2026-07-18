@@ -60,10 +60,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     private var pendingLayoutTask: Task<Void, Never>?
     private var pendingLayoutSize: CGSize = .zero
 
-    /// Duration and node count of the most recent *scan-time* layout (only updated while
-    /// `isScanning` was true when that layout was computed) — feeds the adaptive skip in
-    /// `shouldSkipScanTimeRelayout()`. Reset in `invalidateLayout()` so a new scan doesn't
-    /// inherit a previous scan's timing.
+    /// Wall-clock completion time, duration, and node count of the most recent
+    /// *scan-time* layout (only updated while `isScanning` was true when that layout was
+    /// computed) — feeds the sparsity gate in `shouldSkipScanTimeRelayout()`. Reset in
+    /// `invalidateLayout()` so a new scan doesn't inherit a previous scan's timing.
+    private var lastScanTimeLayoutCompletedAt: CFAbsoluteTime?
     private var lastScanTimeLayoutDuration: TimeInterval = 0
     private var lastScanTimeLayoutNodeCount: Int = 0
 
@@ -204,6 +205,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             self.spatialGrid = grid
             self.instanceBufferDirty = true
             if isScanningNow {
+                self.lastScanTimeLayoutCompletedAt = CFAbsoluteTimeGetCurrent()
                 self.lastScanTimeLayoutDuration = duration
                 self.lastScanTimeLayoutNodeCount = snapshot.count
             }
@@ -234,15 +236,17 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         pendingLayoutTask = task
     }
 
-    /// Adaptive cadence (Plan 044): during an active scan, skip a periodic relayout when
-    /// the previous scan-time layout was expensive and the tree has barely grown since —
-    /// cheap insurance on top of the depth limit for the largest trees. Always false once
-    /// scanning ends, so the completion layout (the forced revision bump) is never
-    /// skipped.
+    /// Sparsity gate (Plan 044, PRIMARY control): during an active scan, skip a periodic
+    /// relayout unless both enough time and enough tree growth have passed since the
+    /// previous scan-time layout — see `ScanTimeLayoutBudget.shouldRunScanTimeLayout`.
+    /// Always false once scanning ends, so the completion layout (the forced revision
+    /// bump) is never skipped.
     func shouldSkipScanTimeRelayout() -> Bool {
         guard isScanning, let tree = currentFileTree else { return false }
-        return ScanTimeLayoutBudget.shouldSkip(
-            lastDuration: lastScanTimeLayoutDuration,
+        let elapsed = lastScanTimeLayoutCompletedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
+        return !ScanTimeLayoutBudget.shouldRunScanTimeLayout(
+            elapsedSinceLastLayout: elapsed,
+            lastLayoutDuration: lastScanTimeLayoutDuration,
             lastNodeCount: lastScanTimeLayoutNodeCount,
             currentNodeCount: tree.count
         )
@@ -252,6 +256,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         pendingLayoutTask?.cancel()
         pendingLayoutTask = nil
         currentViewportSize = .zero
+        lastScanTimeLayoutCompletedAt = nil
         lastScanTimeLayoutDuration = 0
         lastScanTimeLayoutNodeCount = 0
     }

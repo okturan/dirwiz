@@ -131,10 +131,11 @@ public struct CushionTreemapView: NSViewRepresentable {
         if treeChanged || rootChanged {
             coordinator.invalidateLayout()
         } else if revisionChanged {
-            // Plan 044: while a scan is in progress, a periodic revision bump can be
-            // adaptively skipped (previous scan-time layout was expensive and the tree
-            // has barely grown since). Never skipped once scanning ends, so the
-            // completion layout (the forced revision bump) always runs.
+            // Plan 044: while a scan is in progress, a periodic revision bump is sparsely
+            // gated — only allowed once enough time AND tree growth have passed since the
+            // previous scan-time layout (ScanTimeLayoutBudget.shouldRunScanTimeLayout).
+            // Never skipped once scanning ends, so the completion layout (the forced
+            // revision bump) always runs.
             if !coordinator.shouldSkipScanTimeRelayout() {
                 coordinator.invalidateLayout()
             }
