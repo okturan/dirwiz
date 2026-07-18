@@ -542,6 +542,21 @@ public final class FileTree: @unchecked Sendable {
         isSearchIndexBuilt = false
     }
 
+    /// Reserve capacity for `nodes` while preserving `Array`'s amortized geometric growth.
+    ///
+    /// `nodes.reserveCapacity(nodes.count + k)` on a path invoked once per directory collapses
+    /// spare capacity to exactly the current count, so the very next append reallocates and
+    /// copies the whole array — O(n) per directory, O(n²) across an immediate-mode scan
+    /// (measured: 0.096s vs 0.001s at 800k nodes over 160k small batches). Growing to at least
+    /// double when growth is actually needed restores amortized O(1) appends for the
+    /// many-small-batches case while still honoring an occasional large single batch.
+    /// Caller must already hold `lock`.
+    private func reserveNodeCapacity(toAtLeast needed: Int) {
+        if needed > nodes.capacity {
+            nodes.reserveCapacity(max(needed, nodes.capacity * 2))
+        }
+    }
+
     @discardableResult
     public func addNode(_ node: FileNode, name: String) -> UInt32 {
         lock.withLock { _ in
@@ -731,7 +746,7 @@ public final class FileTree: @unchecked Sendable {
             let p = Int(parentIndex)
             guard p >= 0, p < nodes.count else { return UInt32(nodes.count) }
             let firstIndex = UInt32(nodes.count)
-            nodes.reserveCapacity(nodes.count + children.count)
+            reserveNodeCapacity(toAtLeast: nodes.count + children.count)
             for case (var node, let childName) in children {
                 node.parentIndex = parentIndex
                 appendName(for: childName, to: &node)
@@ -755,7 +770,7 @@ public final class FileTree: @unchecked Sendable {
             let p = Int(parentIndex)
             guard p >= 0, p < nodes.count else { return UInt32(nodes.count) }
             let firstIndex = UInt32(nodes.count)
-            nodes.reserveCapacity(nodes.count + children.count)
+            reserveNodeCapacity(toAtLeast: nodes.count + children.count)
             isSearchIndexBuilt = false
 
             namePool.withUnsafeBytes { rawPool in
@@ -1096,7 +1111,7 @@ public final class FileTree: @unchecked Sendable {
             }
 
             let base = UInt32(nodes.count)
-            nodes.reserveCapacity(nodes.count + stagedNodes.count - 1)
+            reserveNodeCapacity(toAtLeast: nodes.count + stagedNodes.count - 1)
             stringPool.reserveCapacity(stringPool.count + stagedStringPool.count)
 
             // Staged index 0 (the placeholder root) maps to `index` itself; every other
