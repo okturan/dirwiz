@@ -299,6 +299,18 @@ public enum WarmStartPlanner {
     /// the item fraction trivially while still making per-root splice bookkeeping
     /// dominate. Both new parameters default to `nil`, so a caller that doesn't supply
     /// them (every existing call site) gets exactly today's root-count-only behavior.
+    ///
+    /// `maxPatchRoots` (default 48) is a THIRD, always-on gate, independent of the two
+    /// above: 042's benchmark found `FileTree.removeChildren` recompacts and renumbers the
+    /// ENTIRE tree on every call — a cost proportional to total tree size, not to the
+    /// root being spliced (~6ms per call measured at ~200k items). Phase B calls it once
+    /// per changed root, so patch cost scales with ROOT COUNT regardless of how small
+    /// each root's own item fraction is — a shape neither the item-fraction rule nor the
+    /// percentage-of-directories rule catches (both can pass comfortably at, say, 50
+    /// scattered one-file-each roots). Until a batched single-pass splice lands (043),
+    /// many-root patches are structurally slower than a parallel cold scan even though
+    /// each root individually looks cheap, so this cap always applies — it is not gated
+    /// behind any optional parameter the way the item-fraction rule is.
     public static func decide(
         cacheAvailable: Bool,
         replay: JournalReplay.Outcome?,
@@ -306,7 +318,8 @@ public enum WarmStartPlanner {
         cachedTotalItemCount: Int? = nil,
         estimatedPatchItems: Int? = nil,
         maxChangedFraction: Double = 0.20,
-        maxChangedItemFraction: Double = 0.25
+        maxChangedItemFraction: Double = 0.25,
+        maxPatchRoots: Int = 48
     ) -> Decision {
         guard cacheAvailable else {
             return .coldFallback(reason: "no cache available")
@@ -319,6 +332,10 @@ public enum WarmStartPlanner {
             return .coldFallback(reason: userFacingPoisonReason(reason))
         case .changes(let targets):
             let roots = PathCollapse.outermostRoots(targets)
+
+            guard roots.count <= maxPatchRoots else {
+                return .coldFallback(reason: "\(roots.count) changed locations — full scan is faster")
+            }
 
             if let estimatedPatchItems, let cachedTotalItemCount, cachedTotalItemCount > 0 {
                 let itemThreshold = Double(cachedTotalItemCount) * maxChangedItemFraction

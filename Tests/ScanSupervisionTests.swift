@@ -355,17 +355,19 @@ struct ScanSupervisionTests {
     private func warmPatchIsCancellableMidFlightBody() async throws {
         var layout: [String: UInt64] = [:]
         // Padding: keeps both the root-count AND cost-based (item-fraction) warm-start
-        // thresholds comfortably satisfied despite changing 50 real directories below —
+        // thresholds comfortably satisfied despite changing 40 real directories below —
         // same trick `warmToColdAbandonmentBody`/`composedWarmStartMatchesColdScan` use.
         for i in 0..<300 {
             layout["pad\(i)/seed.txt"] = 1
         }
-        // 50 real changed roots, each starting tiny in the CACHED tree — the warm-start
-        // decision judges the changed set by this small cached size (exactly like the
-        // reported incident: the decision can't know ahead of time how much new content
-        // a root is about to gain on disk), so it still warms even though the mutation
-        // below gives Phase A/B real work to do.
-        for i in 0..<50 {
+        // 40 real changed roots (kept under the plan-042 `maxPatchRoots` default, 48 —
+        // that gate is always on and would otherwise cold-fallback this fixture before
+        // ever reaching Phase A/B, defeating the point of this test), each starting tiny
+        // in the CACHED tree — the warm-start decision judges the changed set by this
+        // small cached size (exactly like the reported incident: the decision can't know
+        // ahead of time how much new content a root is about to gain on disk), so it
+        // still warms even though the mutation below gives Phase A/B real work to do.
+        for i in 0..<40 {
             layout["churn\(i)/seed.txt"] = 1
         }
         let (rawRoot, cleanup) = try createTempTree(layout)
@@ -380,7 +382,7 @@ struct ScanSupervisionTests {
         // Grow each churn directory substantially — real work for the parallel patch to
         // chew through, even though the warm decision (based on the cache above) sees
         // only a small fraction of the tree as changed.
-        for i in 0..<50 {
+        for i in 0..<40 {
             let dirURL = URL(fileURLWithPath: root).appendingPathComponent("churn\(i)")
             for f in 0..<100 {
                 try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
@@ -401,6 +403,16 @@ struct ScanSupervisionTests {
         await waitUntil(timeout: 10, pollInterval: .milliseconds(1)) {
             state.scanProgress.isScanning && !state.isPreparingScan
         }
+
+        // Confirm this is actually exercising a WARM patch, not a cold fallback that
+        // would make the rest of this test pass for the wrong reason (a real risk: the
+        // planner's `maxPatchRoots` gate — or any future gate — could silently push this
+        // fixture to cold, and every assertion below is generic enough to pass either
+        // way). `commitWarmStart` sets this text synchronously right after registering
+        // its scanner, before any Phase A work begins; cold's `beginColdScan` never does.
+        #expect(state.scanProgress.currentPath.contains("last scan")
+            || state.scanProgress.currentPath.contains("changed folders"),
+            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" — did the fixture stop qualifying as warm?")
 
         state.cancelScan()
         await waitUntil(timeout: 20) { !state.scanProgress.isScanning }
