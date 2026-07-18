@@ -177,6 +177,7 @@ public struct InteractiveTreemapView: View {
             CushionTreemapView(
                 fileTree: appState.fileTree,
                 treeRevision: appState.scanProgress.treeLayoutRevision,
+                isScanning: appState.scanProgress.isScanning,
                 rootIndex: appState.navigation.treemapRootIndex,
                 selectedNodeIndex: appState.selectedNodeIndex,
                 extensionPalette: appState.extensionPalette,
