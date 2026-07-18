@@ -39,6 +39,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     var currentTreeRevision: Int = 0
     var currentViewportSize: CGSize = .zero
     var selectedNodeIndex: UInt32?
+
+    /// Mirrors `AppState.scanProgress.isScanning` (Plan 044). Gates the scan-time layout
+    /// budget in `recomputeLayoutIfNeeded`/`shouldSkipScanTimeRelayout` — false for the
+    /// completion layout and all post-scan interaction layouts, which always run
+    /// full-depth and are never skipped.
+    var isScanning: Bool = false
+
     var hoveredNodeIndex: UInt32?
     var extensionPalette = ExtensionPalette()
     var recencyFactors: [Float] = []
@@ -52,6 +59,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Pending async layout task (cancelled when a new layout is needed).
     private var pendingLayoutTask: Task<Void, Never>?
     private var pendingLayoutSize: CGSize = .zero
+
+    /// Wall-clock completion time, duration, and node count of the most recent
+    /// *scan-time* layout (only updated while `isScanning` was true when that layout was
+    /// computed) — feeds the sparsity gate in `shouldSkipScanTimeRelayout()`. Reset in
+    /// `invalidateLayout()` so a new scan doesn't inherit a previous scan's timing.
+    private var lastScanTimeLayoutCompletedAt: CFAbsoluteTime?
+    private var lastScanTimeLayoutDuration: TimeInterval = 0
+    private var lastScanTimeLayoutNodeCount: Int = 0
 
     /// Instance buffer dirty tracking — skip rebuild when nothing changed.
     var instanceBufferDirty: Bool = true
@@ -177,13 +192,23 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         let rootIndex = currentRootIndex
         let bounds = CGRect(origin: .zero, size: viewportSize)
 
-        let applyLayout: @MainActor @Sendable ([TreemapRect], SpatialGrid) -> Void = { [weak self] layout, grid in
+        // Plan 044: depth-limit scan-time layouts. Captured now (main actor) rather than
+        // read inside the detached task, which must not touch main-actor state.
+        let isScanningNow = isScanning
+        let maxDepth = ScanTimeLayoutBudget.maxDepth(isScanning: isScanningNow)
+
+        let applyLayout: @MainActor @Sendable ([TreemapRect], SpatialGrid, TimeInterval) -> Void = { [weak self] layout, grid, duration in
             guard let self else { return }
             guard self.currentRootIndex == rootIndex else { return }
             self.cachedLayout = layout
             self.cachedSnapshot = snapshot
             self.spatialGrid = grid
             self.instanceBufferDirty = true
+            if isScanningNow {
+                self.lastScanTimeLayoutCompletedAt = CFAbsoluteTimeGetCurrent()
+                self.lastScanTimeLayoutDuration = duration
+                self.lastScanTimeLayoutNodeCount = snapshot.count
+            }
             self.onLayoutUpdate?(layout)
             self.mtkView?.needsDisplay = true
         }
@@ -191,28 +216,49 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         // Fix 2: Run layout off the main thread to avoid frame drops.
         let task = Task.detached(priority: .userInitiated) {
             guard !Task.isCancelled else { return }
+            let layoutStart = CFAbsoluteTimeGetCurrent()
             let layout = SquarifyLayout.layout(
                 nodes: snapshot,
                 rootIndex: rootIndex,
                 bounds: bounds,
-                maxDepth: 20,
+                maxDepth: maxDepth,
                 minPixelSize: 1.0
             )
+            let duration = CFAbsoluteTimeGetCurrent() - layoutStart
             guard !Task.isCancelled else { return }
             let grid = SpatialGrid(
                 viewportWidth: Float(bounds.width),
                 viewportHeight: Float(bounds.height),
                 rects: layout
             )
-            await applyLayout(layout, grid)
+            await applyLayout(layout, grid, duration)
         }
         pendingLayoutTask = task
+    }
+
+    /// Sparsity gate (Plan 044, PRIMARY control): during an active scan, skip a periodic
+    /// relayout unless both enough time and enough tree growth have passed since the
+    /// previous scan-time layout — see `ScanTimeLayoutBudget.shouldRunScanTimeLayout`.
+    /// Always false once scanning ends, so the completion layout (the forced revision
+    /// bump) is never skipped.
+    func shouldSkipScanTimeRelayout() -> Bool {
+        guard isScanning, let tree = currentFileTree else { return false }
+        let elapsed = lastScanTimeLayoutCompletedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
+        return !ScanTimeLayoutBudget.shouldRunScanTimeLayout(
+            elapsedSinceLastLayout: elapsed,
+            lastLayoutDuration: lastScanTimeLayoutDuration,
+            lastNodeCount: lastScanTimeLayoutNodeCount,
+            currentNodeCount: tree.count
+        )
     }
 
     func invalidateLayout() {
         pendingLayoutTask?.cancel()
         pendingLayoutTask = nil
         currentViewportSize = .zero
+        lastScanTimeLayoutCompletedAt = nil
+        lastScanTimeLayoutDuration = 0
+        lastScanTimeLayoutNodeCount = 0
     }
 
     // MARK: - Instance Buffer

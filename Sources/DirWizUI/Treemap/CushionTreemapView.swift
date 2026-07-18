@@ -8,6 +8,7 @@ import SwiftUI
 public struct CushionTreemapView: NSViewRepresentable {
     public var fileTree: FileTree?
     public var treeRevision: Int
+    public var isScanning: Bool
     public var rootIndex: UInt32
     public var selectedNodeIndex: UInt32?
     public var extensionPalette: ExtensionPalette
@@ -28,6 +29,7 @@ public struct CushionTreemapView: NSViewRepresentable {
     public init(
         fileTree: FileTree?,
         treeRevision: Int = 0,
+        isScanning: Bool = false,
         rootIndex: UInt32,
         selectedNodeIndex: UInt32? = nil,
         extensionPalette: ExtensionPalette = ExtensionPalette(),
@@ -47,6 +49,7 @@ public struct CushionTreemapView: NSViewRepresentable {
     ) {
         self.fileTree = fileTree
         self.treeRevision = treeRevision
+        self.isScanning = isScanning
         self.rootIndex = rootIndex
         self.selectedNodeIndex = selectedNodeIndex
         self.extensionPalette = extensionPalette
@@ -98,6 +101,7 @@ public struct CushionTreemapView: NSViewRepresentable {
 
         coordinator.currentFileTree = fileTree
         coordinator.currentTreeRevision = treeRevision
+        coordinator.isScanning = isScanning
         coordinator.currentRootIndex = rootIndex
         coordinator.selectedNodeIndex = selectedNodeIndex
         if paletteChanged {
@@ -124,8 +128,17 @@ public struct CushionTreemapView: NSViewRepresentable {
         coordinator.onHover = onHover
         coordinator.onLayoutUpdate = onLayoutUpdate
 
-        if treeChanged || rootChanged || revisionChanged {
+        if treeChanged || rootChanged {
             coordinator.invalidateLayout()
+        } else if revisionChanged {
+            // Plan 044: while a scan is in progress, a periodic revision bump is sparsely
+            // gated — only allowed once enough time AND tree growth have passed since the
+            // previous scan-time layout (ScanTimeLayoutBudget.shouldRunScanTimeLayout).
+            // Never skipped once scanning ends, so the completion layout (the forced
+            // revision bump) always runs.
+            if !coordinator.shouldSkipScanTimeRelayout() {
+                coordinator.invalidateLayout()
+            }
         }
 
         if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged || recencyChanged || temporalChanged {
