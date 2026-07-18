@@ -140,3 +140,9 @@ Advanced: `DIRWIZ_APP_SUPPORT_DIR` overrides where `snapshot`/`diff` persist sav
 - macOS 15 or newer
 - Swift 6 toolchain
 - Xcode command line tools
+
+## Security
+
+Report scanner, cleanup, privilege, or release-integrity vulnerabilities through
+[GitHub private vulnerability reporting](./SECURITY.md). Please use synthetic
+paths and volumes in reproductions instead of sharing personal filesystem data.
