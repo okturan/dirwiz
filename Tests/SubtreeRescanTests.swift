@@ -300,4 +300,242 @@ struct SubtreeRescanTests {
             assertTreesEquivalent(tree, coldTree, "round \(round)")
         }
     }
+
+    // MARK: - Large changed root (plan 042: parallel Phase A/B at scale)
+
+    @Test("Equivalence holds for a large (50k-file) changed root — the incident's shape at scale",
+          .timeLimit(.minutes(3)))
+    func largeChangedRootStaysEquivalent() async throws {
+        let (root, cleanup) = try createTempTree([
+            "docs/readme.txt": 100,
+            "big/seed.txt": 10,
+        ])
+        defer { cleanup() }
+
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        let tree = FileTree()
+        await scanner.scan(path: root, progress: progress, tree: tree)
+
+        // Populate "big" with 50k files after the baseline scan — big enough that Phase
+        // A's parallel enumeration and Phase B's splice actually exercise real
+        // concurrency and a real `installSubtree` merge at scale, not just the small
+        // batches every other test in this suite covers.
+        let bigURL = URL(fileURLWithPath: root).appendingPathComponent("big")
+        let payload = Data(count: 16)
+        for i in 0..<50_000 {
+            try payload.write(to: bigURL.appendingPathComponent("f\(i).dat"))
+        }
+
+        let report = await scanner.rescanSubtrees([root + "/big"], tree: tree, progress: progress)
+        #expect(report.unresolvedPaths.isEmpty)
+        #expect(report.rescannedRoots == [root + "/big"])
+        #expect(!report.wasCancelled)
+
+        let coldTree = await coldScan(root)
+        assertTreesEquivalent(tree, coldTree, "largeChangedRootStaysEquivalent")
+
+        let bigSummary = summarize(tree)[root + "/big"]
+        #expect(bigSummary?.childCount == 50_001, "50,000 new files plus the original seed.txt")
+    }
+}
+
+// MARK: - Cancellation (plan 042: `isCancelled` is now the coherent, non-dead signal)
+
+@Suite("Subtree Rescan Cancellation Tests")
+struct SubtreeRescanCancellationTests {
+
+    /// Cancels a specific `FileScanner` the very first time `listDirectory` is called —
+    /// deterministic (no wall-clock race), used to prove cancellation mid-Phase-A/B halts
+    /// promptly and is reported honestly via `SubtreeRescanReport.wasCancelled`.
+    private final class CancelOnFirstListFilesystemProvider: @unchecked Sendable, FilesystemProvider {
+        private let inner: MockFilesystemProvider
+        private let lock = NSLock()
+        private var fired = false
+        var scannerToCancel: FileScanner?
+
+        init(inner: MockFilesystemProvider) {
+            self.inner = inner
+        }
+
+        func listDirectory(path: String) -> [DirectoryEntry]? {
+            lock.lock()
+            let shouldFire = !fired
+            fired = true
+            lock.unlock()
+            if shouldFire {
+                scannerToCancel?.cancel()
+            }
+            return inner.listDirectory(path: path)
+        }
+
+        func computeBundleSize(path: String, isCancelled: () -> Bool) -> (fileSize: UInt64, allocatedSize: UInt64) {
+            inner.computeBundleSize(path: path, isCancelled: isCancelled)
+        }
+
+        func deviceAndInode(forPath path: String) -> (device: Int32, inode: UInt64)? {
+            inner.deviceAndInode(forPath: path)
+        }
+
+        func volumeStats(forPath path: String) -> StatfsResult? {
+            inner.volumeStats(forPath: path)
+        }
+    }
+
+    @Test("Cancelling mid-rescan halts promptly, reports it honestly, and leaves the tree structurally valid")
+    func cancellingMidRescanHaltsPromptlyAndReportsIt() async {
+        let mock = MockFilesystemProvider()
+        mock.inodeMap["/vol"] = (device: 1, inode: 0)
+        mock.inodeMap["/vol/a"] = (device: 1, inode: 1)
+        mock.inodeMap["/vol/b"] = (device: 1, inode: 2)
+        mock.directories["/vol"] = [
+            MockFilesystemProvider.dir(name: "a", inode: 1),
+            MockFilesystemProvider.dir(name: "b", inode: 2),
+        ]
+        mock.directories["/vol/a"] = [MockFilesystemProvider.file(name: "f1.txt", size: 10, inode: 10)]
+        mock.directories["/vol/b"] = [MockFilesystemProvider.file(name: "f2.txt", size: 20, inode: 11)]
+
+        let bootstrapScanner = FileScanner(filesystem: mock)
+        let tree = FileTree()
+        await bootstrapScanner.scan(path: "/vol", progress: ScanProgress(), tree: tree)
+
+        // "Change" both dirs so both become real rescan targets.
+        mock.directories["/vol/a"]?.append(MockFilesystemProvider.file(name: "new_a.txt", size: 5, inode: 12))
+        mock.directories["/vol/b"]?.append(MockFilesystemProvider.file(name: "new_b.txt", size: 5, inode: 13))
+
+        let cancelOnFirstList = CancelOnFirstListFilesystemProvider(inner: mock)
+        let rescanScanner = FileScanner(filesystem: cancelOnFirstList)
+        cancelOnFirstList.scannerToCancel = rescanScanner
+
+        let report = await rescanScanner.rescanSubtrees(["/vol/a", "/vol/b"], tree: tree, progress: ScanProgress())
+
+        #expect(report.wasCancelled, "cancelling on the very first directory listing must be reflected honestly")
+
+        // The tree must remain structurally valid regardless of how much finished
+        // applying: every child range must stay inside bounds and start after some real
+        // (non-root) node.
+        let nodes = tree.nodesSnapshot()
+        for node in nodes where node.firstChildIndex != FileNode.invalid {
+            #expect(node.firstChildIndex > 0)
+            #expect(Int(node.firstChildIndex) + Int(node.childCount) <= nodes.count)
+        }
+    }
+}
+
+// MARK: - Determinate progress (plan 042: "k of N roots" text, not just a spinner)
+
+@Suite("Subtree Rescan Progress Tests")
+struct SubtreeRescanProgressTests {
+
+    /// Blocks `listDirectory` for one specific path until the test signals it to
+    /// proceed — lets other roots in the same batch complete freely while one is held,
+    /// giving a fully deterministic window to observe an in-flight progress update
+    /// (rather than racing a wall-clock poll against real work that might already be
+    /// done by the time the poll starts). `listDirectory` itself always runs on a
+    /// background scanning thread (a plain synchronous call stack), so blocking it on a
+    /// `DispatchSemaphore` is fine — only the ASYNC test function must never call
+    /// `.wait()` directly (blocking a cooperative-pool thread is disallowed), so the test
+    /// observes readiness by polling `didReachGate` instead.
+    private final class GatedFilesystemProvider: @unchecked Sendable, FilesystemProvider {
+        private let inner: MockFilesystemProvider
+        private let gatedPath: String
+        private let releaseGate = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var reachedGateFlag = false
+
+        init(inner: MockFilesystemProvider, gatedPath: String) {
+            self.inner = inner
+            self.gatedPath = gatedPath
+        }
+
+        var didReachGate: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return reachedGateFlag
+        }
+
+        func release() {
+            releaseGate.signal()
+        }
+
+        func listDirectory(path: String) -> [DirectoryEntry]? {
+            if path == gatedPath {
+                lock.lock()
+                reachedGateFlag = true
+                lock.unlock()
+                releaseGate.wait()
+            }
+            return inner.listDirectory(path: path)
+        }
+
+        func computeBundleSize(path: String, isCancelled: () -> Bool) -> (fileSize: UInt64, allocatedSize: UInt64) {
+            inner.computeBundleSize(path: path, isCancelled: isCancelled)
+        }
+
+        func deviceAndInode(forPath path: String) -> (device: Int32, inode: UInt64)? {
+            inner.deviceAndInode(forPath: path)
+        }
+
+        func volumeStats(forPath path: String) -> StatfsResult? {
+            inner.volumeStats(forPath: path)
+        }
+    }
+
+    @Test("Phase A publishes a 'k of N' progress text as each root finishes staging")
+    func determinateRootProgressTextAppears() async {
+        let mock = MockFilesystemProvider()
+        mock.inodeMap["/vol"] = (device: 1, inode: 0)
+        mock.inodeMap["/vol/a"] = (device: 1, inode: 1)
+        mock.inodeMap["/vol/b"] = (device: 1, inode: 2)
+        mock.inodeMap["/vol/c"] = (device: 1, inode: 3)
+        mock.directories["/vol"] = [
+            MockFilesystemProvider.dir(name: "a", inode: 1),
+            MockFilesystemProvider.dir(name: "b", inode: 2),
+            MockFilesystemProvider.dir(name: "c", inode: 3),
+        ]
+        mock.directories["/vol/a"] = [MockFilesystemProvider.file(name: "f.txt", size: 1, inode: 10)]
+        mock.directories["/vol/b"] = [MockFilesystemProvider.file(name: "f.txt", size: 1, inode: 11)]
+        mock.directories["/vol/c"] = [MockFilesystemProvider.file(name: "f.txt", size: 1, inode: 12)]
+
+        let bootstrapScanner = FileScanner(filesystem: mock)
+        let tree = FileTree()
+        await bootstrapScanner.scan(path: "/vol", progress: ScanProgress(), tree: tree)
+
+        mock.directories["/vol/a"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 20))
+        mock.directories["/vol/b"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 21))
+        mock.directories["/vol/c"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 22))
+
+        // Hold "/vol/a" open — "/vol/b" and "/vol/c" run concurrently (the default
+        // worker count comfortably covers all 3 of these tiny plans) and WILL both
+        // finish while "/vol/a" is blocked, since nothing gates them.
+        let gated = GatedFilesystemProvider(inner: mock, gatedPath: "/vol/a")
+        let rescanScanner = FileScanner(filesystem: gated)
+        let progress = ScanProgress()
+
+        let rescanTask = Task {
+            await rescanScanner.rescanSubtrees(["/vol/a", "/vol/b", "/vol/c"], tree: tree, progress: progress)
+        }
+
+        for _ in 0..<400 {
+            if gated.didReachGate { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(gated.didReachGate, "expected the gated root's enumeration to have started")
+
+        var sawExpectedText = false
+        for _ in 0..<400 {
+            if progress.currentPath.contains("2 of 3") {
+                sawExpectedText = true
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(sawExpectedText,
+            "expected a '(2 of 3)' progress update once two of three roots finished staging; last seen: \"\(progress.currentPath)\"")
+
+        gated.release()
+        let report = await rescanTask.value
+        #expect(!report.wasCancelled)
+        #expect(report.unresolvedPaths.isEmpty)
+    }
 }

@@ -524,6 +524,129 @@ struct FileNodeTests {
         #expect(tree.nodes[0].fileSize == 100, "Root should accumulate child's file size")
         #expect(tree.nodes[0].allocatedSize == 128, "Root should accumulate child's allocated size")
     }
+
+    // MARK: - subtreeItemCount / installSubtree (plan 042: parallel warm-patch staging)
+
+    @Test("subtreeItemCount counts a subtree's own node plus every descendant")
+    func subtreeItemCountCountsDescendants() {
+        let tree = FileTree()
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        // One `addChildren` call for root's two children — `addChildren` OVERWRITES the
+        // parent's firstChildIndex/childCount on every call, so two separate calls for
+        // the same parent would silently orphan whichever batch came first.
+        var dirA = FileNode()
+        dirA.isDirectory = true
+        var dirB = FileNode()
+        dirB.isDirectory = true
+        let rootChildren = tree.addChildren([(node: dirA, name: "a"), (node: dirB, name: "b")], parentIndex: 0)
+        let aIndex = rootChildren
+        let bIndex = rootChildren + 1
+
+        let f1 = FileNode()
+        let f2 = FileNode()
+        tree.addChildren([(node: f1, name: "f1"), (node: f2, name: "f2")], parentIndex: aIndex)
+
+        #expect(tree.subtreeItemCount(at: 0) == 5, "root + a + f1 + f2 + b")
+        #expect(tree.subtreeItemCount(at: aIndex) == 3, "a + f1 + f2")
+        #expect(tree.subtreeItemCount(at: bIndex) == 1, "b (empty dir) counts just itself")
+    }
+
+    @Test("subtreeItemCount is 0 for an out-of-range index")
+    func subtreeItemCountOutOfRange() {
+        let tree = FileTree()
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+        #expect(tree.subtreeItemCount(at: 99) == 0)
+    }
+
+    @Test("installSubtree splices a staged subtree in, remapping every index and name offset")
+    func installSubtreeSplicesStagedContent() {
+        let tree = FileTree()
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        var target = FileNode()
+        target.isDirectory = true
+        let targetIndex = tree.addChildren([(node: target, name: "docs")], parentIndex: 0)
+
+        // Build a staged tree exactly the way Phase A does: a placeholder root at index
+        // 0, with real content underneath.
+        let staging = FileTree(stagingCapacityHint: 8)
+        var placeholder = FileNode()
+        placeholder.isDirectory = true
+        staging.addNode(placeholder, name: "")
+
+        // A single `addChildren` call per parent, exactly like production `scanDirectory`
+        // does — `addChildren` OVERWRITES the parent's firstChildIndex/childCount on every
+        // call, so two calls for the same parent (rather than one call with both
+        // children) would silently orphan the first batch.
+        var stagedFile = FileNode()
+        stagedFile.fileSize = 100
+        stagedFile.allocatedSize = 100
+        var stagedDir = FileNode()
+        stagedDir.isDirectory = true
+        let stagedFirst = staging.addChildren(
+            [(node: stagedFile, name: "readme.txt"), (node: stagedDir, name: "nested")],
+            parentIndex: 0
+        )
+
+        var deepFile = FileNode()
+        deepFile.fileSize = 42
+        deepFile.allocatedSize = 42
+        staging.addChildren([(node: deepFile, name: "deep.txt")], parentIndex: stagedFirst + 1)
+
+        tree.installSubtree(staging, at: targetIndex)
+
+        #expect(tree.name(at: targetIndex) == "docs", "the target node itself must be untouched")
+        let children = tree.children(of: targetIndex)
+        #expect(children.count == 2)
+
+        let names = children.map { tree.name(at: UInt32($0)) }
+        #expect(Set(names) == Set(["readme.txt", "nested"]))
+
+        guard let nestedLocalIndex = children.first(where: { tree.name(at: UInt32($0)) == "nested" }) else {
+            Issue.record("expected a 'nested' child after installSubtree")
+            return
+        }
+        let nestedChildren = tree.children(of: UInt32(nestedLocalIndex))
+        #expect(nestedChildren.count == 1)
+        #expect(tree.name(at: UInt32(nestedChildren.first!)) == "deep.txt")
+
+        // Every appended node's parentIndex must point at something valid inside `tree`,
+        // and no name offset should read past the shared string pool.
+        let allNodes = tree.nodesSnapshot()
+        for i in allNodes.indices {
+            let node = allNodes[i]
+            if node.parentIndex != FileNode.invalid {
+                #expect(Int(node.parentIndex) < allNodes.count)
+            }
+        }
+    }
+
+    @Test("installSubtree on an empty staged subtree leaves the target childless")
+    func installSubtreeEmptyStagingLeavesTargetChildless() {
+        let tree = FileTree()
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+        var target = FileNode()
+        target.isDirectory = true
+        let targetIndex = tree.addChildren([(node: target, name: "empty")], parentIndex: 0)
+
+        let staging = FileTree(stagingCapacityHint: 4)
+        var placeholder = FileNode()
+        placeholder.isDirectory = true
+        staging.addNode(placeholder, name: "")
+
+        tree.installSubtree(staging, at: targetIndex)
+
+        #expect(tree.children(of: targetIndex).isEmpty)
+    }
 }
 
 private func legacyExtensionHash(_ name: String) -> UInt32 {

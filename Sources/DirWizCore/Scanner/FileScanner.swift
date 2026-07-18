@@ -121,6 +121,94 @@ private final class DirectoryWorkQueue: @unchecked Sendable {
     }
 }
 
+/// One unit of Phase A rescan work: a directory to enumerate, tagged with which
+/// collapsed changed root it belongs to and which detached staging `FileTree` its
+/// results go into. Distinct from `DirectoryWorkItem`/`DirectoryWorkQueue` (used by cold
+/// scan) rather than generalizing those: `rescanSubtrees`'s Phase A shares ONE queue
+/// across every changed root instead of one queue per root — a single worker pool that
+/// drains whatever directory is next regardless of which root it came from, so a
+/// worker isn't idle just because its own root ran out of work while another root (in
+/// the incident's shape, ONE dominant root) still has plenty.
+private struct RescanWorkItem: Sendable {
+    let path: String
+    let parentIndex: UInt32
+    let rootPath: String
+    let staging: FileTree
+}
+
+private final class RescanWorkQueue: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var pending: [RescanWorkItem] = []
+    private var active = 0
+    private var closed = false
+
+    func enqueue(_ item: RescanWorkItem) {
+        condition.lock()
+        defer { condition.unlock() }
+        guard !closed else { return }
+        pending.append(item)
+        condition.signal()
+    }
+
+    func next() -> RescanWorkItem? {
+        condition.lock()
+        defer { condition.unlock() }
+        while pending.isEmpty && !closed {
+            if active <= 0 {
+                closed = true
+                condition.broadcast()
+                return nil
+            }
+            condition.wait()
+        }
+        guard !pending.isEmpty else { return nil }
+        active += 1
+        return pending.removeLast()
+    }
+
+    func complete() {
+        condition.lock()
+        defer { condition.unlock() }
+        active -= 1
+        if pending.isEmpty && active <= 0 {
+            closed = true
+            condition.broadcast()
+        }
+    }
+}
+
+/// Tracks how many enumeration items are still outstanding for each collapsed changed
+/// root sharing the same `RescanWorkQueue`, so Phase A can report honest "k of N roots"
+/// progress even though the queue itself has no notion of "root" — many workers may be
+/// draining items that all belong to the SAME root, or to different ones, in any order.
+/// Seeded with one pending item per root (its own root path); each discovered
+/// subdirectory bumps its root's count, each finished item decrements it — the root is
+/// fully enumerated the moment its count returns to zero.
+private final class RootCompletionTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pendingByRoot: [String: Int]
+
+    init(rootPaths: [String]) {
+        pendingByRoot = Dictionary(uniqueKeysWithValues: rootPaths.map { ($0, 1) })
+    }
+
+    func itemEnqueued(forRoot rootPath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        pendingByRoot[rootPath, default: 0] += 1
+    }
+
+    /// Returns true exactly once per root: the moment its outstanding count reaches zero.
+    func itemCompleted(forRoot rootPath: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let count = pendingByRoot[rootPath] else { return false }
+        let newCount = count - 1
+        pendingByRoot[rootPath] = newCount
+        return newCount == 0
+    }
+}
+
 private struct RawScanScratch {
     var children: [EncodedFileNode] = []
     var namePool = Data()
@@ -235,11 +323,25 @@ public struct SubtreeRescanReport: Sendable {
     public let rescannedRoots: [String]
     /// Requested paths that weren't under the tree's root at all.
     public let unresolvedPaths: [String]
+    /// True if cancellation (`FileScanner.cancel()`, or the enclosing `Task` itself being
+    /// cancelled) was observed at any point during the rescan (plan 042) — some of
+    /// `rescannedRoots` may not actually have been applied to the tree yet. The tree is
+    /// left structurally valid either way (whatever finished applying stays applied, the
+    /// rest is untouched), but callers should treat a cancelled rescan as incomplete
+    /// rather than a normal completion — no cache write-back under the new event id, no
+    /// "success" summary.
+    public let wasCancelled: Bool
 
-    public init(requestedPaths: [String], rescannedRoots: [String], unresolvedPaths: [String]) {
+    public init(
+        requestedPaths: [String],
+        rescannedRoots: [String],
+        unresolvedPaths: [String],
+        wasCancelled: Bool = false
+    ) {
         self.requestedPaths = requestedPaths
         self.rescannedRoots = rescannedRoots
         self.unresolvedPaths = unresolvedPaths
+        self.wasCancelled = wasCancelled
     }
 }
 
@@ -358,14 +460,36 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Re-enumerate the given directories into `tree`, replacing each one's descendants.
-    /// Paths are absolute, expected under tree's root. Serial per subtree root (changed
-    /// sets are typically small); cancellable via Task.isCancelled between roots.
+    /// Paths are absolute, expected under tree's root.
+    ///
+    /// Two phases per batch (plan 042), preserving 028's resolve-before-apply discipline:
+    /// - **Phase A** (`stageChangedRoots`, parallel, I/O-bound): every collapsed root is
+    ///   resolved once against the tree's shape at the START of this call, then enumerated
+    ///   CONCURRENTLY (bounded to the same worker count cold scan uses) into its own small,
+    ///   detached staging `FileTree` — nothing here touches the shared `tree` yet. This is
+    ///   the fix for the reported incident: a serial per-root loop re-walking a large
+    ///   fraction of the disk single-threaded took minutes where cold (fully parallel)
+    ///   took ~20s.
+    /// - **Phase B** (`applyStagedRoots`, serial, memory-bound): each staged result is
+    ///   spliced in one at a time, re-resolving its path against `tree` FRESH immediately
+    ///   before splicing — an earlier splice in this same loop may have compacted and
+    ///   renumbered every index (`removeChildren`'s contract). Safe to resolve every root
+    ///   ONCE up front in Phase A because `rescannedRoots` are outermost/disjoint
+    ///   (`PathCollapse.outermostRoots`): applying one root's splice can never change
+    ///   whether an unrelated, non-nested root's path still resolves the same way.
     ///
     /// Resolution runs entirely against path strings before any mutation begins — never
     /// holds a tree index across a splice, since indices are garbage after any mutation
     /// that compacts the array (same discipline as `TreeActions.batchTrash(paths:tree:)`).
-    /// Each surviving target is re-resolved to a fresh index immediately before its own
-    /// splice, so an earlier splice in this batch can never invalidate a later one.
+    ///
+    /// Cancellation: `isCancelled` (this scanner's own flag, flipped by `cancel()`) is the
+    /// primary, coherent signal checked in both phases — NOT `Task.isCancelled`, which
+    /// stays false unless the surrounding `Task` itself is structurally cancelled (a stale
+    /// check 040 flagged: `cancel()` alone never trips it). `Task.isCancelled` is still
+    /// honored inside Phase A's child tasks as a secondary signal, since those are real
+    /// `Task`s structured cancellation can reach directly. Either way a cancelled rescan
+    /// leaves `tree` valid — whatever finished applying stays applied, the rest is
+    /// untouched — and `SubtreeRescanReport.wasCancelled` says so honestly.
     public func rescanSubtrees(
         _ changedDirectories: [String],
         tree: FileTree,
@@ -388,26 +512,264 @@ public final class FileScanner: @unchecked Sendable {
         let rescannedRoots = PathCollapse.outermostRoots(resolvedPaths)
 
         // One instance shared across every target in this batch — matches cold scan's
-        // single firmlink/hardlink guard for the whole operation, not one per target.
+        // single firmlink/hardlink guard for the whole operation, not one per target. Its
+        // internal Mutex makes sharing it across Phase A's concurrent tasks safe.
         let visited = VisitedDirectories()
 
-        for targetPath in rescannedRoots {
-            guard !Task.isCancelled else { break }
+        let plans = planRescanTargets(rescannedRoots, tree: tree)
+        let staged = await stageChangedRoots(plans, progress: progress, visited: visited)
+        applyStagedRoots(rescannedRoots, staged: staged, tree: tree, progress: progress)
 
-            // Re-resolve fresh: an earlier splice in this loop may have compacted and
-            // renumbered every index in the tree.
-            let snapshot = tree.pathBuildingSnapshot()
+        tree.recomputeAggregates()
+
+        return SubtreeRescanReport(
+            requestedPaths: changedDirectories,
+            rescannedRoots: rescannedRoots,
+            unresolvedPaths: unresolvedPaths,
+            wasCancelled: isCancelled
+        )
+    }
+
+    /// One collapsed root's batch-start shape: just enough to decide, up front, whether
+    /// Phase A should enumerate it as a directory or compute it as an opaque bundle leaf.
+    private struct RootPlan {
+        let targetPath: String
+        let isBundle: Bool
+    }
+
+    /// What Phase A produced for one root, keyed by path in `stageChangedRoots`'s result —
+    /// never keyed by index, since indices from the batch-start snapshot are meaningless
+    /// once Phase B starts splicing.
+    private enum StageResult: Sendable {
+        case directory(staging: FileTree)
+        case bundle(fileSize: UInt64, allocatedSize: UInt64)
+    }
+
+    /// Resolves every collapsed root's current shape ONCE, against the tree as it stands
+    /// at the very start of this batch — before any splicing happens. See
+    /// `rescanSubtrees`'s doc comment for why this one-time-up-front resolution is safe.
+    private func planRescanTargets(_ rescannedRoots: [String], tree: FileTree) -> [RootPlan] {
+        let snapshot = tree.pathBuildingSnapshot()
+        var plans: [RootPlan] = []
+        plans.reserveCapacity(rescannedRoots.count)
+        for targetPath in rescannedRoots {
             guard let components = Self.relativeComponents(of: targetPath, rootPath: snapshot.rootPath),
-                  let targetIndex = FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool),
+                  let targetIndex = FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool) else {
+                continue
+            }
+            let i = Int(targetIndex)
+            guard i < snapshot.nodes.count else { continue }
+            plans.append(RootPlan(targetPath: targetPath, isBundle: snapshot.nodes[i].isBundle))
+        }
+        return plans
+    }
+
+    /// Phase A: enumerate every plan's on-disk subtree (or compute its bundle size)
+    /// concurrently, bounded to the same worker-count knob cold scan uses
+    /// (`DIRWIZ_SCAN_WORKERS`). Every directory plan's enumeration work — its root path
+    /// AND every subdirectory discovered under it — feeds into ONE shared
+    /// `RescanWorkQueue` drained by that many workers, rather than giving each root its
+    /// own fixed slice of the pool: a single directory's own entries can't be split
+    /// across workers (`getattrlistbulk` reads one handle's entries as one sequential
+    /// operation), so across-roots-only parallelism helps when there are many
+    /// small-to-medium roots but does nothing extra for the reported incident's actual
+    /// shape — ONE dominant root sitting high in the tree. Sharing one queue means idle
+    /// workers (roots with nothing left) naturally flow into whichever root still has
+    /// work, with no size estimate needed up front. Nothing here touches the shared
+    /// `tree`: each directory plan enumerates into its OWN small, detached staging
+    /// `FileTree` that `applyStagedRoots` later splices in via `FileTree.installSubtree`.
+    private func stageChangedRoots(
+        _ plans: [RootPlan],
+        progress: ScanProgress,
+        visited: VisitedDirectories
+    ) async -> [String: StageResult] {
+        guard !plans.isEmpty else { return [:] }
+
+        let directoryPlans = plans.filter { !$0.isBundle }
+        let bundlePlans = plans.filter { $0.isBundle }
+
+        var stagingByPath: [String: FileTree] = [:]
+        stagingByPath.reserveCapacity(directoryPlans.count)
+        let sharedQueue = RescanWorkQueue()
+        for plan in directoryPlans {
+            // Mark each root itself visited before seeding the queue, same as the cold
+            // scan marks its root and the old single-consumer drain did — so a firmlink
+            // loop can't immediately re-enter a subtree that's already being enumerated.
+            if let di = filesystem.deviceAndInode(forPath: plan.targetPath) {
+                _ = visited.insert(dev: di.device, inode: di.inode)
+            }
+            // A larger hint than a "typically small" changed root needs matters
+            // specifically for the incident's shape: an undersized reservation means a
+            // dominant root's staging tree hits Array's doubling reallocations while
+            // MULTIPLE workers are appending into it under its shared lock, serializing
+            // everyone on each expensive copy. A few thousand nodes is cheap regardless
+            // (a few hundred KB), and a root bigger than that still just grows normally.
+            let staging = FileTree(stagingCapacityHint: 4096)
+            var placeholderRoot = FileNode()
+            placeholderRoot.isDirectory = true
+            _ = staging.addNode(placeholderRoot, name: "")
+            stagingByPath[plan.targetPath] = staging
+            sharedQueue.enqueue(RescanWorkItem(path: plan.targetPath, parentIndex: 0, rootPath: plan.targetPath, staging: staging))
+        }
+
+        let tracker = RootCompletionTracker(rootPaths: plans.map(\.targetPath))
+        let rootsCompleted = Mutex(0)
+        let totalRoots = plans.count
+        // Which directory roots actually got AT LEAST one item processed (as opposed to
+        // cancelled before their own queue entry was ever dequeued). An untouched root's
+        // staging tree is just the placeholder with no children — installing that would
+        // wrongly wipe out the target's real, pre-existing children rather than leaving
+        // them alone, so `applyStagedRoots` must see `nil` (not `.directory`) for it.
+        let touchedRoots = Mutex(Set<String>())
+
+        // Reports one more root done, whichever kind it was — thread-safe from any
+        // context, matching cold scan's own `maybeUpdateProgress` (`updateCurrentPath`
+        // is the thread-safe hot-counter write; `publishCounters()` must run on
+        // MainActor, so it's dispatched fire-and-forget rather than awaited here).
+        @Sendable func reportRootDone() {
+            let completedSnapshot = rootsCompleted.withLock { count -> Int in
+                count += 1
+                return count
+            }
+            progress.updateCurrentPath("Scanning changed folders (\(completedSnapshot) of \(totalRoots))…")
+            Task { await MainActor.run { progress.publishCounters() } }
+        }
+
+        let workerCount = min(Self.defaultRescanWorkerCount(), max(1, directoryPlans.count))
+        var results: [String: StageResult] = [:]
+        results.reserveCapacity(plans.count)
+
+        await withTaskGroup(of: (String, StageResult)?.self) { group in
+            // Bundle plans: one Task each, no further internal parallelism possible —
+            // computing a bundle's size is a single recursive walk, not splittable.
+            for plan in bundlePlans {
+                group.addTask {
+                    guard !Task.isCancelled, !self.isCancelled else { return nil }
+                    let (fileSize, allocatedSize) = self.filesystem.computeBundleSize(
+                        path: plan.targetPath,
+                        isCancelled: { Task.isCancelled || self.isCancelled }
+                    )
+                    reportRootDone()
+                    return (plan.targetPath, .bundle(fileSize: fileSize, allocatedSize: allocatedSize))
+                }
+            }
+
+            // Directory plans: bridge to a GCD-backed multi-worker drain of the shared
+            // queue — plain OS threads (like cold scan's own worker pool), not Swift
+            // Tasks, since these loops legitimately block on `RescanWorkQueue.next()`
+            // while other workers still have work; blocking a Swift Task body that way
+            // risks starving the cooperative thread pool cold scan and everything else
+            // shares.
+            if !directoryPlans.isEmpty {
+                group.addTask {
+                    let rawFilesystemForScan = self.filesystem as? RealFilesystemProvider
+                    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                        let dispatchGroup = DispatchGroup()
+                        for _ in 0..<workerCount {
+                            dispatchGroup.enter()
+                            DispatchQueue.global(qos: .userInitiated).async {
+                                let rawBuffer = rawFilesystemForScan.map { _ in
+                                    UnsafeMutableRawPointer.allocate(
+                                        byteCount: RealFilesystemProvider.directoryBufferSize,
+                                        alignment: 16
+                                    )
+                                }
+                                var rawScratch = RawScanScratch()
+                                var rawArena = RawScanArena()
+                                defer { rawBuffer?.deallocate() }
+
+                                while let item = sharedQueue.next() {
+                                    if !self.isCancelled {
+                                        touchedRoots.withLock { _ = $0.insert(item.rootPath) }
+                                        self.scanDirectory(
+                                            dirPath: item.path,
+                                            parentIndex: item.parentIndex,
+                                            tree: item.staging,
+                                            progress: progress,
+                                            visited: visited,
+                                            enqueue: { path, parentIndex in
+                                                tracker.itemEnqueued(forRoot: item.rootPath)
+                                                sharedQueue.enqueue(RescanWorkItem(
+                                                    path: path, parentIndex: parentIndex,
+                                                    rootPath: item.rootPath, staging: item.staging
+                                                ))
+                                            },
+                                            maybeUpdateProgress: { _ in },
+                                            rawFilesystem: rawFilesystemForScan,
+                                            rawBuffer: rawBuffer,
+                                            rawScratch: &rawScratch,
+                                            deferredBuilder: nil,
+                                            rawArena: &rawArena
+                                        )
+                                    }
+                                    sharedQueue.complete()
+                                    if tracker.itemCompleted(forRoot: item.rootPath) {
+                                        reportRootDone()
+                                    }
+                                }
+                                dispatchGroup.leave()
+                            }
+                        }
+                        dispatchGroup.notify(queue: .global(qos: .userInitiated)) {
+                            continuation.resume()
+                        }
+                    }
+                    return nil
+                }
+            }
+
+            for await outcome in group {
+                if let (targetPath, result) = outcome {
+                    results[targetPath] = result
+                }
+            }
+        }
+
+        // Every directory plan's staging tree gets installed here — none of them flow
+        // through the task group's return value (only bundle plans do, above), since
+        // `stagingByPath` already has a live reference to each one that workers wrote
+        // into directly. Skip any root that never got touched (cancelled before its own
+        // queue entry was ever dequeued): its staging tree is just the untouched
+        // placeholder, and installing that would wipe out the target's real children —
+        // leaving it out of `results` entirely makes `applyStagedRoots` see `nil` and
+        // correctly leave that root untouched instead.
+        let touched = touchedRoots.withLock { $0 }
+        for (targetPath, staging) in stagingByPath where results[targetPath] == nil && touched.contains(targetPath) {
+            results[targetPath] = .directory(staging: staging)
+        }
+
+        return results
+    }
+
+    /// Phase B: apply each staged result in `rescannedRoots` order, re-resolving its path
+    /// against `tree` fresh immediately before splicing — see `rescanSubtrees`'s doc
+    /// comment for why an earlier splice in this same loop can invalidate a later target's
+    /// index but never its path.
+    private func applyStagedRoots(
+        _ rescannedRoots: [String],
+        staged: [String: StageResult],
+        tree: FileTree,
+        progress: ScanProgress
+    ) {
+        let total = rescannedRoots.count
+        var completed = 0
+        for targetPath in rescannedRoots {
+            guard !isCancelled, !Task.isCancelled else { break }
+            completed += 1
+
+            // Resolved in its own function so the snapshot's `nodes`/`stringPool`
+            // references (a full-tree COW handle) are provably released before this
+            // iteration mutates the tree — holding them any longer would force
+            // `removeChildren`/`installSubtree` to copy the entire array on every single
+            // root instead of appending in place (measured: this was Phase B's actual
+            // bottleneck on a large batch, not the per-node splice work itself).
+            guard let targetIndex = Self.resolveCurrentIndex(of: targetPath, tree: tree),
                   let targetNode = tree.node(at: targetIndex) else {
                 continue
             }
 
-            if targetNode.isBundle {
-                let (fileSize, allocatedSize) = filesystem.computeBundleSize(
-                    path: targetPath,
-                    isCancelled: { Task.isCancelled }
-                )
+            switch staged[targetPath] {
+            case .bundle(let fileSize, let allocatedSize):
                 tree.setNodeSizeAndPropagate(
                     at: targetIndex,
                     fileSize: fileSize,
@@ -415,31 +777,57 @@ public final class FileScanner: @unchecked Sendable {
                     expectedDevice: targetNode.device,
                     expectedInode: targetNode.inode
                 )
+            case .directory(let staging):
+                tree.removeChildren(of: targetIndex)
+                tree.installSubtree(staging, at: targetIndex)
+            case nil:
+                // Cancelled before Phase A ever got to this root — nothing staged, so
+                // there's nothing trustworthy to apply. Leave it untouched rather than
+                // guessing; the next rescan will pick it up again.
                 continue
             }
-
-            tree.removeChildren(of: targetIndex)
-            scanSubtreeImmediate(
-                rootPath: targetPath,
-                rootIndex: targetIndex,
-                tree: tree,
-                progress: progress,
-                visited: visited
-            )
 
             // A changed dir's mtime is user-visible in the table.
             if let mtime = Self.modifiedDate(atPath: targetPath) {
                 tree.updateNode(at: targetIndex) { $0.modifiedDate = mtime }
             }
+
+            // Thread-safe hot-counter write (see `stageChangedRoots`'s matching comment) —
+            // setting `progress.currentPath` directly here would just get clobbered by
+            // `publishCounters()`'s own `currentPath = snapshot.path` line.
+            progress.updateCurrentPath("Refreshing changed folders (\(completed) of \(total))…")
+            Task { await MainActor.run {
+                progress.publishCounters()
+            } }
         }
+    }
 
-        tree.recomputeAggregates()
+    /// Re-resolves `targetPath` to its CURRENT index in `tree` by path, isolated in its
+    /// own function so the `pathBuildingSnapshot()` it takes (a COW handle on the WHOLE
+    /// tree's nodes array and string pool) is provably released on return rather than
+    /// staying alive for the rest of the caller's loop body. `applyStagedRoots` calls
+    /// this immediately before each splice; if the snapshot outlived the splice, the
+    /// splice's own mutation (`removeChildren`/`installSubtree`) would see a
+    /// reference count > 1 and copy the ENTIRE array before appending instead of growing
+    /// it in place — on a large batch this dwarfed the actual per-node splice cost.
+    private static func resolveCurrentIndex(of targetPath: String, tree: FileTree) -> UInt32? {
+        let snapshot = tree.pathBuildingSnapshot()
+        guard let components = Self.relativeComponents(of: targetPath, rootPath: snapshot.rootPath) else {
+            return nil
+        }
+        return FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool)
+    }
 
-        return SubtreeRescanReport(
-            requestedPaths: changedDirectories,
-            rescannedRoots: rescannedRoots,
-            unresolvedPaths: unresolvedPaths
-        )
+    /// Same worker-count sizing cold scan uses for its `DirectoryWorkQueue` pool
+    /// (`DIRWIZ_SCAN_WORKERS`, defaulting to 4–6 based on core count) — reused here so
+    /// Phase A's across-roots concurrency is governed by the one existing tunable knob
+    /// rather than a second, uncoordinated one.
+    private static func defaultRescanWorkerCount() -> Int {
+        let defaultWorkerCount = min(6, max(4, ProcessInfo.processInfo.activeProcessorCount))
+        return ProcessInfo.processInfo.environment["DIRWIZ_SCAN_WORKERS"]
+            .flatMap(Int.init)
+            .map { max(1, $0) }
+            ?? defaultWorkerCount
     }
 
     /// Resolve one changed-directory path to the deepest ancestor that both still exists
@@ -468,62 +856,13 @@ public final class FileScanner: @unchecked Sendable {
         return Self.absolutePath(rootPath: rootPath, components: [])
     }
 
-    /// Immediate-mode re-enumeration of one directory into an already-existing tree node:
-    /// reuses the same `scanDirectory` dispatcher a cold scan uses in immediate mode
-    /// (raw buffer path for `RealFilesystemProvider`, generic listing otherwise), seeded
-    /// mid-tree instead of at a fresh root, drained on the calling task rather than a
-    /// worker pool — changed sets are small, so a dedicated pool isn't worth the setup cost.
-    private func scanSubtreeImmediate(
-        rootPath: String,
-        rootIndex: UInt32,
-        tree: FileTree,
-        progress: ScanProgress,
-        visited: VisitedDirectories
-    ) {
-        // Mark the target itself visited before recursing, same as the cold scan marks
-        // its root, so a firmlink loop can't immediately re-enter this subtree.
-        if let di = filesystem.deviceAndInode(forPath: rootPath) {
-            _ = visited.insert(dev: di.device, inode: di.inode)
-        }
-
-        let queue = DirectoryWorkQueue()
-        queue.enqueue(path: rootPath, parentIndex: rootIndex)
-
-        let rawFilesystemForScan = filesystem as? RealFilesystemProvider
-        let rawBuffer = rawFilesystemForScan.map { _ in
-            UnsafeMutableRawPointer.allocate(
-                byteCount: RealFilesystemProvider.directoryBufferSize,
-                alignment: 16
-            )
-        }
-        defer { rawBuffer?.deallocate() }
-
-        var rawScratch = RawScanScratch()
-        var rawArena = RawScanArena()
-
-        while let item = queue.next() {
-            scanDirectory(
-                dirPath: item.path,
-                parentIndex: item.parentIndex,
-                tree: tree,
-                progress: progress,
-                visited: visited,
-                enqueue: { path, parentIndex in queue.enqueue(path: path, parentIndex: parentIndex) },
-                maybeUpdateProgress: { _ in },
-                rawFilesystem: rawFilesystemForScan,
-                rawBuffer: rawBuffer,
-                rawScratch: &rawScratch,
-                deferredBuilder: nil,
-                rawArena: &rawArena
-            )
-            queue.complete()
-        }
-    }
-
     /// Split `path` into components relative to `rootPath`, or nil if `path` is neither
     /// `rootPath` itself nor a boundary-respecting descendant of it (e.g. rejects
-    /// "/root-2" against root "/root").
-    private static func relativeComponents(of path: String, rootPath: String) -> [String]? {
+    /// "/root-2" against root "/root"). Module-internal (not `private`) rather than
+    /// duplicated: `WarmStartPlanner.estimatedPatchItemCount` (WarmStart.swift, plan 042)
+    /// needs the identical path-splitting logic to resolve a changed root against the
+    /// CACHED tree before `FileScanner` itself is even involved.
+    static func relativeComponents(of path: String, rootPath: String) -> [String]? {
         let normalizedPath = normalizePath(path)
         let normalizedRoot = normalizePath(rootPath)
         if normalizedPath == normalizedRoot { return [] }

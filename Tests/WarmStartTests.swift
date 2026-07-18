@@ -154,6 +154,170 @@ struct WarmStartPlannerTests {
         )
         #expect(decision == .warm(targets: ["/root/a", "/root/b", "/root/c"]))
     }
+
+    // MARK: - Cost-based rule (plan 042: judge by estimated WORK, not root count alone)
+
+    @Test("Few roots but a huge share of cached items falls back to cold — the incident shape")
+    func fewRootsHugeItemFractionFallsBackToCold() {
+        // Exactly the reported incident: a handful of collapsed roots easily clears the
+        // root-count threshold (3 of 1,000 dirs), but those roots are a subtree of
+        // 100k+ files — three quarters of everything the cache knows about.
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(["/root/a", "/root/b", "/root/c"]),
+            cachedDirectoryCount: 1_000,
+            cachedTotalItemCount: 200_000,
+            estimatedPatchItems: 150_000
+        )
+        guard case .coldFallback(let reason) = decision else {
+            Issue.record("expected coldFallback, got \(decision)")
+            return
+        }
+        #expect(reason.contains("75"), "reason should mention the item-change percentage: \(reason)")
+    }
+
+    @Test("Small scattered item fraction still warms even with the cost-based rule active")
+    func smallItemFractionStillWarms() {
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(["/root/a", "/root/b"]),
+            cachedDirectoryCount: 1_000,
+            cachedTotalItemCount: 200_000,
+            estimatedPatchItems: 1_000
+        )
+        #expect(decision == .warm(targets: ["/root/a", "/root/b"]))
+    }
+
+    @Test("Item fraction exactly at the 25% boundary still warms")
+    func itemFractionAtBoundaryStillWarms() {
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(["/root/a"]),
+            cachedDirectoryCount: 1_000,
+            cachedTotalItemCount: 100_000,
+            estimatedPatchItems: 25_000
+        )
+        #expect(decision == .warm(targets: ["/root/a"]))
+    }
+
+    @Test("Item fraction just over the 25% boundary falls back to cold")
+    func itemFractionJustOverBoundaryFallsBackToCold() {
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(["/root/a"]),
+            cachedDirectoryCount: 1_000,
+            cachedTotalItemCount: 100_000,
+            estimatedPatchItems: 25_001
+        )
+        guard case .coldFallback = decision else {
+            Issue.record("expected coldFallback, got \(decision)")
+            return
+        }
+    }
+
+    @Test("Cost-based rule is inert when the caller doesn't supply the new parameters")
+    func costBasedRuleInertWithoutNewParameters() {
+        // Same inputs as `tooManyChangesFallsBackToCold` above, proving the default
+        // (nil, nil) leaves the pre-042 root-count-only behavior byte-for-byte unchanged.
+        let manyPaths = (0..<10).map { "/root/dir\($0)" }
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(manyPaths),
+            cachedDirectoryCount: 20,
+            maxChangedFraction: 0.20
+        )
+        guard case .coldFallback = decision else {
+            Issue.record("expected coldFallback (root-count rule alone), got \(decision)")
+            return
+        }
+    }
+
+    @Test("A passing item fraction still defers to the root-count rule as a secondary cap")
+    func itemFractionPassingStillSubjectToRootCountCap() {
+        // 500 tiny changed roots (1 item apiece) sail under the 25% item threshold but
+        // blow through the 20% root-count cap — the cost-based rule isn't a replacement,
+        // it's an ADDITIONAL gate.
+        let manyTinyRoots = (0..<500).map { "/root/dir\($0)" }
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(manyTinyRoots),
+            cachedDirectoryCount: 1_000,
+            cachedTotalItemCount: 1_000_000,
+            estimatedPatchItems: 500
+        )
+        guard case .coldFallback = decision else {
+            Issue.record("expected coldFallback from the root-count cap despite a tiny item fraction, got \(decision)")
+            return
+        }
+    }
+}
+
+// MARK: - estimatedPatchItemCount (plan 042: the cost-based rule's numerator)
+
+@Suite("WarmStartPlanner estimatedPatchItemCount Tests")
+struct WarmStartPlannerEstimatedPatchItemCountTests {
+
+    @Test("Sums cached subtree sizes for resolvable roots and a small constant for unresolved ones")
+    func sumsSubtreesAndHandlesUnresolvedRoots() {
+        let tree = FileTree()
+        tree.setRootPath("/root")
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        var dirA = FileNode()
+        dirA.isDirectory = true
+        var dirB = FileNode()
+        dirB.isDirectory = true
+        let firstChild = tree.addChildren([(node: dirA, name: "a"), (node: dirB, name: "b")], parentIndex: 0)
+        let aIndex = firstChild
+
+        let f1 = FileNode()
+        let f2 = FileNode()
+        let f3 = FileNode()
+        tree.addChildren([(node: f1, name: "f1"), (node: f2, name: "f2"), (node: f3, name: "f3")], parentIndex: aIndex)
+
+        // "a": itself + 3 files = 4. "b": itself = 1. "doesnotexist": unresolved constant.
+        let count = WarmStartPlanner.estimatedPatchItemCount(
+            forChangedPaths: ["/root/a", "/root/b", "/root/doesnotexist"],
+            cachedTree: tree
+        )
+        #expect(count == 4 + 1 + 32, "unresolved root should contribute the small fallback constant (32)")
+    }
+
+    @Test("Nested changed paths collapse to their outermost root before summing")
+    func collapsesNestedPathsBeforeSumming() {
+        let tree = FileTree()
+        tree.setRootPath("/root")
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        var dirA = FileNode()
+        dirA.isDirectory = true
+        let aIndex = tree.addChildren([(node: dirA, name: "a")], parentIndex: 0)
+        let f1 = FileNode()
+        tree.addChildren([(node: f1, name: "f1")], parentIndex: aIndex)
+
+        // "/root/a/f1" is nested inside "/root/a" — only the outer root should be counted.
+        let count = WarmStartPlanner.estimatedPatchItemCount(
+            forChangedPaths: ["/root/a", "/root/a/f1"],
+            cachedTree: tree
+        )
+        #expect(count == 2, "a + f1, counted once")
+    }
+
+    @Test("Empty changed-paths list contributes zero")
+    func emptyChangedPathsContributesZero() {
+        let tree = FileTree()
+        tree.setRootPath("/root")
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        let count = WarmStartPlanner.estimatedPatchItemCount(forChangedPaths: [], cachedTree: tree)
+        #expect(count == 0)
+    }
 }
 
 // MARK: - PathCollapse (shared outermost-root collapsing, plan 035)

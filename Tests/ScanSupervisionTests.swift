@@ -336,6 +336,88 @@ struct ScanSupervisionTests {
         await waitUntil(timeout: 20) { !state.scanProgress.isScanning }
         #expect(!state.scanProgress.isScanning)
     }
+
+    // MARK: - 7. A warm patch is cancellable/supersedable mid-flight (plan 042)
+
+    /// The patch phase used to be a single-threaded loop that ran synchronously on the
+    /// caller (effectively blocking the UI for however long it took); plan 042 reworked it
+    /// into parallel-enumerate/serial-apply. This proves the rework kept (and, per the
+    /// 040-flagged nit fixed in 042, actually FIXED) real cancellation: clicking away
+    /// mid-patch must stop actual work, not just eventually settle on its own.
+    @Test("A warm patch can be cancelled mid-flight — no patch work keeps going in the background afterward")
+    func warmPatchIsCancellableMidFlight() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.warmPatchIsCancellableMidFlightBody()
+        }
+    }
+
+    @MainActor
+    private func warmPatchIsCancellableMidFlightBody() async throws {
+        var layout: [String: UInt64] = [:]
+        // Padding: keeps both the root-count AND cost-based (item-fraction) warm-start
+        // thresholds comfortably satisfied despite changing 50 real directories below —
+        // same trick `warmToColdAbandonmentBody`/`composedWarmStartMatchesColdScan` use.
+        for i in 0..<300 {
+            layout["pad\(i)/seed.txt"] = 1
+        }
+        // 50 real changed roots, each starting tiny in the CACHED tree — the warm-start
+        // decision judges the changed set by this small cached size (exactly like the
+        // reported incident: the decision can't know ahead of time how much new content
+        // a root is about to gain on disk), so it still warms even though the mutation
+        // below gives Phase A/B real work to do.
+        for i in 0..<50 {
+            layout["churn\(i)/seed.txt"] = 1
+        }
+        let (rawRoot, cleanup) = try createTempTree(layout)
+        defer { cleanup() }
+        let root = realDirectoryPath(rawRoot)
+        try await settleFSEventsJournal()
+
+        let savedEventId = FSEventsJournal.currentEventId()
+        let tree = await scanFixture(at: root)
+        try TreeCache.save(tree: tree, lastEventId: savedEventId)
+
+        // Grow each churn directory substantially — real work for the parallel patch to
+        // chew through, even though the warm decision (based on the cache above) sees
+        // only a small fraction of the tree as changed.
+        for i in 0..<50 {
+            let dirURL = URL(fileURLWithPath: root).appendingPathComponent("churn\(i)")
+            for f in 0..<100 {
+                try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
+            }
+        }
+        try await settleFSEventsJournal()
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        defaults.set(root, forKey: Self.lastScannedVolumePathKey)
+
+        let state = AppState(defaults: defaults)
+        state.selectedVolume = URL(fileURLWithPath: root)
+
+        state.startSelectedVolumeScan()
+        // Wait past the "preparing"/replay-wait sub-state into the actual patch, where
+        // `commitWarmStart` has registered its scanner via `markStarted`.
+        await waitUntil(timeout: 10, pollInterval: .milliseconds(1)) {
+            state.scanProgress.isScanning && !state.isPreparingScan
+        }
+
+        state.cancelScan()
+        await waitUntil(timeout: 20) { !state.scanProgress.isScanning }
+
+        #expect(!state.scanProgress.isScanning)
+
+        // Not just momentarily quiet: no patch work should still be updating counters in
+        // the background after cancellation has settled.
+        let filesAfterCancel = state.scanProgress.filesScanned
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(state.scanProgress.filesScanned == filesAfterCancel,
+            "no patch work should still be in flight after cancelActiveScan")
+
+        // The tree must remain usable regardless of how much of the patch got applied.
+        #expect(state.fileTree != nil)
+        #expect((state.fileTree?.count ?? 0) > 0)
+    }
 }
 
 } // extension AppSupportEnvSuites

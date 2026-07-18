@@ -288,11 +288,25 @@ public enum WarmStartPlanner {
     /// The `max(1, …)` floor below is deliberate for the same reason — it guarantees at
     /// least one changed root is always tolerated, so an empty or near-empty tree isn't
     /// permanently locked out of ever warming.
+    ///
+    /// `cachedTotalItemCount`/`estimatedPatchItems` (plan 042) add a cost-based rule that
+    /// runs BEFORE the root-count rule, when the caller can supply both: root COUNT alone
+    /// can't see that a single collapsed root is a subtree of 100k+ files (the reported
+    /// incident — days of churn collapsed to a handful of roots sitting high in the tree)
+    /// while the root-count rule alone happily warms a handful of roots. Judging by
+    /// estimated WORK instead catches that shape. The root-count rule is kept as a
+    /// secondary sanity cap regardless — many small, scattered changed roots could pass
+    /// the item fraction trivially while still making per-root splice bookkeeping
+    /// dominate. Both new parameters default to `nil`, so a caller that doesn't supply
+    /// them (every existing call site) gets exactly today's root-count-only behavior.
     public static func decide(
         cacheAvailable: Bool,
         replay: JournalReplay.Outcome?,
         cachedDirectoryCount: Int?,
-        maxChangedFraction: Double = 0.20
+        cachedTotalItemCount: Int? = nil,
+        estimatedPatchItems: Int? = nil,
+        maxChangedFraction: Double = 0.20,
+        maxChangedItemFraction: Double = 0.25
     ) -> Decision {
         guard cacheAvailable else {
             return .coldFallback(reason: "no cache available")
@@ -305,6 +319,15 @@ public enum WarmStartPlanner {
             return .coldFallback(reason: userFacingPoisonReason(reason))
         case .changes(let targets):
             let roots = PathCollapse.outermostRoots(targets)
+
+            if let estimatedPatchItems, let cachedTotalItemCount, cachedTotalItemCount > 0 {
+                let itemThreshold = Double(cachedTotalItemCount) * maxChangedItemFraction
+                guard Double(estimatedPatchItems) <= itemThreshold else {
+                    let percent = percentage(estimatedPatchItems, of: cachedTotalItemCount)
+                    return .coldFallback(reason: "~\(percent)% of files changed since last scan")
+                }
+            }
+
             guard let cachedDirectoryCount else {
                 guard roots.count <= unknownDirectoryCountBackstop else {
                     return .coldFallback(
@@ -326,6 +349,37 @@ public enum WarmStartPlanner {
         guard total > 0 else { return 100 }
         return Int((Double(count) / Double(total) * 100).rounded())
     }
+
+    /// Sum of the CACHED tree's subtree item counts for each collapsed changed root — the
+    /// cost-based decision's numerator (plan 042). Caller-computed (like
+    /// `cachedDirectoryCount`) rather than done inside `decide` itself, keeping that
+    /// function pure logic with no `FileTree` dependency of its own.
+    ///
+    /// A root that doesn't resolve in the cached tree (a brand-new top-level directory
+    /// FSEvents reported, or one already deleted) contributes a small constant instead of
+    /// zero — the estimate only needs to bound a decision, not be exact, and treating an
+    /// unresolvable root as "free" would silently undercount exactly the case (new
+    /// content) most likely to be large.
+    public static func estimatedPatchItemCount(forChangedPaths targets: [String], cachedTree: FileTree) -> Int {
+        let roots = PathCollapse.outermostRoots(targets)
+        guard !roots.isEmpty else { return 0 }
+
+        let snapshot = cachedTree.pathBuildingSnapshot()
+        var total = 0
+        for root in roots {
+            guard let components = FileScanner.relativeComponents(of: root, rootPath: snapshot.rootPath),
+                  let index = FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool) else {
+                total += unresolvedRootItemEstimate
+                continue
+            }
+            total += cachedTree.subtreeItemCount(at: index)
+        }
+        return total
+    }
+
+    /// Fallback contribution (plan 042) for a changed root that doesn't resolve against
+    /// the cached tree at all — see `estimatedPatchItemCount`'s doc comment.
+    private static let unresolvedRootItemEstimate = 32
 
     /// Poison reasons from `JournalCollector` (e.g. "MustScanSubDirs,RootChanged",
     /// "failed to create FSEventStream") are diagnostic jargon meant for logs, not the

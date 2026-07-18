@@ -236,10 +236,19 @@ extension AppState {
             // A true folder count for the threshold, not the cache's raw node count —
             // computed fresh each attempt since the cached tree itself never changes here.
             let cachedDirectoryCount = Self.directoryCount(in: cached.tree)
+            // Cost-based rule (plan 042): estimate how much of the cached tree the
+            // changed roots actually represent, not just how many of them there are — a
+            // handful of collapsed roots can still be a subtree of 100k+ files.
+            let estimatedPatchItems: Int? = {
+                guard case .changes(let targets) = replay.outcome else { return nil }
+                return WarmStartPlanner.estimatedPatchItemCount(forChangedPaths: targets, cachedTree: cached.tree)
+            }()
             let decision = WarmStartPlanner.decide(
                 cacheAvailable: true,
                 replay: replay.outcome,
-                cachedDirectoryCount: cachedDirectoryCount
+                cachedDirectoryCount: cachedDirectoryCount,
+                cachedTotalItemCount: cached.tree.count,
+                estimatedPatchItems: estimatedPatchItems
             )
 
             guard self.scanSession.token == attemptToken else { return }
@@ -365,6 +374,22 @@ extension AppState {
                 path: path, runPostScanAnalyses: shouldRunPostScanAnalyses,
                 preservedExploration: preservedExploration
             )
+            return
+        }
+
+        // A cancelled rescan (plan 042) leaves `tree` valid but only partially patched —
+        // whatever finished applying stays applied, the rest didn't. Report that honestly
+        // instead of the "success" bookkeeping below: no cache write-back under the new
+        // event id (it would wrongly claim every target was applied), no completion
+        // summary implying a finished refresh.
+        guard !report.wasCancelled else {
+            log.info("Warm start cancelled mid-patch for \(path, privacy: .public); tree reflects a partial refresh")
+            scanSession.markFinished()
+            computeExtensionStats()
+            scanProgress.publishCounters(forceLayoutRevision: true)
+            scanProgress.isScanning = false
+            scanProgress.isCancelled = true
+            scanProgress.scanComplete = true
             return
         }
 

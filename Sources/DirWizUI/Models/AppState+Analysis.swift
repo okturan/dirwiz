@@ -211,6 +211,17 @@ extension AppState {
             return
         }
 
+        // This flow's scanner isn't registered with `scanSession` (see the doc comment
+        // above), so nothing in the UI can cancel it directly today — but the enclosing
+        // Task could still be cancelled some other way (e.g. the view task it runs on
+        // going away). Leave `fsChanges`/the cache untouched rather than claiming full
+        // coverage over a possibly-partial splice (028's rescan is idempotent, so simply
+        // trying again later re-applies whatever this run didn't finish).
+        guard !report.wasCancelled else {
+            isApplyingChanges = false
+            return
+        }
+
         invalidateAfterTreeMutation(restoring: capture)
         computeExtensionStats()
 

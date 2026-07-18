@@ -149,6 +149,19 @@ public final class FileTree: @unchecked Sendable {
         lowercaseNameEntries.reserveCapacity(500_000)
     }
 
+    /// Lightweight initializer for detached per-root staging trees built during
+    /// `FileScanner.rescanSubtrees`'s parallel Phase A (plan 042): one of these gets
+    /// created per concurrently-enumerated changed root, so the default init's 500k-node
+    /// reservation (~tens of MB each) would multiply badly across dozens of them. Dynamic
+    /// array growth handles anything bigger than the hint at the usual amortized cost.
+    /// Never builds a search index (`lowercaseNamePool`/`lowercaseNameEntries` stay empty)
+    /// since staging trees are discarded into the real tree via `installSubtree` before
+    /// any search-index consumer ever sees them.
+    init(stagingCapacityHint: Int) {
+        nodes.reserveCapacity(stagingCapacityHint)
+        stringPool.reserveCapacity(stagingCapacityHint * 24)
+    }
+
     /// Set the root path. Must be called exactly once, before concurrent access begins.
     public func setRootPath(_ path: String) {
         precondition(nodes.isEmpty, "setRootPath must be called before any nodes are added")
@@ -1023,6 +1036,111 @@ public final class FileTree: @unchecked Sendable {
             stringPool = newStringPool
             lowercaseNamePool.removeAll(keepingCapacity: true)
             lowercaseNameEntries.removeAll(keepingCapacity: true)
+            isSearchIndexBuilt = false
+        }
+    }
+
+    /// Count every node in the subtree rooted at `index` — the root itself plus every
+    /// descendant. A subtree's member indices are NOT one contiguous range (only a single
+    /// node's DIRECT children are), so this walks an explicit stack, the same technique
+    /// `removeSubtree` uses to find a subtree's members. Used by the cost-based warm-start
+    /// decision (plan 042) to estimate how much work a collapsed changed root represents,
+    /// from the CACHED tree's last-known shape, without re-walking the whole tree per root.
+    public func subtreeItemCount(at index: UInt32) -> Int {
+        lock.withLock { _ in
+            let i = Int(index)
+            guard i >= 0, i < nodes.count else { return 0 }
+            var visited = Set<UInt32>()
+            var stack: [UInt32] = [index]
+            while let current = stack.popLast() {
+                guard visited.insert(current).inserted else { continue }
+                let ci = Int(current)
+                guard ci < nodes.count else { continue }
+                let node = nodes[ci]
+                guard node.firstChildIndex != FileNode.invalid else { continue }
+                let start = Int(node.firstChildIndex)
+                let end = min(start + Int(node.childCount), nodes.count)
+                for child in start..<end {
+                    stack.append(UInt32(child))
+                }
+            }
+            return visited.count
+        }
+    }
+
+    /// Merge a detached staged subtree (built by `FileScanner.rescanSubtrees`'s parallel
+    /// Phase A into its own small `FileTree` via `stagingCapacityHint:` — index 0 there is
+    /// a placeholder standing in for `at`'s on-disk descendants) into this tree at `at`,
+    /// whose existing children the caller has already cleared via `removeChildren(of:)`.
+    ///
+    /// Appends the staged tree's nodes (skipping its placeholder root) to the end of this
+    /// tree's array, remapping every parent/child index and rebasing every name offset —
+    /// the same appending discipline `replaceContents` uses when merging cold-scan worker
+    /// arenas, scoped to one subtree instead of the whole tree. Aggregate sizes are left
+    /// for the caller's `recomputeAggregates()`, matching `removeChildren`'s own contract.
+    func installSubtree(_ staged: FileTree, at index: UInt32) {
+        let stagedNodes = staged.nodesSnapshot()
+        guard !stagedNodes.isEmpty else { return }
+        let stagedStringPool = staged.stringPoolSnapshot()
+
+        lock.withLock { _ in
+            let targetIndex = Int(index)
+            guard targetIndex >= 0, targetIndex < nodes.count else { return }
+
+            guard stagedNodes.count > 1 else {
+                // Only the placeholder root staged — the target directory is empty on
+                // disk now. `removeChildren` already cleared it; nothing more to splice.
+                nodes[targetIndex].firstChildIndex = FileNode.invalid
+                nodes[targetIndex].childCount = 0
+                return
+            }
+
+            let base = UInt32(nodes.count)
+            nodes.reserveCapacity(nodes.count + stagedNodes.count - 1)
+            stringPool.reserveCapacity(stringPool.count + stagedStringPool.count)
+
+            // Staged index 0 (the placeholder root) maps to `index` itself; every other
+            // staged index `i` maps to `base + (i - 1)`, appended in staged order.
+            func remap(_ stagedIndex: UInt32) -> UInt32 {
+                stagedIndex == 0 ? index : base &+ (stagedIndex &- 1)
+            }
+
+            // Raw-pointer name copying, matching `addChildren(encoded:namePool:parentIndex:)`
+            // — per-node `Data` slicing (`stagedStringPool[start..<end]`) measurably
+            // dominated Phase B's cost on a large staged subtree (benchmarked: ~30k nodes
+            // took ~300ms via slicing vs a small fraction of that here), apparently from
+            // `Data`'s slice/COW bookkeeping on every iteration rather than the copy itself.
+            stagedStringPool.withUnsafeBytes { rawPool in
+                let pool = rawPool.bindMemory(to: UInt8.self)
+                for stagedIndex in 1..<UInt32(stagedNodes.count) {
+                    var node = stagedNodes[Int(stagedIndex)]
+                    node.parentIndex = remap(node.parentIndex)
+                    if node.firstChildIndex != FileNode.invalid {
+                        node.firstChildIndex = remap(node.firstChildIndex)
+                    }
+
+                    let nameStart = Int(node.nameOffset)
+                    let nameLength = Int(node.nameLength)
+                    let available = nameStart >= 0 && nameStart < pool.count
+                        ? min(nameLength, pool.count - nameStart)
+                        : 0
+                    node.nameOffset = UInt32(stringPool.count)
+                    node.nameLength = UInt16(available)
+                    if let poolBase = pool.baseAddress, available > 0 {
+                        let nameBytes = UnsafeBufferPointer(start: poolBase.advanced(by: nameStart), count: available)
+                        stringPool.append(contentsOf: nameBytes)
+                    }
+
+                    nodes.append(node)
+                }
+            }
+
+            let stagedRoot = stagedNodes[0]
+            nodes[targetIndex].firstChildIndex = stagedRoot.firstChildIndex == FileNode.invalid
+                ? FileNode.invalid
+                : remap(stagedRoot.firstChildIndex)
+            nodes[targetIndex].childCount = stagedRoot.childCount
+
             isSearchIndexBuilt = false
         }
     }
