@@ -49,6 +49,22 @@ open dist/DirWiz.app
 
 The package script creates `dist/DirWiz.app` and `dist/DirWiz-<version>-macos.zip` (version read from `Info.plist`).
 
+### Published v1.0.0 artifact
+
+The [v1.0.0 download](https://github.com/okturan/dirwiz/releases/tag/v1.0.0) is a historical Apple-silicon (`arm64`) build for macOS 15 or newer. It is ad-hoc signed, not notarized, and therefore may require an explicit Gatekeeper override on first launch. Its SHA-256 checksum is:
+
+```text
+763351f50f3087720b537914f6edbd91f238e01179a011d6f0d9d4036730fe4b  DirWiz-1.0.0-macos.zip
+```
+
+Verify a download before opening it:
+
+```bash
+shasum -a 256 DirWiz-1.0.0-macos.zip
+```
+
+Current source has moved beyond that artifact: `scripts/package-release.sh` now requires a universal `arm64` + `x86_64` binary and supports Developer ID signing plus notarization when the maintainer supplies Apple credentials. Those improvements do not retroactively make the v1.0.0 zip universal or notarized; Intel users should build current source until a newer verified release is published.
+
 Run the CLI:
 
 ```bash
