@@ -136,6 +136,33 @@ struct AnalysisCoordinationTests {
     }
 }
 
+// MARK: - SkippedDirsPresentation (skipped-dirs-honesty)
+
+/// Fixability decides tone: FDA-granted skips are SIP-protected and unfixable (quiet
+/// explainer), FDA-missing skips are fixable (they fold into the FDA banner's warning),
+/// and zero skips show nothing at all.
+@Suite("Skipped Dirs Presentation Tests")
+struct SkippedDirsPresentationTests {
+    @Test("Zero skips hide the line regardless of FDA state")
+    func zeroSkipsHidden() {
+        #expect(SkippedDirsPresentation.style(fdaGranted: true, skippedCount: 0) == .hidden)
+        #expect(SkippedDirsPresentation.style(fdaGranted: false, skippedCount: 0) == .hidden)
+    }
+
+    @Test("FDA granted with skips presents the quiet informational style")
+    func fdaGrantedIsQuiet() {
+        #expect(SkippedDirsPresentation.style(fdaGranted: true, skippedCount: 1) == .quietInfo)
+        #expect(SkippedDirsPresentation.style(fdaGranted: true, skippedCount: 5_000) == .quietInfo,
+            "Magnitude never escalates an unfixable condition to a warning")
+    }
+
+    @Test("FDA missing with skips routes into the FDA warning banner")
+    func fdaMissingRoutesToBanner() {
+        #expect(SkippedDirsPresentation.style(fdaGranted: false, skippedCount: 1) == .fdaWarning)
+        #expect(SkippedDirsPresentation.style(fdaGranted: false, skippedCount: 5_000) == .fdaWarning)
+    }
+}
+
 // MARK: - ScanSummaryComposer (pure formatting, plan 031)
 
 @Suite("Scan Summary Composer Tests")

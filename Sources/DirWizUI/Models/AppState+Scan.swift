@@ -49,6 +49,26 @@ enum ScanSummaryComposer {
     }
 }
 
+/// Styling rule for the sidebar's skipped-directories line (skipped-dirs-honesty):
+/// fixability decides tone. With Full Disk Access granted, the skips are SIP-protected
+/// locations the user cannot unlock — quiet informational styling with an explainer,
+/// never an FDA call-to-action they've already satisfied. Without FDA the skips are
+/// fixable, so they belong inside the existing FDA warning banner (one alarm, one
+/// action) rather than a second independent warning line.
+public enum SkippedDirsPresentation: Equatable {
+    /// Nothing skipped — show nothing.
+    case hidden
+    /// FDA granted: secondary-styled informational line with the explainer popover.
+    case quietInfo
+    /// FDA missing: fold the count into the FDA banner; no standalone line.
+    case fdaWarning
+
+    public static func style(fdaGranted: Bool, skippedCount: Int) -> SkippedDirsPresentation {
+        guard skippedCount > 0 else { return .hidden }
+        return fdaGranted ? .quietInfo : .fdaWarning
+    }
+}
+
 extension AppState {
     private static let lastScannedVolumePathKey = "lastScannedVolumePath"
 

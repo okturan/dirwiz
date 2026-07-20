@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var exportAlertTitle: String = ""
     @State private var exportAlertMessage: String = ""
     @State private var showExportAlert: Bool = false
+    @State private var showSkippedDirsPopover: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -156,7 +157,9 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Full Disk Access not granted")
                     .font(.system(size: 11, weight: .medium))
-                Text("Results will be incomplete")
+                // The skipped count folds in here rather than as a second warning line in
+                // the scan summary — one alarm, one action (skipped-dirs-honesty).
+                Text(fdaBannerDetail)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -171,6 +174,12 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .background(Color.orange.opacity(0.1))
         .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.orange.opacity(0.3)), alignment: .bottom)
+    }
+
+    private var fdaBannerDetail: String {
+        let skipped = appState.scanProgress.skippedDirectories
+        guard skipped > 0 else { return "Results will be incomplete" }
+        return "Results will be incomplete — \(skipped) folder\(skipped == 1 ? "" : "s") couldn't be read"
     }
 
     private var scanSummary: some View {
@@ -213,20 +222,84 @@ struct ContentView: View {
             Text(String(format: "%.1fs elapsed", appState.scanProgress.elapsedTime))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if appState.scanProgress.skippedDirectories > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                    Text("\(appState.scanProgress.skippedDirectories) directories unreadable")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                .help("Some directories could not be read due to permission restrictions. Enable Full Disk Access in System Settings for complete results.")
+            // Skipped-dirs line: only the quiet (FDA-granted) style renders here. The
+            // FDA-missing case folds into `fullDiskAccessBanner` above — one alarm, one
+            // action — instead of a second independent warning (skipped-dirs-honesty).
+            if SkippedDirsPresentation.style(
+                fdaGranted: appState.hasFullDiskAccess,
+                skippedCount: appState.scanProgress.skippedDirectories
+            ) == .quietInfo {
+                skippedDirsQuietLine
             }
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
+    }
+
+    /// The FDA-granted skipped-dirs presentation: these locations are SIP-protected and
+    /// unfixable, so the line is informational (secondary styling, no orange) and opens
+    /// an explainer popover listing the recorded paths.
+    private var skippedDirsQuietLine: some View {
+        let count = appState.scanProgress.skippedDirectories
+        return Button {
+            showSkippedDirsPopover.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "info.circle")
+                    .font(.caption2)
+                Text("\(count) system-protected folder\(count == 1 ? "" : "s") skipped")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showSkippedDirsPopover, arrowEdge: .trailing) {
+            skippedDirsPopover
+        }
+    }
+
+    private var skippedDirsPopover: some View {
+        let paths = appState.scanProgress.skippedDirectoryPaths
+        let count = appState.scanProgress.skippedDirectories
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("System-Protected Folders")
+                .font(.system(size: 12, weight: .semibold))
+            Text("macOS protects these locations even from apps with Full Disk Access. Every disk utility skips them; their contents are not included in totals.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(paths, id: \.self) { path in
+                        Text(abbreviateHomePath(path))
+                            .font(.system(size: 11, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    if count > paths.count {
+                        Text("… and \(count - paths.count) more")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+        .padding(12)
+        .frame(width: 420)
+    }
+
+    private func abbreviateHomePath(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
     }
 
     /// Shown in place of `scanSummary` while a restored cache is on screen and not yet

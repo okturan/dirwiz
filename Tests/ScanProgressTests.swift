@@ -185,3 +185,69 @@ struct ScanProgressFractionHonestyTests {
         #expect(progress.fractionCompleted == 0.2, "A fresh scan after reset() must not inherit the previous scan's latch")
     }
 }
+
+/// Skipped-directory path recording (skipped-dirs-honesty): the count stays exact while
+/// the recorded path list is a display sample capped at `maxRecordedSkippedPaths`. The
+/// paths ride the same mutex-guarded hot-counter path as every other scanner-thread
+/// counter and surface only via `publishCounters()`.
+@MainActor
+@Suite("ScanProgress skipped-path recording")
+struct ScanProgressSkippedPathTests {
+
+    @Test("Recorded paths and count surface after publish")
+    func recordsPathsUpToPublish() {
+        let progress = ScanProgress()
+        progress.incrementSkippedDirectories(path: "/private/var/db/a")
+        progress.incrementSkippedDirectories(path: "/private/var/db/b")
+
+        #expect(progress.skippedDirectoryPaths.isEmpty, "Hot-counter writes must not surface before publishCounters()")
+
+        progress.publishCounters()
+        #expect(progress.skippedDirectories == 2)
+        #expect(progress.skippedDirectoryPaths == ["/private/var/db/a", "/private/var/db/b"])
+    }
+
+    @Test("Cap bounds the path list while the count stays exact")
+    func capBoundsPathsCountStaysExact() {
+        let progress = ScanProgress()
+        let total = ScanProgress.maxRecordedSkippedPaths + 150
+        for i in 0..<total {
+            progress.incrementSkippedDirectories(path: "/denied/\(i)")
+        }
+        progress.publishCounters()
+
+        #expect(progress.skippedDirectories == total, "Count must stay exact beyond the cap")
+        #expect(progress.skippedDirectoryPaths.count == ScanProgress.maxRecordedSkippedPaths)
+        #expect(progress.skippedDirectoryPaths.first == "/denied/0", "The sample keeps the earliest skips, not the latest")
+    }
+
+    @Test("reset() clears both the count and the recorded paths")
+    func resetClearsPathsAndCount() {
+        let progress = ScanProgress()
+        progress.incrementSkippedDirectories(path: "/denied/x")
+        progress.publishCounters()
+        #expect(progress.skippedDirectories == 1)
+
+        progress.reset()
+        #expect(progress.skippedDirectories == 0)
+        #expect(progress.skippedDirectoryPaths.isEmpty)
+
+        // The hot side must be cleared too — a publish after reset must not resurrect old paths.
+        progress.publishCounters()
+        #expect(progress.skippedDirectoryPaths.isEmpty, "Hot-counter path list must be cleared by reset(), not just the published copy")
+    }
+
+    @Test("Concurrent increments keep the count exact and the list within cap")
+    func concurrentIncrementsAreExact() {
+        let progress = ScanProgress()
+        let total = 400
+        DispatchQueue.concurrentPerform(iterations: total) { i in
+            progress.incrementSkippedDirectories(path: "/denied/\(i)")
+        }
+        progress.publishCounters()
+
+        #expect(progress.skippedDirectories == total, "No increments may be lost under concurrency")
+        #expect(progress.skippedDirectoryPaths.count == ScanProgress.maxRecordedSkippedPaths)
+        #expect(Set(progress.skippedDirectoryPaths).count == ScanProgress.maxRecordedSkippedPaths, "Recorded paths must be distinct entries, not duplicated slots")
+    }
+}

@@ -1240,7 +1240,7 @@ public final class FileScanner: @unchecked Sendable {
 
         guard opened else {
             scanLog.warning("Skipped (permission denied): \(dirPath, privacy: .public)")
-            progress.incrementSkippedDirectories()
+            progress.incrementSkippedDirectories(path: dirPath)
             return
         }
 
@@ -1397,7 +1397,7 @@ public final class FileScanner: @unchecked Sendable {
 
         guard opened else {
             scanLog.warning("Skipped (permission denied): \(dirPath, privacy: .public)")
-            progress.incrementSkippedDirectories()
+            progress.incrementSkippedDirectories(path: dirPath)
             return
         }
 

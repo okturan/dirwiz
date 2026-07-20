@@ -30,6 +30,16 @@ public final class ScanProgress: @unchecked Sendable {
     /// Directories that could not be read (permission denied or I/O error).
     public var skippedDirectories: Int = 0
 
+    /// The skipped directories' paths, capped at `maxRecordedSkippedPaths` entries.
+    /// `skippedDirectories` stays exact beyond the cap — this list is a sample for
+    /// display, not the authoritative count.
+    public var skippedDirectoryPaths: [String] = []
+
+    /// Cap on recorded skipped paths. FDA-granted scans typically skip <30 dirs
+    /// (SIP-protected locations); FDA-missing scans can skip thousands, where the
+    /// count alone drives the UI and unbounded recording would be waste.
+    public static let maxRecordedSkippedPaths = 100
+
     // MARK: - Hot counters (written from scanner threads, NOT observable)
 
     private struct HotCounters: Sendable {
@@ -38,6 +48,7 @@ public final class ScanProgress: @unchecked Sendable {
         var totalSize: UInt64 = 0
         var allocatedBytes: UInt64 = 0
         var skipped: Int = 0
+        var skippedPaths: [String] = []
         var path: String = ""
         var publishCount: Int = 0
     }
@@ -109,6 +120,7 @@ public final class ScanProgress: @unchecked Sendable {
             counters.totalSize = 0
             counters.allocatedBytes = 0
             counters.skipped = 0
+            counters.skippedPaths = []
             counters.path = ""
             counters.publishCount = 0
         }
@@ -125,6 +137,7 @@ public final class ScanProgress: @unchecked Sendable {
         estimatedTotalItems = 0
         scannedAllocatedBytes = 0
         skippedDirectories = 0
+        skippedDirectoryPaths = []
         treeLayoutRevision = 0
         estimateUndershot = false
     }
@@ -146,9 +159,13 @@ public final class ScanProgress: @unchecked Sendable {
     }
 
     /// Called from scanner background threads. Does NOT trigger @Observable.
-    public func incrementSkippedDirectories(count: Int = 1) {
+    /// Records the path while under `maxRecordedSkippedPaths`; the count is exact always.
+    public func incrementSkippedDirectories(path: String) {
         hot.withLock { counters in
-            counters.skipped += count
+            counters.skipped += 1
+            if counters.skippedPaths.count < Self.maxRecordedSkippedPaths {
+                counters.skippedPaths.append(path)
+            }
         }
     }
 
@@ -173,6 +190,7 @@ public final class ScanProgress: @unchecked Sendable {
         totalSize = snapshot.totalSize
         scannedAllocatedBytes = snapshot.allocatedBytes
         skippedDirectories = snapshot.skipped
+        skippedDirectoryPaths = snapshot.skippedPaths
         currentPath = snapshot.path
 
         // Bump layout revision every 10 publishes (≈2.5s) or when forced at scan end.
