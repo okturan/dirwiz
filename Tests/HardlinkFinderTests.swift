@@ -231,4 +231,51 @@ struct HardlinkFinderTests {
         let g2 = HardlinkGroup(inode: 1, device: 1, fileSize: 100, paths: ["/a", "/b"])
         #expect(g1.id != g2.id, "Each HardlinkGroup should have a unique UUID")
     }
+
+    // MARK: - Scan-time link-count capture (always-on-hardlinks)
+
+    @Test("Scan captures multi-link flags on files only and marks the tree")
+    func scanCapturesLinkFlags() async throws {
+        let (rootPath, cleanup) = try createHardlinkTree()
+        defer { cleanup() }
+
+        let tree = FileTree()
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        await scanner.scan(path: rootPath, progress: progress, tree: tree)
+
+        #expect(tree.linkCountsCaptured, "A scanner-produced tree must mark link counts as captured")
+
+        let summary = summarizeTree(tree)
+        #expect(summary[rootPath + "/original.txt"]?.hasMultipleHardlinks == true)
+        #expect(summary[rootPath + "/sub/hardlink.txt"]?.hasMultipleHardlinks == true)
+        #expect(summary[rootPath + "/sub/another_link.txt"]?.hasMultipleHardlinks == true)
+        #expect(summary[rootPath + "/unique.txt"]?.hasMultipleHardlinks == false,
+            "Single-link files must not carry the flag")
+        #expect(summary[rootPath + "/sub"]?.hasMultipleHardlinks == false,
+            "Directories never carry the flag regardless of their filesystem link count")
+    }
+
+    @Test("Fast path groups are identical to full grouping on the same scanned tree")
+    func fastPathMatchesFullGrouping() async throws {
+        let (rootPath, cleanup) = try createHardlinkTree()
+        defer { cleanup() }
+
+        let tree = FileTree()
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        await scanner.scan(path: rootPath, progress: progress, tree: tree)
+        #expect(tree.linkCountsCaptured)
+
+        let finder = HardlinkFinder()
+        let fast = await finder.findHardlinks(in: tree, useLinkCountFastPath: true)
+        let full = await finder.findHardlinks(in: tree, useLinkCountFastPath: false)
+
+        #expect(fast.count == full.count)
+        let fastSummaries = fast.map { ($0.inode, $0.device, $0.fileSize, $0.paths) }
+        let fullSummaries = full.map { ($0.inode, $0.device, $0.fileSize, $0.paths) }
+        for (f, s) in zip(fastSummaries, fullSummaries) {
+            #expect(f == s, "Fast-path group must match full-grouping result exactly (incl. order)")
+        }
+    }
 }

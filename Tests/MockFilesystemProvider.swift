@@ -47,7 +47,8 @@ final class MockFilesystemProvider: @unchecked Sendable, FilesystemProvider {
         allocatedSize: UInt64? = nil,
         inode: UInt64 = 0,
         device: Int32 = 1,
-        modifiedDate: UInt32 = 0
+        modifiedDate: UInt32 = 0,
+        linkCount: UInt32 = 1
     ) -> DirectoryEntry {
         DirectoryEntry(
             name: name,
@@ -57,7 +58,8 @@ final class MockFilesystemProvider: @unchecked Sendable, FilesystemProvider {
             allocatedSize: allocatedSize ?? size,
             modifiedDate: modifiedDate,
             inode: inode,
-            device: device
+            device: device,
+            linkCount: linkCount
         )
     }
 

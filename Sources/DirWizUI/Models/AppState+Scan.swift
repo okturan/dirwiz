@@ -165,6 +165,7 @@ extension AppState {
         setTreemapRoot(resolvedRoot, recordHistory: false)
 
         computeExtensionStats()
+        refreshHardlinkGroups()
         scanProgress.publishCounters(forceLayoutRevision: true)
         staleViewAsOf = cached.savedAt
         lastScanSummary = ScanSummaryComposer.stale(savedAt: cached.savedAt)
@@ -427,6 +428,7 @@ extension AppState {
             setTreemapRoot(0, recordHistory: false)
         }
         computeExtensionStats()
+        refreshHardlinkGroups()
         scanProgress.publishCounters(forceLayoutRevision: true)
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -524,6 +526,7 @@ extension AppState {
                     self.setTreemapRoot(0, recordHistory: false)
                 }
                 self.computeExtensionStats()
+                self.refreshHardlinkGroups()
                 if let coldFallbackReason {
                     self.lastScanSummary = ScanSummaryComposer.coldWithReason(
                         items: tree.count, seconds: self.scanProgress.elapsedTime, reason: coldFallbackReason

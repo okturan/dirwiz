@@ -4,6 +4,7 @@ import Synchronization
 private enum FileNodeFlags {
     static let isDirectory: UInt8 = 1
     static let isBundle: UInt8 = 2
+    static let hasMultipleHardlinks: UInt8 = 4
 }
 
 /// Compact flat-array tree node for filesystem representation.
@@ -46,6 +47,20 @@ public struct FileNode: Sendable {
         get { flags & FileNodeFlags.isBundle != 0 }
         set {
             if newValue { flags |= FileNodeFlags.isBundle } else { flags &= ~FileNodeFlags.isBundle }
+        }
+    }
+
+    // Bit 2: file's scan-time link count exceeded 1 (ATTR_FILE_LINKCOUNT). Never set on
+    // directories (their link count means child count). Meaningful only on trees whose
+    // `FileTree.linkCountsCaptured` is true — hand-built trees leave it false.
+    public var hasMultipleHardlinks: Bool {
+        get { flags & FileNodeFlags.hasMultipleHardlinks != 0 }
+        set {
+            if newValue {
+                flags |= FileNodeFlags.hasMultipleHardlinks
+            } else {
+                flags &= ~FileNodeFlags.hasMultipleHardlinks
+            }
         }
     }
 
@@ -128,6 +143,11 @@ public final class FileTree: @unchecked Sendable {
     /// Whether the scanned volume is case-sensitive (e.g., case-sensitive APFS).
     /// When true, the search index stores original-case names instead of lowercased.
     public private(set) var isCaseSensitive: Bool = false
+    /// Whether this tree's `FileNode.hasMultipleHardlinks` bits are meaningful. True only
+    /// for scanner-produced trees (and caches thereof) — hand-built trees leave it false,
+    /// which tells `HardlinkFinder` to fall back to full per-file grouping instead of
+    /// trusting absent flags.
+    public private(set) var linkCountsCaptured: Bool = false
     private var lowercaseNamePool: Data = Data()
     private var lowercaseNameEntries: [(offset: UInt32, length: UInt16)] = []
     private var isSearchIndexBuilt = false
@@ -172,6 +192,13 @@ public final class FileTree: @unchecked Sendable {
     public func setCaseSensitivity(_ caseSensitive: Bool) {
         precondition(nodes.isEmpty, "setCaseSensitivity must be called before any nodes are added")
         isCaseSensitive = caseSensitive
+    }
+
+    /// Mark that the scanner captured per-file link counts into node flags. Must be called
+    /// before concurrent access begins, same contract as `setRootPath`/`setCaseSensitivity`.
+    public func setLinkCountsCaptured(_ captured: Bool) {
+        precondition(nodes.isEmpty, "setLinkCountsCaptured must be called before any nodes are added")
+        linkCountsCaptured = captured
     }
 
     // MARK: - Thread-safe Reads
@@ -726,13 +753,15 @@ public final class FileTree: @unchecked Sendable {
         nodes: [FileNode],
         stringPool: Data,
         rootPath: String,
-        isCaseSensitive: Bool
+        isCaseSensitive: Bool,
+        linkCountsCaptured: Bool
     ) {
         lock.withLock { _ in
             self.nodes = nodes
             self.stringPool = stringPool
             self.rootPath = rootPath
             self.isCaseSensitive = isCaseSensitive
+            self.linkCountsCaptured = linkCountsCaptured
             lowercaseNamePool.removeAll(keepingCapacity: true)
             lowercaseNameEntries.removeAll(keepingCapacity: true)
             isSearchIndexBuilt = false

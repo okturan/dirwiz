@@ -937,6 +937,9 @@ public final class FileScanner: @unchecked Sendable {
 
         // Store scan root path for correct absolute path reconstruction.
         tree.setRootPath(path)
+        // Every scan path (raw and provider-driven) records per-file link counts into
+        // node flags, so mark them trustworthy for HardlinkFinder's fast path.
+        tree.setLinkCountsCaptured(true)
 
         // Detect volume case sensitivity using getattrlist ATTR_VOL_CAPABILITIES.
         // On case-sensitive APFS, we skip lowercasing file names to avoid merging
@@ -1211,6 +1214,9 @@ public final class FileScanner: @unchecked Sendable {
             node.inode = rawEntry.inode
             if !isDir {
                 node.extensionHash = extensionHash(entryName)
+                if rawEntry.linkCount > 1 {
+                    node.hasMultipleHardlinks = true
+                }
             }
 
             // Detect bundles: mark as opaque leaves and skip recursive enqueue.
@@ -1354,6 +1360,9 @@ public final class FileScanner: @unchecked Sendable {
             node.inode = rawEntry.inode
             if !isDir {
                 node.extensionHash = extensionHash(rawEntry.nameBytes)
+                if rawEntry.linkCount > 1 {
+                    node.hasMultipleHardlinks = true
+                }
             }
 
             let isBundle = isDir && isBundleName(rawEntry.nameBytes)

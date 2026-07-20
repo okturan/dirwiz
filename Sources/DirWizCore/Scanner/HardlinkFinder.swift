@@ -32,8 +32,11 @@ public struct HardlinkGroup: Identifiable, Sendable {
 /// grouping by scan-time (device, inode) identity when available.
 ///
 /// Files sharing the same (device, inode) pair are hardlinks to the same data.
-/// For scan results that don't carry identity metadata (for example, manually
-/// assembled trees in tests), the finder falls back to `lstat`.
+/// Trees produced by the scanner carry per-file link-count flags
+/// (`FileTree.linkCountsCaptured`), so grouping only has to touch the few flagged
+/// nodes — a pure in-memory pass over a tiny subset. For trees without that
+/// guarantee (manually assembled trees in tests), the finder falls back to full
+/// per-file grouping, using `lstat` for nodes missing identity metadata.
 public struct HardlinkFinder {
     public typealias ProgressHandler = @MainActor @Sendable (_ processed: Int, _ total: Int) -> Void
 
@@ -51,6 +54,16 @@ public struct HardlinkFinder {
         in tree: FileTree,
         progress: ProgressHandler? = nil
     ) async -> [HardlinkGroup] {
+        await findHardlinks(in: tree, useLinkCountFastPath: tree.linkCountsCaptured, progress: progress)
+    }
+
+    /// Internal seam so tests can force the full-grouping path on a scanned tree and pin
+    /// fast-path ≡ full-path equivalence.
+    func findHardlinks(
+        in tree: FileTree,
+        useLinkCountFastPath: Bool,
+        progress: ProgressHandler? = nil
+    ) async -> [HardlinkGroup] {
         // Take a snapshot so we can walk all nodes lock-free.
         let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
 
@@ -66,16 +79,6 @@ public struct HardlinkFinder {
         guard !fileIndices.isEmpty else { return [] }
         await progress?(0, fileIndices.count)
 
-        // Dictionary keyed by a hashable representation of (dev, ino).
-        struct DevIno: Hashable {
-            let dev: Int32
-            let ino: UInt64
-        }
-
-        // We'll collect node indices first so we only materialize paths for real groups.
-        var groups: [DevIno: [(nodeIndex: UInt32, fileSize: UInt64)]] = [:]
-        groups.reserveCapacity(fileIndices.count / 4)
-
         func path(for nodeIndex: UInt32) -> String {
             FileTree.pathFromSnapshot(
                 at: nodeIndex,
@@ -84,6 +87,26 @@ public struct HardlinkFinder {
                 rootPath: rootPath
             )
         }
+
+        // Fast path: the scanner recorded link counts, so only flagged files can be
+        // hardlinks — group just those, no per-file batching or filesystem fallback.
+        // Progress keeps the same contract as the full path (total = all files); the
+        // pass is effectively instant, so it reports start and completion only.
+        if useLinkCountFastPath {
+            var flaggedGroups: [DevIno: [(nodeIndex: UInt32, fileSize: UInt64)]] = [:]
+            for i in fileIndices {
+                let node = nodes[Int(i)]
+                guard node.hasMultipleHardlinks else { continue }
+                flaggedGroups[DevIno(dev: node.device, ino: node.inode), default: []]
+                    .append((nodeIndex: i, fileSize: node.fileSize))
+            }
+            await progress?(fileIndices.count, fileIndices.count)
+            return Self.buildResults(from: flaggedGroups, path: path)
+        }
+
+        // We'll collect node indices first so we only materialize paths for real groups.
+        var groups: [DevIno: [(nodeIndex: UInt32, fileSize: UInt64)]] = [:]
+        groups.reserveCapacity(fileIndices.count / 4)
 
         // Process in batches via TaskGroup. Most scanned trees already have device/inode
         // metadata, so this becomes a pure in-memory grouping pass; the fallback path only
@@ -155,23 +178,34 @@ public struct HardlinkFinder {
             }
         }
 
-        // Build HardlinkGroup results — only keep groups with 2+ paths.
+        return Self.buildResults(from: groups, path: path)
+    }
+
+    /// Shared tail for both paths: keep 2+-member groups, materialize sorted paths,
+    /// sort by extra link bytes descending (most impactful first).
+    private static func buildResults(
+        from groups: [DevIno: [(nodeIndex: UInt32, fileSize: UInt64)]],
+        path: (UInt32) -> String
+    ) -> [HardlinkGroup] {
         var results: [HardlinkGroup] = []
         for (key, members) in groups {
             guard members.count >= 2 else { continue }
-            let paths = members.map { path(for: $0.nodeIndex) }.sorted()
+            let paths = members.map { path($0.nodeIndex) }.sorted()
             let fileSize = members.first?.fileSize ?? 0
-            let hardlinkGroup = HardlinkGroup(
+            results.append(HardlinkGroup(
                 inode: key.ino,
                 device: UInt32(bitPattern: key.dev),
                 fileSize: fileSize,
                 paths: paths
-            )
-            results.append(hardlinkGroup)
+            ))
         }
-
-        // Sort by extra link bytes descending (most impactful first).
         results.sort { $0.extraLinkBytes > $1.extraLinkBytes }
         return results
     }
+}
+
+/// Hashable (dev, inode) identity shared by both grouping paths.
+private struct DevIno: Hashable {
+    let dev: Int32
+    let ino: UInt64
 }

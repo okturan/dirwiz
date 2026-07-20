@@ -260,6 +260,30 @@ extension AppState {
         storageTrendHistory = history
     }
 
+    /// Recompute hardlink groups from the current tree's scan-time link-count flags.
+    /// Milliseconds on scanner/cache-produced trees (`linkCountsCaptured` fast path), so
+    /// it runs automatically after every scan completion and tree mutation
+    /// (always-on-hardlinks) instead of behind a button. Token-guarded like every other
+    /// analysis so a stale run can't clobber a newer tree's results.
+    public func refreshHardlinkGroups() {
+        guard let tree = fileTree, !tree.isEmpty else { return }
+        hardlinkTask?.cancel()
+        hardlinkToken &+= 1
+        let token = hardlinkToken
+        hardlink.isHardlinkScanRunning = true
+        hardlink.hardlinkProgress = (0, 0)
+
+        hardlinkTask = Task.detached(priority: .utility) {
+            let groups = await HardlinkFinder().findHardlinks(in: tree)
+            await MainActor.run {
+                guard self.hardlinkToken == token else { return }
+                self.hardlink.hardlinkGroups = groups
+                self.hardlink.isHardlinkScanRunning = false
+                self.hardlinkTask = nil
+            }
+        }
+    }
+
     public func runPostScanAnalyses(
         tree: FileTree,
         volumePath: String,
@@ -357,6 +381,7 @@ extension AppState {
         }
 
         scanProgress.publishCounters(forceLayoutRevision: true)
+        refreshHardlinkGroups()
     }
 
     // MARK: - JSON Export

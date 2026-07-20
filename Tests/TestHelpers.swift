@@ -75,9 +75,11 @@ struct TreeNodeSummary: Equatable, CustomStringConvertible {
     let fileSize: UInt64
     let allocatedSize: UInt64
     let childCount: UInt32
+    let hasMultipleHardlinks: Bool
 
     var description: String {
-        "(dir: \(isDirectory), bundle: \(isBundle), size: \(fileSize), alloc: \(allocatedSize), children: \(childCount))"
+        "(dir: \(isDirectory), bundle: \(isBundle), size: \(fileSize), alloc: \(allocatedSize), "
+            + "children: \(childCount), multilink: \(hasMultipleHardlinks))"
     }
 }
 
@@ -90,7 +92,8 @@ func summarizeTree(_ tree: FileTree) -> [String: TreeNodeSummary] {
             isBundle: node.isBundle,
             fileSize: node.fileSize,
             allocatedSize: node.allocatedSize,
-            childCount: node.childCount
+            childCount: node.childCount,
+            hasMultipleHardlinks: node.hasMultipleHardlinks
         )
     }
     return result

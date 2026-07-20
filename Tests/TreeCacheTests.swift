@@ -69,10 +69,10 @@ private func currentVolumeUUID(for path: String) -> String {
 /// Byte offsets of the fixed-position header fields that follow the variable-length
 /// rootPath/volumeUUID strings, mirroring TreeCache's write order exactly:
 /// magic(4) + formatVersion(4) + nodeStride(4) + savedAt(8) + lastEventId(8) +
-/// rootPathLen(2) + rootPath + isCaseSensitive(1) + volumeUUIDLen(2) + volumeUUID +
-/// nodeCount(4) + stringPoolLen(8) + [nodes...].
+/// rootPathLen(2) + rootPath + isCaseSensitive(1) + linkCountsCaptured(1) +
+/// volumeUUIDLen(2) + volumeUUID + nodeCount(4) + stringPoolLen(8) + [nodes...].
 private func headerFieldOffsets(rootPath: String, volumeUUID: String) -> (nodeCount: Int, stringPoolLen: Int, nodesStart: Int) {
-    let beforeNodeCount = 4 + 4 + 4 + 8 + 8 + 2 + rootPath.utf8.count + 1 + 2 + volumeUUID.utf8.count
+    let beforeNodeCount = 4 + 4 + 4 + 8 + 8 + 2 + rootPath.utf8.count + 1 + 1 + 2 + volumeUUID.utf8.count
     let stringPoolLenOffset = beforeNodeCount + 4
     let nodesStart = stringPoolLenOffset + 8
     return (nodeCount: beforeNodeCount, stringPoolLen: stringPoolLenOffset, nodesStart: nodesStart)
@@ -130,6 +130,8 @@ struct TreeCacheTests {
             guard let payload else { return }
 
             #expect(payload.lastEventId == 12345)
+            #expect(payload.tree.linkCountsCaptured,
+                "A scanned tree marks link counts captured; the cache must carry that through")
 
             let original = tree.pathBuildingSnapshot()
             let loaded = payload.tree.pathBuildingSnapshot()
@@ -216,7 +218,10 @@ struct TreeCacheTests {
 
             let url = TreeCache.cacheURL(for: path)
             var data = try Data(contentsOf: url)
-            patchUInt32(&data, at: 4, to: 2) // formatVersion follows the 4-byte magic
+            // formatVersion follows the 4-byte magic. Patch to v1: pre-link-count caches
+            // must fail closed (their flag bit 2 has no meaning), which doubles as the
+            // generic wrong-version rejection.
+            patchUInt32(&data, at: 4, to: 1)
             try data.write(to: url)
 
             #expect(TreeCache.load(for: path) == nil)

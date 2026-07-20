@@ -13,6 +13,7 @@ public struct DirectoryEntry: Sendable {
     public var modifiedDate: UInt32   // seconds since epoch, clamped to UInt32
     public var inode: UInt64          // file ID for firmlink deduplication
     public var device: Int32          // device ID for firmlink deduplication
+    public var linkCount: UInt32      // hardlink count (ATTR_FILE_LINKCOUNT); 0 = unknown
 
     public init(
         name: String,
@@ -22,7 +23,8 @@ public struct DirectoryEntry: Sendable {
         allocatedSize: UInt64,
         modifiedDate: UInt32,
         inode: UInt64,
-        device: Int32
+        device: Int32,
+        linkCount: UInt32 = 1
     ) {
         self.name = name
         self.isDirectory = isDirectory
@@ -32,6 +34,7 @@ public struct DirectoryEntry: Sendable {
         self.modifiedDate = modifiedDate
         self.inode = inode
         self.device = device
+        self.linkCount = linkCount
     }
 }
 
@@ -47,6 +50,8 @@ public struct RawDirectoryEntry {
     public var modifiedDate: UInt32
     public var inode: UInt64
     public var device: Int32
+    /// Hardlink count (ATTR_FILE_LINKCOUNT); 0 when the filesystem didn't report one.
+    public var linkCount: UInt32
 }
 
 // MARK: - FilesystemProvider Protocol
@@ -133,7 +138,8 @@ public struct RealFilesystemProvider: FilesystemProvider {
                 allocatedSize: entry.allocatedSize,
                 modifiedDate: entry.modifiedDate,
                 inode: entry.inode,
-                device: entry.device
+                device: entry.device,
+                linkCount: entry.linkCount
             ))
             return true
         }) else { return nil }
@@ -151,7 +157,8 @@ public struct RealFilesystemProvider: FilesystemProvider {
                 allocatedSize: entry.allocatedSize,
                 modifiedDate: entry.modifiedDate,
                 inode: entry.inode,
-                device: entry.device
+                device: entry.device,
+                linkCount: entry.linkCount
             ))
         }
     }
@@ -191,7 +198,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
             for _ in 0..<count {
                 guard entryPtr.advanced(by: MemoryLayout<UInt32>.size) <= bufferEnd else { break }
                 let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
-                guard entryLength > 0, entryLength >= kOffsetFileData else { break }
+                guard entryLength > 0, entryLength >= kOffsetCommonEnd else { break }
 
                 let entry = entryPtr
                 let objType = entry.advanced(by: kOffsetObjType).loadUnaligned(as: UInt32.self)
@@ -218,8 +225,10 @@ public struct RealFilesystemProvider: FilesystemProvider {
 
                 var dataLength: UInt64 = 0
                 var allocSize: UInt64 = 0
+                var linkCount: UInt32 = 0
                 if !isDir {
                     guard entryLength >= kOffsetFileData + 2 * MemoryLayout<off_t>.size else { break }
+                    linkCount = parseFileLinkCount(from: entry)
                     (dataLength, allocSize) = parseFileSizes(from: entry)
                 }
 
@@ -230,7 +239,8 @@ public struct RealFilesystemProvider: FilesystemProvider {
                     allocatedSize: allocSize,
                     modifiedDate: modDate,
                     inode: fileID,
-                    device: devID
+                    device: devID,
+                    linkCount: linkCount
                 ))
                 guard shouldContinue else { return true }
 
@@ -275,7 +285,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
                     guard !isCancelled() else { break }
                     guard entryPtr.advanced(by: MemoryLayout<UInt32>.size) <= bufferEnd else { break }
                     let entryLength = Int(entryPtr.loadUnaligned(as: UInt32.self))
-                    guard entryLength > 0, entryLength >= kOffsetFileData else { break }
+                    guard entryLength > 0, entryLength >= kOffsetCommonEnd else { break }
                     let entry = entryPtr
                     let objType = entry.advanced(by: kOffsetObjType).loadUnaligned(as: UInt32.self)
                     let isDir     = objType == VDIR.rawValue
@@ -349,18 +359,33 @@ private let kRequestedCommonAttrs: attrgroup_t =
     attrgroup_t(ATTR_CMN_FILEID)
 
 private let kRequestedFileAttrs: attrgroup_t =
+    attrgroup_t(ATTR_FILE_LINKCOUNT) |
     attrgroup_t(ATTR_FILE_DATALENGTH) |
     attrgroup_t(ATTR_FILE_ALLOCSIZE)
 
-// kOffsetName and kOffsetFileData are `internal` (not `private`) so the contract tests in
-// Tests/FilesystemProviderParsingTests.swift can build fixtures against the real offsets
-// instead of a hardcoded copy that could silently drift from these values.
+// kOffsetName, kOffsetFileLinkCount, and kOffsetFileData are `internal` (not `private`) so
+// the contract tests in Tests/FilesystemProviderParsingTests.swift can build fixtures
+// against the real offsets instead of a hardcoded copy that could silently drift from
+// these values.
+//
+// Offsets are FIXED because FSOPT_PACK_INVAL_ATTRS packs every requested attribute
+// (zero-filled when invalid for the object/filesystem); the per-entry returned-attrs
+// bitmap says which values are real. File-group attributes pack in bit order:
+// LINKCOUNT (0x1) before ALLOCSIZE (0x4) before DATALENGTH (0x200).
 let kOffsetName:     Int = 24
 private let kOffsetDevID:    Int = 32
 private let kOffsetObjType:  Int = 36
 private let kOffsetModTime:  Int = 40
 private let kOffsetFileID:   Int = 56
-let kOffsetFileData: Int = 64
+/// End of the fixed common-attribute region — the minimum plausible entry length for ANY
+/// object type (directories carry no meaningful file-group data we read).
+private let kOffsetCommonEnd: Int = 64
+/// Returned-attrs bitmap (attribute_set_t at offset 4): commonattr, volattr, dirattr,
+/// fileattr, forkattr — one UInt32 each. The file group's bitmap is the fourth.
+/// `internal` so the parsing contract tests can set the bitmap in crafted fixtures.
+let kOffsetReturnedFileAttrs: Int = 4 + 3 * 4
+let kOffsetFileLinkCount: Int = 64
+let kOffsetFileData: Int = 68
 
 private func parseEntryName(from entry: UnsafeRawPointer, entryLength: Int) -> String {
     guard let nameBytes = parseEntryNameBytes(from: entry, entryLength: entryLength) else {
@@ -415,6 +440,17 @@ func parseFileSizes(from entry: UnsafeRawPointer) -> (dataLength: UInt64, allocS
     let allocSize  = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData).loadUnaligned(as: off_t.self)))
     let dataLength = UInt64(bitPattern: Int64(entry.advanced(by: kOffsetFileData + 8).loadUnaligned(as: off_t.self)))
     return (dataLength, allocSize)
+}
+
+// `internal` (not `private`) so Tests/FilesystemProviderParsingTests.swift can drive this
+// pure, pointer-based parser directly with crafted buffers via `@testable import`.
+/// Returns the packed ATTR_FILE_LINKCOUNT value, or 0 when the per-entry returned-attrs
+/// bitmap says the filesystem didn't actually report one (FSOPT_PACK_INVAL_ATTRS packs a
+/// zero-filled placeholder in that case, so the size offsets after it never shift).
+func parseFileLinkCount(from entry: UnsafeRawPointer) -> UInt32 {
+    let returnedFileAttrs = entry.advanced(by: kOffsetReturnedFileAttrs).loadUnaligned(as: UInt32.self)
+    guard returnedFileAttrs & attrgroup_t(ATTR_FILE_LINKCOUNT) != 0 else { return 0 }
+    return entry.advanced(by: kOffsetFileLinkCount).loadUnaligned(as: UInt32.self)
 }
 
 /// Free helper to call the C statfs(2) syscall without naming ambiguity.

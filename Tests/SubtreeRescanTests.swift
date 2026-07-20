@@ -538,4 +538,38 @@ struct SubtreeRescanProgressTests {
         #expect(!report.wasCancelled)
         #expect(report.unresolvedPaths.isEmpty)
     }
+
+    @Test("Hardlink created after the scan carries the multi-link flag through the splice")
+    func hardlinkFlagsThroughSplice() async throws {
+        let (root, cleanup) = try createTempTree([
+            "docs/readme.txt": 100,
+            "docs/notes.md": 200,
+        ])
+        defer { cleanup() }
+
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        let tree = FileTree()
+        await scanner.scan(path: root, progress: progress, tree: tree)
+        #expect(summarizeTree(tree)[root + "/docs/readme.txt"]?.hasMultipleHardlinks == false)
+
+        try FileManager.default.linkItem(
+            at: URL(fileURLWithPath: root).appendingPathComponent("docs/readme.txt"),
+            to: URL(fileURLWithPath: root).appendingPathComponent("docs/readme_link.txt")
+        )
+
+        let report = await scanner.rescanSubtrees([root + "/docs"], tree: tree, progress: progress)
+        #expect(report.unresolvedPaths.isEmpty)
+
+        // assertTreesEquivalent compares hasMultipleHardlinks per node, so this pins the
+        // spliced flags against a fresh cold scan of the mutated fixture.
+        let coldTree = FileTree()
+        await FileScanner().scan(path: root, progress: ScanProgress(), tree: coldTree)
+        assertTreesEquivalent(tree, coldTree, "hardlinkFlagsThroughSplice")
+
+        let summary = summarizeTree(tree)
+        #expect(summary[root + "/docs/readme.txt"]?.hasMultipleHardlinks == true)
+        #expect(summary[root + "/docs/readme_link.txt"]?.hasMultipleHardlinks == true)
+        #expect(summary[root + "/docs/notes.md"]?.hasMultipleHardlinks == false)
+    }
 }

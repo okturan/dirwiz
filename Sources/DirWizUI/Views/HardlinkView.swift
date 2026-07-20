@@ -33,15 +33,17 @@ public struct HardlinkView: View {
 
     // MARK: - Toolbar
 
+    /// No run button — groups populate automatically from scan-time link counts
+    /// (always-on-hardlinks); the toolbar is a summary strip.
     private var toolbar: some View {
         HStack(spacing: 12) {
-            Button(action: startHardlinkScan) {
-                HStack(spacing: 4) {
-                    Image(systemName: "link")
-                    Text("Scan for Hardlinks")
-                }
+            HStack(spacing: 4) {
+                Image(systemName: "link")
+                    .foregroundStyle(.secondary)
+                Text("Detected automatically from scan data")
+                    .foregroundStyle(.secondary)
             }
-            .disabled(!appState.canStartHeavyTask(.hardlinkScan))
+            .font(.callout)
 
             Spacer()
 
@@ -83,7 +85,7 @@ public struct HardlinkView: View {
                 .progressViewStyle(.linear)
                 .frame(maxWidth: 300)
             } else {
-                Text("Calling lstat on each file to detect shared inodes.")
+                Text("Grouping files that share an inode.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -96,10 +98,15 @@ public struct HardlinkView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label("No Hardlinks Found", systemImage: "link")
+            Label(
+                appState.fileTree == nil ? "No Data" : "No Hardlinks Found",
+                systemImage: "link"
+            )
         } description: {
-            if appState.hardlink.hardlinkGroups.isEmpty && !appState.hardlink.isHardlinkScanRunning {
-                Text("Click \"Scan for Hardlinks\" to search for files sharing the same inode.\n\nHardlinks are multiple directory entries pointing to identical file data. Removing a hardlink only unlinks one directory entry — the data is freed only when the last link is removed.")
+            if appState.fileTree == nil {
+                Text("Scan a volume to detect hardlinked files.")
+            } else {
+                Text("No files on this volume share an inode.\n\nHardlinks are multiple directory entries pointing to identical file data. Removing a hardlink only unlinks one directory entry — the data is freed only when the last link is removed.")
             }
         }
     }
@@ -134,36 +141,6 @@ public struct HardlinkView: View {
         appState.hardlink.hardlinkGroups.reduce(0) { $0 + $1.extraLinkBytes }
     }
 
-    // MARK: - Actions
-
-    private func startHardlinkScan() {
-        guard let tree = appState.fileTree else { return }
-        guard appState.canStartHeavyTask(.hardlinkScan) else { return }
-        appState.hardlinkTask?.cancel()
-        appState.hardlinkToken &+= 1
-        let token = appState.hardlinkToken
-        appState.hardlink.isHardlinkScanRunning = true
-        appState.hardlink.hardlinkExpandedGroups.removeAll()
-        appState.hardlink.hardlinkProgress = (0, 0)
-
-        appState.hardlinkTask = Task.detached(priority: .userInitiated) {
-            let finder = HardlinkFinder()
-            let groups = await finder.findHardlinks(in: tree) { processed, total in
-                guard appState.hardlinkToken == token else { return }
-                appState.hardlink.hardlinkProgress = (processed, total)
-            }
-            await MainActor.run {
-                guard appState.hardlinkToken == token else { return }
-                appState.hardlink.hardlinkGroups = groups
-                appState.hardlink.isHardlinkScanRunning = false
-                appState.hardlink.hardlinkProgress = (
-                    appState.hardlink.hardlinkProgress.total,
-                    appState.hardlink.hardlinkProgress.total
-                )
-                appState.hardlinkTask = nil
-            }
-        }
-    }
 }
 
 // MARK: - HardlinkGroupRow

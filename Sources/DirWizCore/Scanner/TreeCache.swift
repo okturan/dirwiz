@@ -4,17 +4,18 @@ import Foundation
 /// re-enumerating the volume. FAIL-CLOSED: `load` returns `nil` on ANY doubt —
 /// a nil cache simply means a cold scan, i.e. today's behavior.
 ///
-/// Binary format (little-endian), current version 1:
+/// Binary format (little-endian), current version 2:
 ///
 /// | Field | Type |
 /// |---|---|
 /// | magic | 4 bytes "DWTC" |
-/// | formatVersion | UInt32 = 1 |
+/// | formatVersion | UInt32 = 2 |
 /// | nodeStride | UInt32 = MemoryLayout<FileNode>.stride (layout guard) |
 /// | savedAt | Float64 (timeIntervalSince1970) |
 /// | lastEventId | UInt64 |
 /// | rootPathLen UInt16 + UTF-8 bytes | |
 /// | isCaseSensitive | UInt8 |
+/// | linkCountsCaptured | UInt8 (v2+) |
 /// | volumeUUIDLen UInt16 + UTF-8 bytes | empty if unavailable at save time |
 /// | nodeCount | UInt32 |
 /// | stringPoolLen | UInt64 |
@@ -23,7 +24,12 @@ import Foundation
 /// | checksum | UInt64 FNV-1a 64 over everything before it |
 ///
 /// Any change to `FileNode`'s stored layout MUST bump `formatVersion` — the stride
-/// guard catches size changes but not same-size field reorders.
+/// guard catches size changes but not same-size field reorders (or, as with v2's
+/// `hasMultipleHardlinks` flag bit, new meaning assigned to existing bytes).
+///
+/// Version history: v1 = original; v2 = flags bit 2 means hasMultipleHardlinks and the
+/// header carries `linkCountsCaptured` (v1 caches predate link-count capture, so they
+/// are rejected rather than presenting absent flags as "no hardlinks").
 public enum TreeCache {
     public struct Payload: Sendable {
         public let tree: FileTree
@@ -35,7 +41,7 @@ public enum TreeCache {
 
     private enum Binary {
         static let magic = Data([0x44, 0x57, 0x54, 0x43]) // "DWTC"
-        static let formatVersion: UInt32 = 1
+        static let formatVersion: UInt32 = 2
     }
 
     /// Reasons a load can fail. Structural failures (the file itself is garbage) are
@@ -64,6 +70,7 @@ public enum TreeCache {
     public static func save(tree: FileTree, lastEventId: UInt64) throws {
         let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
         let isCaseSensitive = tree.isCaseSensitive
+        let linkCountsCaptured = tree.linkCountsCaptured
 
         let rootPathBytes = Array(rootPath.utf8)
         guard rootPathBytes.count <= Int(UInt16.max) else {
@@ -91,6 +98,7 @@ public enum TreeCache {
         data.appendLE(UInt16(rootPathBytes.count))
         data.append(contentsOf: rootPathBytes)
         data.append(isCaseSensitive ? 1 : 0)
+        data.append(linkCountsCaptured ? 1 : 0)
         data.appendLE(UInt16(volumeUUIDBytes.count))
         data.append(contentsOf: volumeUUIDBytes)
         data.appendLE(UInt32(nodes.count))
@@ -171,6 +179,11 @@ public enum TreeCache {
         }
         let isCaseSensitive = caseByte[caseByte.startIndex] != 0
 
+        guard let linkCountsByte = data.readBytes(count: 1, at: &cursor) else {
+            throw DecodeError.truncated
+        }
+        let linkCountsCaptured = linkCountsByte[linkCountsByte.startIndex] != 0
+
         let volumeUUIDLen: UInt16 = try data.readLE(at: &cursor)
         guard let volumeUUIDRaw = data.readBytes(count: Int(volumeUUIDLen), at: &cursor),
               let storedVolumeUUID = String(bytes: volumeUUIDRaw, encoding: .utf8) else {
@@ -229,7 +242,8 @@ public enum TreeCache {
             nodes: nodes,
             stringPool: stringPool,
             rootPath: rootPath,
-            isCaseSensitive: isCaseSensitive
+            isCaseSensitive: isCaseSensitive,
+            linkCountsCaptured: linkCountsCaptured
         )
         return Payload(tree: tree, lastEventId: lastEventId, savedAt: Date(timeIntervalSince1970: savedAtRaw))
     }

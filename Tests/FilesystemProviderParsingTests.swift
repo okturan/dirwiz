@@ -17,21 +17,23 @@ import Foundation
 // there's no way to inject a malformed buffer through that path (a real, empty directory
 // is used for the one case that doesn't need malformed bytes; see test 6b below).
 //
-// Byte layout of a single getattrlistbulk entry, as consumed by the two helpers under test
-// (offsets mirror the `internal` constants `kOffsetName`/`kOffsetFileData` in
-// FilesystemProvider.swift; the other offset constants there stay `private` since neither
-// helper under test touches them):
-//   [0..<24)   entryLength (UInt32) + other common attrs (returned-attrs bitmap, devID,
-//              objType, modTime) — NOT read by either helper (the outer walking loop reads
-//              entryLength to bound entries); left zeroed in these fixtures.
+// Byte layout of a single getattrlistbulk entry, as consumed by the helpers under test
+// (offsets mirror the `internal` constants `kOffsetName`/`kOffsetReturnedFileAttrs`/
+// `kOffsetFileLinkCount`/`kOffsetFileData` in FilesystemProvider.swift; the other offset
+// constants there stay `private` since no helper under test touches them):
+//   [0..<4)    entryLength (UInt32) — read by the outer walking loop, not the helpers.
+//   [4..<24)   returned-attrs bitmap (attribute_set_t, 5×UInt32). The file group's
+//              bitmap sits at kOffsetReturnedFileAttrs (16) and gates
+//              parseFileLinkCount; the rest is left zeroed in these fixtures.
 //   [24..<28)  attrreference_t.attr_dataoffset ("nameOffset", Int32 LE) — relative to
 //              byte 24 (kOffsetName), i.e. absolute name position = 24 + nameOffset.
 //   [28..<32)  attrreference_t.attr_length ("nameLength", UInt32 LE) — INCLUDES the
 //              trailing NUL byte.
 //   [32..<64)  devID/objType/modTime/fileID region — untouched by the helpers under test;
 //              left zeroed.
-//   [64..<72)  ATTR_FILE_ALLOCSIZE (off_t LE) — kOffsetFileData.
-//   [72..<80)  ATTR_FILE_DATALENGTH (off_t LE) — kOffsetFileData + 8.
+//   [64..<68)  ATTR_FILE_LINKCOUNT (UInt32 LE) — kOffsetFileLinkCount.
+//   [68..<76)  ATTR_FILE_ALLOCSIZE (off_t LE) — kOffsetFileData.
+//   [76..<84)  ATTR_FILE_DATALENGTH (off_t LE) — kOffsetFileData + 8.
 //   [24+nameOffset ..< 24+nameOffset+nameLength) name bytes, NUL-terminated.
 
 // MARK: - Fixture helpers
@@ -93,19 +95,50 @@ struct FilesystemProviderParsingTests {
 
     @Test("Valid entry: name and file sizes parsed correctly")
     func validEntryParsesNameAndSizes() {
-        // entryLength=89, exact fit: name "file.txt\0" (9 bytes) placed at absolute
-        // offset 80 (= kOffsetName(24) + nameOffset(56)), immediately after the
-        // allocSize/dataLength pair at kOffsetFileData(64)..<80.
-        var buffer = makeEntryBuffer(size: 89, nameOffset: 56, nameLength: 9)
+        // entryLength=93, exact fit: name "file.txt\0" (9 bytes) placed at absolute
+        // offset 84 (= kOffsetName(24) + nameOffset(60)), immediately after the
+        // linkCount at kOffsetFileLinkCount(64) and the allocSize/dataLength pair at
+        // kOffsetFileData(68)..<84.
+        var buffer = makeEntryBuffer(size: 93, nameOffset: 60, nameLength: 9)
         writeLE(Int64(8192), into: &buffer, at: kOffsetFileData)       // allocSize
         writeLE(Int64(4096), into: &buffer, at: kOffsetFileData + 8)   // dataLength
-        writeNameBytes(Array("file.txt".utf8) + [0], into: &buffer, nameOffset: 56)
+        writeNameBytes(Array("file.txt".utf8) + [0], into: &buffer, nameOffset: 60)
 
-        #expect(parsedName(from: buffer, entryLength: 89) == "file.txt")
+        #expect(parsedName(from: buffer, entryLength: 93) == "file.txt")
 
         let sizes = parsedFileSizes(from: buffer)
         #expect(sizes.dataLength == 4096)
         #expect(sizes.allocSize == 8192)
+    }
+
+    // MARK: 1b. Link count parsing
+
+    @Test("Link count parsed when the returned-attrs bitmap reports it")
+    func linkCountParsedWhenReported() {
+        var buffer = makeEntryBuffer(size: 93, nameOffset: 60, nameLength: 9)
+        writeLE(attrgroup_t(ATTR_FILE_LINKCOUNT), into: &buffer, at: kOffsetReturnedFileAttrs)
+        writeLE(UInt32(3), into: &buffer, at: kOffsetFileLinkCount)
+
+        let linkCount = buffer.withUnsafeBytes { raw -> UInt32 in
+            guard let base = raw.baseAddress else { return .max }
+            return parseFileLinkCount(from: base)
+        }
+        #expect(linkCount == 3)
+    }
+
+    @Test("Link count reads 0 when the bitmap says the filesystem didn't report one")
+    func linkCountZeroWhenNotReported() {
+        // FSOPT_PACK_INVAL_ATTRS packs a placeholder slot even for unsupported attrs —
+        // write a nonzero placeholder to prove the bitmap check (not the slot value) is
+        // what gates the result.
+        var buffer = makeEntryBuffer(size: 93, nameOffset: 60, nameLength: 9)
+        writeLE(UInt32(7), into: &buffer, at: kOffsetFileLinkCount)
+
+        let linkCount = buffer.withUnsafeBytes { raw -> UInt32 in
+            guard let base = raw.baseAddress else { return .max }
+            return parseFileLinkCount(from: base)
+        }
+        #expect(linkCount == 0, "Bitmap bit clear must yield 0 regardless of the packed placeholder bytes")
     }
 
     // MARK: 2. nameLength claiming more than entryLength allows
