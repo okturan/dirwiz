@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var exportAlertMessage: String = ""
     @State private var showExportAlert: Bool = false
     @State private var showSkippedDirsPopover: Bool = false
+    @State private var showWarmStartHistoryPopover: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -138,6 +139,13 @@ struct ContentView: View {
                 staleBadge(text: badge)
             } else if appState.scanProgress.scanComplete {
                 scanSummary
+            } else if let summary = appState.lastScanSummary {
+                // warm-start-observability: `restoreOnLaunch`'s cache-rejected-at-launch
+                // path sets `lastScanSummary` without ever running a scan (nothing
+                // completed, so `scanComplete` stays false and the branch above never
+                // fires) — without this branch, that summary would be set but literally
+                // never shown anywhere.
+                launchNoticeSummary(text: summary)
             }
         }
         .onAppear { appState.hasFullDiskAccess = checkFullDiskAccess() }
@@ -231,10 +239,117 @@ struct ContentView: View {
             ) == .quietInfo {
                 skippedDirsQuietLine
             }
+            warmStartHistoryLine
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
     }
+
+    /// warm-start-observability: shown in place of `scanSummary` when `restoreOnLaunch`
+    /// discovered a rejected cache without ever running a scan — `lastScanSummary` is set
+    /// but `scanProgress.scanComplete` never flips true (nothing completed), so the full
+    /// `scanSummary` block (which assumes a finished scan: elapsed time, item counts)
+    /// would be dishonest here. Deliberately minimal: just the explanation, plus the same
+    /// history affordance every other state-summary view offers.
+    private func launchNoticeSummary(text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            warmStartHistoryLine
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
+    /// warm-start-observability: quiet, always-available affordance for "why has this
+    /// been cold-scanning lately" — reuses the skipped-dirs-honesty popover pattern.
+    /// Shown whenever a volume is selected; the popover itself handles the
+    /// empty-history case.
+    @ViewBuilder
+    private var warmStartHistoryLine: some View {
+        if let path = appState.selectedVolume?.path {
+            Button {
+                showWarmStartHistoryPopover.toggle()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "list.bullet.clipboard")
+                        .font(.caption2)
+                    Text("Scan history")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showWarmStartHistoryPopover, arrowEdge: .trailing) {
+                warmStartHistoryPopover(path: path)
+            }
+        }
+    }
+
+    private func warmStartHistoryPopover(path: String) -> some View {
+        let entries = WarmStartHistory.load(for: path).reversed()
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Recent Scan Decisions")
+                .font(.system(size: 12, weight: .semibold))
+            Text("Whether each recent scan of this volume ran instantly (warm) or from scratch (cold), and why.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            if entries.isEmpty {
+                Text("No scan history yet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                            warmStartHistoryRow(entry)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+        }
+        .padding(12)
+        .frame(width: 380)
+    }
+
+    private func warmStartHistoryRow(_ entry: WarmStartHistory.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 5) {
+                Image(systemName: entry.wasWarm ? "bolt.fill" : "arrow.clockwise")
+                    .font(.system(size: 9))
+                    .foregroundStyle(entry.wasWarm ? .blue : .secondary)
+                Text(entry.wasWarm ? "Warm" : "Cold")
+                    .font(.system(size: 11, weight: .medium))
+                Text(Self.historyDateFormatter.string(from: entry.date))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            if let reason = entry.reason {
+                Text(reason)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static let historyDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
 
     /// The FDA-granted skipped-dirs presentation: these locations are SIP-protected and
     /// unfixable, so the line is informational (secondary styling, no orange) and opens
@@ -315,6 +430,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            warmStartHistoryLine
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)

@@ -63,6 +63,22 @@ public enum TreeCache {
                 return false
             }
         }
+
+        /// Short human reason, style-matched to `WarmStartPlanner.userFacingPoisonReason`
+        /// — routed through `coldFallbackReason` (AppState+Scan.swift) so a rejected
+        /// cache reads as an explained event in the scan summary, not a silent,
+        /// unexplained cold scan. Only meaningful when `isStructuralCorruption` is
+        /// true — `loadResult` never surfaces the non-structural cases as a rejection at
+        /// all (see its doc comment), so their strings here are unreachable in practice.
+        var structuralCorruptionReason: String {
+            switch self {
+            case .invalidHeader: return "cache format outdated"
+            case .truncated: return "cache file was incomplete"
+            case .checksumMismatch: return "cache file was corrupted"
+            case .structuralInvalid: return "cache data failed a consistency check"
+            case .rootPathMismatch, .volumeMismatch: return "cache doesn't apply here"
+            }
+        }
     }
 
     // MARK: - Save
@@ -118,20 +134,44 @@ public enum TreeCache {
 
     // MARK: - Load
 
-    public static func load(for rootPath: String) -> Payload? {
+    /// Richer sibling of `load(for:)` (warm-start-observability): distinguishes "no
+    /// cache exists yet" (first-ever scan — not an anomaly) from "a cache exists but was
+    /// rejected" (worth explaining to the user), sharing one decode pass with `load` so
+    /// a large cache is never parsed twice just to explain a failure.
+    public enum LoadOutcome: Sendable {
+        case success(Payload)
+        case noCacheFile
+        case rejected(reason: String)
+    }
+
+    public static func loadResult(for rootPath: String) -> LoadOutcome {
         let url = cacheURL(for: rootPath)
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return .noCacheFile }
 
         do {
-            return try decode(data: data, requestedRootPath: rootPath)
+            return .success(try decode(data: data, requestedRootPath: rootPath))
         } catch let error as DecodeError {
-            if error.isStructuralCorruption {
-                invalidate(for: rootPath)
+            guard error.isStructuralCorruption else {
+                // rootPathMismatch/volumeMismatch: per the doc comment on DecodeError,
+                // this file may still be valid for its actual owner — not an anomaly for
+                // THIS lookup, so it reads exactly like no cache existing at all.
+                return .noCacheFile
             }
-            return nil
+            invalidate(for: rootPath)
+            return .rejected(reason: error.structuralCorruptionReason)
         } catch {
-            return nil
+            return .noCacheFile
         }
+    }
+
+    /// Fail-closed convenience over `loadResult`: nil on ANY doubt, discarding why.
+    /// Unchanged behavior/signature for every existing caller — only `startScan`
+    /// (AppState+Scan.swift) needs the richer `loadResult` to explain a rejection.
+    public static func load(for rootPath: String) -> Payload? {
+        if case .success(let payload) = loadResult(for: rootPath) {
+            return payload
+        }
+        return nil
     }
 
     public static func invalidate(for rootPath: String) {

@@ -218,12 +218,15 @@ struct ScanSupervisionTests {
     @MainActor
     private func warmToColdAbandonmentBody() async throws {
         var layout: [String: UInt64] = ["docs/readme.txt": 100]
-        // Padding directories: the planner's threshold is a percentage of the cached
-        // tree's directory count (WarmStartTests' `manyRawEventsCollapsingToFewRootsWarms`
-        // uses the same trick) — without these, one changed root out of ~2 cached
-        // directories reads as 50% churn and correctly falls back to cold on its own,
-        // never reaching the mid-patch abandonment branch this test exists to exercise.
-        for i in 0..<40 {
+        // Padding directories: an unresolvable changed root (the brand-new top-level
+        // directory below) contributes the planner's fixed `unresolvedRootItemEstimate`
+        // (32 — WarmStart.swift) toward the changed-item-fraction estimate. Without
+        // enough padding, 32 alone is already >25% of a tiny cached tree, so the
+        // *planner's own* threshold check declines before ever reaching the mid-patch
+        // abandonment this test exists to exercise (WarmStartTests'
+        // `manyRawEventsCollapsingToFewRootsWarms` uses the same margin-padding trick).
+        // 150 pad dirs keeps 32 comfortably under 25% of the total (~10%).
+        for i in 0..<150 {
             layout["pad\(i)/file.txt"] = 10
         }
         let (rawRoot, cleanup) = try createTempTree(layout)
@@ -266,6 +269,83 @@ struct ScanSupervisionTests {
         // with a stale/partial tree left behind): the brand-new directory is reflected.
         #expect(nodeIndex(in: finalTree, pathSuffix: "/brandnew/f.txt") != nil,
             "expected the fallback cold scan to have picked up the new top-level directory")
+
+        // warm-start-observability: the abandonment reason must reach the visible
+        // summary, not just settle into a plain "Scanned N items" with no explanation —
+        // this is exactly the silent-cold-fallback gap the change fixes.
+        #expect(
+            state.lastScanSummary?.contains("nothing narrower to patch") == true,
+            "expected the root-level-rescan abandonment reason in the summary, got \(state.lastScanSummary ?? "nil")"
+        )
+    }
+
+    @Test("A cache that fails to load surfaces why, distinct from no cache ever existing")
+    func rejectedCacheSurfacesReason() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.rejectedCacheSurfacesReasonBody()
+        }
+    }
+
+    @MainActor
+    private func rejectedCacheSurfacesReasonBody() async throws {
+        let (path, cleanup) = try createTempTree(Self.layout)
+        defer { cleanup() }
+        let tree = await scanFixture(at: path)
+        try TreeCache.save(tree: tree, lastEventId: FSEventsJournal.currentEventId())
+
+        // Truncate the saved cache — same structural-corruption shape
+        // `TreeCacheTests.truncatedFileFailsClosed` pins at the `TreeCache` level; here
+        // the same fixture is driven through the full `AppState` scan flow to prove the
+        // reason reaches `lastScanSummary`, not just `TreeCache.loadResult` in isolation.
+        let url = TreeCache.cacheURL(for: path)
+        var data = try Data(contentsOf: url)
+        #expect(data.count > 100, "Fixture cache should be large enough to chop 100 bytes")
+        data.removeLast(100)
+        try data.write(to: url)
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = AppState(defaults: defaults)
+        state.selectedVolume = URL(fileURLWithPath: path)
+
+        state.startSelectedVolumeScan()
+        await waitUntil(timeout: 20) { state.scanProgress.scanComplete }
+
+        #expect(!state.scanProgress.isScanning)
+        #expect(
+            state.lastScanSummary?.contains("cache file was incomplete") == true,
+            "expected the rejected-cache reason in the summary, got \(state.lastScanSummary ?? "nil")"
+        )
+    }
+
+    @Test("A volume with no cache at all reads as a first scan, not a rejected one")
+    func noCacheAtAllReadsAsFirstScan() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.noCacheAtAllReadsAsFirstScanBody()
+        }
+    }
+
+    @MainActor
+    private func noCacheAtAllReadsAsFirstScanBody() async throws {
+        let (path, cleanup) = try createTempTree(Self.layout)
+        defer { cleanup() }
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = AppState(defaults: defaults)
+        state.selectedVolume = URL(fileURLWithPath: path)
+
+        state.startSelectedVolumeScan()
+        await waitUntil(timeout: 20) { state.scanProgress.scanComplete }
+
+        #expect(!state.scanProgress.isScanning)
+        #expect(state.lastScanSummary?.hasPrefix("Scanned") == true)
+        // `ScanSummaryComposer.coldWithReason`'s literal separator — its absence proves
+        // no reason was attached, i.e. this reads as a first scan, not a rejected cache.
+        #expect(
+            state.lastScanSummary?.contains(" — full scan: ") != true,
+            "a first-ever scan must not read as a rejected-cache explanation, got \(state.lastScanSummary ?? "nil")"
+        )
     }
 
     // MARK: - 5. Every flow's scanner is cancellable

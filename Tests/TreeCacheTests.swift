@@ -132,6 +132,10 @@ struct TreeCacheTests {
             #expect(payload.lastEventId == 12345)
             #expect(payload.tree.linkCountsCaptured,
                 "A scanned tree marks link counts captured; the cache must carry that through")
+            guard case .success = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .success from loadResult on a valid cache")
+                return
+            }
 
             let original = tree.pathBuildingSnapshot()
             let loaded = payload.tree.pathBuildingSnapshot()
@@ -178,6 +182,16 @@ struct TreeCacheTests {
             data.removeLast(100)
             try data.write(to: url)
 
+            // warm-start-observability: a structurally-corrupt cache must be
+            // distinguishable from "no cache exists" — not just both collapsing to nil.
+            // loadResult() is called FIRST and ONCE: it invalidates (deletes) a
+            // structurally-corrupt file as a side effect, so calling load() first would
+            // destroy the evidence before loadResult() ever saw it.
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .rejected for a truncated cache")
+                return
+            }
+            #expect(reason == "cache file was incomplete")
             #expect(TreeCache.load(for: path) == nil)
         }
     }
@@ -202,6 +216,11 @@ struct TreeCacheTests {
             data[flipOffset] ^= 0xFF
             try data.write(to: url)
 
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .rejected for a checksum-corrupted cache")
+                return
+            }
+            #expect(reason == "cache file was corrupted")
             #expect(TreeCache.load(for: path) == nil)
         }
     }
@@ -224,6 +243,11 @@ struct TreeCacheTests {
             patchUInt32(&data, at: 4, to: 1)
             try data.write(to: url)
 
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .rejected for a version-mismatched cache")
+                return
+            }
+            #expect(reason == "cache format outdated")
             #expect(TreeCache.load(for: path) == nil)
         }
     }
@@ -244,6 +268,11 @@ struct TreeCacheTests {
             patchUInt32(&data, at: 8, to: UInt32(MemoryLayout<FileNode>.stride) + 8)
             try data.write(to: url)
 
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .rejected for a stride-mismatched cache")
+                return
+            }
+            #expect(reason == "cache format outdated")
             #expect(TreeCache.load(for: path) == nil)
         }
     }
@@ -266,6 +295,14 @@ struct TreeCacheTests {
             patchUInt32(&data, at: offsets.nodeCount, to: UInt32.max)
             try data.write(to: url)
 
+            // A declared count this far past what's actually in the file trips the
+            // bounds guard before allocating — that guard throws .truncated (the
+            // file's on-disk content can't back up what the header claims).
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .rejected for an impossible declared node count")
+                return
+            }
+            #expect(reason == "cache file was incomplete")
             #expect(TreeCache.load(for: path) == nil)
         }
     }
@@ -294,6 +331,14 @@ struct TreeCacheTests {
             try data.write(to: url)
 
             #expect(TreeCache.load(for: path) == nil)
+            // Not structural corruption — per TreeCache's own doc comment this file may
+            // still be valid for its actual owner, so it must NOT read as a rejection
+            // (that would misleadingly tell the user "your cache was corrupted" when
+            // really a different volume happens to be mounted at this path).
+            guard case .noCacheFile = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .noCacheFile (not .rejected) for a volume-UUID mismatch")
+                return
+            }
         }
     }
 
@@ -312,6 +357,10 @@ struct TreeCacheTests {
 
             // (a) Distinct cache file — no cache was ever written for pathB.
             #expect(TreeCache.load(for: pathB) == nil)
+            guard case .noCacheFile = TreeCache.loadResult(for: pathB) else {
+                Issue.record("expected .noCacheFile when nothing was ever saved for this path")
+                return
+            }
 
             // (b) Patch test: place A's saved bytes at B's cache location, so the
             // header's own rootPath field ("A") disagrees with the requested root ("B").
@@ -322,6 +371,13 @@ struct TreeCacheTests {
             try dataA.write(to: urlB)
 
             #expect(TreeCache.load(for: pathB) == nil)
+            // Same reasoning as the volume-UUID case: a root-path mismatch means this
+            // cache belongs to a different lookup, not that the requested lookup's
+            // cache is broken — must read as .noCacheFile, not .rejected.
+            guard case .noCacheFile = TreeCache.loadResult(for: pathB) else {
+                Issue.record("expected .noCacheFile (not .rejected) for a root-path mismatch")
+                return
+            }
         }
     }
 
@@ -351,6 +407,11 @@ struct TreeCacheTests {
             recomputeChecksum(&data)
             try data.write(to: url)
 
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected .rejected for a structurally-invalid cache")
+                return
+            }
+            #expect(reason == "cache data failed a consistency check")
             #expect(TreeCache.load(for: path) == nil)
         }
     }

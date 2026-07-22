@@ -137,6 +137,58 @@ struct LaunchRestoreTests {
         #expect(state.staleViewAsOf == nil)
     }
 
+    @Test("warm-start-observability: a corrupted cache discovered AT LAUNCH surfaces why, instead of silently discarding the reason")
+    func rejectedCacheAtLaunchSurfacesReason() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.rejectedCacheAtLaunchSurfacesReasonBody()
+        }
+    }
+
+    /// This is the scenario that actually matters most in practice, and the one the
+    /// earlier `startSelectedVolumeScan`-only coverage (ScanSupervisionTests) missed:
+    /// `restoreOnLaunch` runs on EVERY cold app launch and is usually the FIRST code to
+    /// ever touch a stored cache. Its own `TreeCache.loadResult` call invalidates
+    /// (deletes) a structurally-corrupt file as a side effect — so if `restoreOnLaunch`
+    /// itself doesn't capture the reason before bailing out, NOTHING later ever gets a
+    /// second chance to see it; the file is already gone. A test that instead calls
+    /// `startSelectedVolumeScan()` directly on a `defaults` with no remembered path
+    /// bypasses `restoreOnLaunch` entirely and would pass even if this exact gap existed.
+    @MainActor
+    private func rejectedCacheAtLaunchSurfacesReasonBody() async throws {
+        let (path, cleanup) = try createTempTree(Self.layout)
+        defer { cleanup() }
+        let tree = await scanFixture(at: path)
+        try TreeCache.save(tree: tree, lastEventId: FSEventsJournal.currentEventId())
+
+        // Same structural-corruption shape as `TreeCacheTests.truncatedFileFailsClosed`.
+        let url = TreeCache.cacheURL(for: path)
+        var data = try Data(contentsOf: url)
+        #expect(data.count > 100, "Fixture cache should be large enough to chop 100 bytes")
+        data.removeLast(100)
+        try data.write(to: url)
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        defaults.set(path, forKey: Self.lastScannedVolumePathKey)
+
+        let state = AppState(defaults: defaults)
+        state.restoreOnLaunch()
+
+        // Behavior is UNCHANGED from the plain no-cache case above: no auto-scan, empty
+        // launch state. Only the explanation is new.
+        #expect(state.fileTree == nil)
+        #expect(state.staleViewAsOf == nil)
+        #expect(
+            state.lastScanSummary?.contains("cache file was incomplete") == true,
+            "expected the rejected-cache reason in the summary, got \(state.lastScanSummary ?? "nil")"
+        )
+
+        let history = WarmStartHistory.load(for: path)
+        #expect(history.count == 1)
+        #expect(history.first?.wasWarm == false)
+        #expect(history.first?.reason == "cache file was incomplete")
+    }
+
     @Test("DIRWIZ_NO_WARM_START kill switch disables restore even with a valid cache")
     func envKillSwitchDisablesRestore() async throws {
         try await withTemporaryAppSupportDir {

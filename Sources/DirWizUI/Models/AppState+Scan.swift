@@ -23,6 +23,14 @@ enum ScanSummaryComposer {
         cold(items: items, seconds: seconds) + " — full scan: \(reason)"
     }
 
+    /// warm-start-observability: `restoreOnLaunch`'s cache was rejected before any scan
+    /// even ran — distinct from `coldWithReason`, which describes a scan that DID
+    /// complete. Saying "Scanned 0 items in 0.0s" here would be dishonest; nothing was
+    /// scanned yet.
+    static func cacheRejectedAtLaunch(reason: String) -> String {
+        "Previous cache unavailable: \(reason). Click Scan Volume to start fresh."
+    }
+
     /// "Showing last scan · X ago" for a restored cache not yet freshened. `now` is
     /// injectable for deterministic tests; defaults to the real clock for callers.
     static func stale(savedAt: Date, now: Date = Date()) -> String {
@@ -143,7 +151,33 @@ extension AppState {
         guard ProcessInfo.processInfo.environment["DIRWIZ_NO_WARM_START"] != "1" else { return }
         guard let path = defaults.string(forKey: Self.lastScannedVolumePathKey), !path.isEmpty else { return }
         guard FileManager.default.fileExists(atPath: path) else { return }
-        guard let cached = TreeCache.load(for: path) else { return }
+
+        // warm-start-observability: `restoreOnLaunch` runs on every cold app launch, so
+        // in practice it's usually the FIRST code to ever touch a stored cache — meaning
+        // it's usually the first (and, since a rejection invalidates the file as a side
+        // effect, often the ONLY) chance to explain a corrupted/outdated cache before the
+        // evidence is gone. Using plain `load(for:)` here would silently discard that
+        // reason into the exact same empty-launch-state silence as "never scanned
+        // before" — indistinguishable, exactly the gap this change exists to close.
+        let cached: TreeCache.Payload
+        switch TreeCache.loadResult(for: path) {
+        case .success(let payload):
+            cached = payload
+        case .noCacheFile:
+            return
+        case .rejected(let reason):
+            // Deliberately does NOT auto-start a scan — today's behavior (empty launch
+            // state, user clicks Scan Volume themselves) is unchanged; only the
+            // explanation is new. `itemCount`/`elapsedSeconds` are 0: nothing was
+            // scanned, there's nothing else honest to put there.
+            log.notice("Warm start skipped for \(path, privacy: .public): \(reason, privacy: .public)")
+            lastScanSummary = ScanSummaryComposer.cacheRejectedAtLaunch(reason: reason)
+            WarmStartHistory.record(
+                .init(date: Date(), wasWarm: false, reason: reason, itemCount: 0, elapsedSeconds: 0),
+                for: path
+            )
+            return
+        }
 
         let volumeURL = URL(fileURLWithPath: path)
         selectedVolume = volumeURL
@@ -221,12 +255,29 @@ extension AppState {
 
         let path = volumeURL.path
 
+        // warm-start-observability: distinguishes "no cache exists yet" (first-ever
+        // scan — not an anomaly, `noCacheReason` stays nil) from "a cache exists but was
+        // rejected" (worth explaining — same reason string that later reaches
+        // `lastScanSummary` via `coldFallbackReason` below, and the warm-start history).
         let cached: TreeCache.Payload?
+        var noCacheReason: String?
         if !forceCold, ProcessInfo.processInfo.environment["DIRWIZ_NO_WARM_START"] != "1" {
-            // `preloadedCache` comes from `restoreOnLaunch()`, which already loaded and
-            // published this exact payload's tree moments earlier — reusing it here
-            // avoids decoding the same cache file from disk a second time.
-            cached = preloadedCache ?? TreeCache.load(for: path)
+            if let preloadedCache {
+                // Comes from `restoreOnLaunch()`, which already loaded and published this
+                // exact payload's tree moments earlier — reusing it here avoids decoding
+                // the same cache file from disk a second time.
+                cached = preloadedCache
+            } else {
+                switch TreeCache.loadResult(for: path) {
+                case .success(let payload):
+                    cached = payload
+                case .noCacheFile:
+                    cached = nil
+                case .rejected(let reason):
+                    cached = nil
+                    noCacheReason = reason
+                }
+            }
         } else {
             cached = nil
         }
@@ -244,9 +295,16 @@ extension AppState {
         let attemptToken = scanSession.token
 
         guard let cached else {
+            // Only log when there's an actual anomaly to explain — a genuine first-ever
+            // scan (`noCacheReason == nil`) isn't worth a log line, matching the same
+            // "not an anomaly" judgment `loadResult`/`lastScanSummary` already make for it.
+            if let noCacheReason {
+                log.notice("Warm start skipped for \(path, privacy: .public): \(noCacheReason, privacy: .public)")
+            }
             beginColdScan(
                 path: path,
                 runPostScanAnalyses: shouldRunPostScanAnalyses,
+                coldFallbackReason: noCacheReason,
                 preservedExploration: captureExplorationIfPreserving()
             )
             return
@@ -276,7 +334,7 @@ extension AppState {
 
             switch decision {
             case .coldFallback(let reason):
-                log.info("Warm start fallback for \(path, privacy: .public): \(reason, privacy: .public)")
+                log.notice("Warm start fallback for \(path, privacy: .public): \(reason, privacy: .public)")
                 self.beginColdScan(
                     path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason,
                     preservedExploration: self.captureExplorationIfPreserving()
@@ -390,9 +448,17 @@ extension AppState {
         // treat it the same as an unresolved path: prefer a full rescan over patching
         // the whole tree through the splice path it wasn't designed to replace wholesale.
         guard report.unresolvedPaths.isEmpty, !report.rescannedRoots.contains(path) else {
-            log.info("Warm start abandoned mid-patch for \(path, privacy: .public); falling back to cold")
+            // warm-start-observability: name which of the two abandonment shapes fired —
+            // this reason reaches `lastScanSummary` (via `beginColdScan`'s
+            // `coldFallbackReason`, same mechanism a planner-declined warm start already
+            // uses) and the warm-start history, rather than a silent, unexplained cold
+            // scan directly after a "Checking what changed…" wait.
+            let reason = !report.unresolvedPaths.isEmpty
+                ? "couldn't resolve \(report.unresolvedPaths.count) changed path\(report.unresolvedPaths.count == 1 ? "" : "s") against the cached tree"
+                : "a changed path resolved to the scan root — nothing narrower to patch"
+            log.notice("Warm start abandoned mid-patch for \(path, privacy: .public): \(reason, privacy: .public)")
             beginColdScan(
-                path: path, runPostScanAnalyses: shouldRunPostScanAnalyses,
+                path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason,
                 preservedExploration: preservedExploration
             )
             return
@@ -438,6 +504,10 @@ extension AppState {
         scanProgress.currentPath = summary
         lastScanSummary = summary
         staleViewAsOf = nil
+        WarmStartHistory.record(
+            .init(date: Date(), wasWarm: true, reason: nil, itemCount: tree.count, elapsedSeconds: elapsed),
+            for: path
+        )
 
         do {
             try TreeCache.save(tree: tree, lastEventId: newEventId)
@@ -539,6 +609,13 @@ extension AppState {
                 } else {
                     self.lastScanSummary = ScanSummaryComposer.cold(items: tree.count, seconds: self.scanProgress.elapsedTime)
                 }
+                WarmStartHistory.record(
+                    .init(
+                        date: Date(), wasWarm: false, reason: coldFallbackReason,
+                        itemCount: tree.count, elapsedSeconds: self.scanProgress.elapsedTime
+                    ),
+                    for: path
+                )
                 self.beginDeferredBundleSizing(
                     scanner: scanner, tree: tree, token: token, eventIdAtScanStart: eventIdAtScanStart
                 )
