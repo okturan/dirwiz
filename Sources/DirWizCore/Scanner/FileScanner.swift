@@ -895,13 +895,21 @@ public final class FileScanner: @unchecked Sendable {
     /// The tree is populated incrementally — assign it to your UI state before awaiting
     /// this method if you want live updates.
     /// Pass the returned FileTree to the UI immediately; it's populated in-place during scan.
-    public func scan(path: String, progress: ScanProgress, tree: FileTree) async {
+    ///
+    /// `estimatedItemsHint`: when the caller already knows a trustworthy item-count
+    /// estimate — e.g. the previous scan's count, for a refresh behind a stale view —
+    /// pass it here to skip the statfs-based inode estimate entirely. That estimate is
+    /// only loosely correlated with the true count on APFS (see `ScanProgress.
+    /// fractionCompleted`'s doc comment); a prior scan's real count is a far better
+    /// predictor of a refresh's total than inode statistics are.
+    public func scan(path: String, progress: ScanProgress, tree: FileTree, estimatedItemsHint: Int = 0) async {
         // Reset cancellation so a scanner instance can be reused after cancel().
         cancelState.withLock { $0 = false }
 
-        // Estimate total items using inode counts (blocking I/O, done off main thread).
-        var estimatedItems = 0
-        if let sf = filesystem.volumeStats(forPath: path) {
+        // Estimate total items using inode counts (blocking I/O, done off main thread) —
+        // skipped entirely when the caller supplied a trustworthy hint.
+        var estimatedItems = max(0, estimatedItemsHint)
+        if estimatedItems == 0, let sf = filesystem.volumeStats(forPath: path) {
             let normalizedPath = Self.normalizePath(path)
             let normalizedMountPoint = Self.normalizePath(sf.mountPoint)
             if normalizedPath == normalizedMountPoint {
@@ -996,9 +1004,12 @@ public final class FileScanner: @unchecked Sendable {
         let workQueue = DirectoryWorkQueue()
         directoryWorkQueue.withLock { $0 = workQueue }
         defer { directoryWorkQueue.withLock { $0 = nil } }
+        // 8 measured ~7% faster than 6 on a 10-core machine (~/code fixture: 5.51s → 5.12s);
+        // 10/12 workers showed no further gain — syscall latency, not core count, is the
+        // limiting factor beyond this point.
         let defaultWorkerCount = isNetworkFS
             ? 4
-            : min(6, max(4, ProcessInfo.processInfo.activeProcessorCount))
+            : min(8, max(4, ProcessInfo.processInfo.activeProcessorCount))
         let workerCount = ProcessInfo.processInfo.environment["DIRWIZ_SCAN_WORKERS"]
             .flatMap(Int.init)
             .map { max(1, $0) }

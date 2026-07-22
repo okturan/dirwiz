@@ -484,6 +484,11 @@ extension AppState {
         )
         let tree = FileTree()
         let preservingStaleView = staleViewAsOf != nil
+        // The stale tree's own item count is a far better progress-bar denominator than
+        // inode statistics for this specific case — it's this exact volume's actual count
+        // as of the last scan, not an estimate. Captured now, before `preservingStaleView`'s
+        // branch below leaves `fileTree` untouched for the scan's duration.
+        let staleItemCountHint = preservingStaleView ? (fileTree?.count ?? 0) : 0
 
         if preservingStaleView {
             // A restored view is on screen — build into `tree` (a detached instance) and
@@ -500,7 +505,7 @@ extension AppState {
         let token = scanToken
 
         Task {
-            await scanner.scan(path: path, progress: scanProgress, tree: tree)
+            await scanner.scan(path: path, progress: scanProgress, tree: tree, estimatedItemsHint: staleItemCountHint)
             let handoff = await MainActor.run { () -> (scanCompleted: Bool, sizingTask: Task<Void, Never>?) in
                 guard self.scanToken == token else { return (false, nil) }
                 self.scanSession.markFinished()
