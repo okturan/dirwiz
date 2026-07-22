@@ -503,10 +503,15 @@ struct FSEventsJournalTests {
         }
         let paths = rawPaths.map(stripTrailingSlash)
         #expect(paths.contains(root + "/docs"), "docs/ should be reported changed; got \(paths)")
-        // A brand-new, still-empty top-level directory has nothing "inside" it yet — FSEvents
-        // attributes its creation to the parent whose listing gained an entry (root), not to
-        // the new directory itself. Either way the change is visible via replay.
-        #expect(paths.contains(root), "the new directory's parent should be reported changed; got \(paths)")
+        // With FileEvents (the flag that fixes the root-volume-scan regression: a file
+        // changing deep in a huge directory no longer gets blamed on that whole
+        // directory), FSEvents reports a newly created directory's OWN path directly,
+        // flagged ItemIsDir — the collector keeps directory-flagged paths as-is (only
+        // file-flagged paths get reduced to their parent). This is strictly more precise
+        // than the pre-fix behavior (blaming the parent, `root`, because a
+        // directory-only stream couldn't see past "root's listing changed") — a
+        // narrower, cheaper target to patch, not a broader one.
+        #expect(paths.contains(root + "/newdir"), "the new directory's own path should be reported changed; got \(paths)")
     }
 
     @Test("Zero-change replay still completes via HistoryDone")

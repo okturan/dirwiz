@@ -97,7 +97,18 @@ private final class JournalCollector: @unchecked Sendable {
             copyDescription: nil
         )
 
-        let flags: FSEventStreamCreateFlags = UInt32(kFSEventStreamCreateFlagUseCFTypes)
+        // FileEvents gives per-file granularity instead of per-directory — without it,
+        // ANY file changing directly inside a huge directory (e.g. a shell writing
+        // ~/.zsh_history) is reported as "the whole directory changed", which for a
+        // root-volume scan can mean "the whole home folder" (a large fraction of the
+        // entire tree). `handleEvents` below reduces file-level events back to their
+        // parent directory — same pattern `FSEventsMonitor` already uses for the live
+        // watcher — so this doesn't change what `rescanSubtrees` receives in shape, only
+        // how precisely huge coalesced directories get narrowed down first.
+        let flags: FSEventStreamCreateFlags = UInt32(
+            kFSEventStreamCreateFlagFileEvents |
+            kFSEventStreamCreateFlagUseCFTypes
+        )
 
         guard let newStream = FSEventStreamCreate(
             nil,
@@ -148,8 +159,15 @@ private final class JournalCollector: @unchecked Sendable {
                 historyDone = true
                 continue
             }
-            if seenPaths.insert(path).inserted {
-                collectedPaths.append(path)
+            // With FileEvents on, a file-level event's finest reportable unit is the
+            // file itself — reduce it to its parent directory so `rescanSubtrees`
+            // keeps receiving directory targets, and so a scattered file touched deep
+            // in a huge directory doesn't get treated as "that whole directory" the
+            // way a directory-level event's path already, correctly, would be.
+            let isDir = flag & UInt32(kFSEventStreamEventFlagItemIsDir) != 0
+            let target = isDir ? path : (path as NSString).deletingLastPathComponent
+            if seenPaths.insert(target).inserted {
+                collectedPaths.append(target)
             }
         }
         let collected = collectedPaths
