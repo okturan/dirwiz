@@ -182,6 +182,16 @@ struct LaunchRestoreTests {
             state.lastScanSummary?.contains("cache file was incomplete") == true,
             "expected the rejected-cache reason in the summary, got \(state.lastScanSummary ?? "nil")"
         )
+        // ultrareview-caught (bug_001): without this, selectedVolume stays nil and
+        // VolumePickerView.refreshVolumes silently auto-selects a DIFFERENT volume the
+        // next time the sidebar appears — the "Scan history" popover, the "Scan Volume"
+        // button, and everything else downstream of selectedVolume would then target
+        // the wrong volume, defeating the whole point of naming `path` in the message
+        // above.
+        #expect(
+            state.selectedVolume?.path == path,
+            "expected selectedVolume to still point at the volume the message names, got \(state.selectedVolume?.path ?? "nil")"
+        )
 
         let history = WarmStartHistory.load(for: path)
         #expect(history.count == 1)

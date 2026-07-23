@@ -170,6 +170,18 @@ extension AppState {
             // state, user clicks Scan Volume themselves) is unchanged; only the
             // explanation is new. `itemCount`/`elapsedSeconds` are 0: nothing was
             // scanned, there's nothing else honest to put there.
+            //
+            // ultrareview-caught (bug_001): this branch must set `selectedVolume`, same
+            // as the `.success` case below — otherwise it stays nil, and
+            // `VolumePickerView.refreshVolumes` (called from its own `.onAppear`, which
+            // fires right after this) auto-selects `availableVolumes.first` (typically
+            // "/") whenever `selectedVolume` is nil. Every downstream consumer of
+            // `selectedVolume` — the "Scan history" popover, the "Scan Volume" button,
+            // and the `persistLastScannedVolume` write-back once that scan completes —
+            // would then silently point at a DIFFERENT volume than the one this message
+            // just named, exactly in the external-drive/multi-volume scenario a
+            // corrupted cache is most likely to occur in.
+            selectedVolume = URL(fileURLWithPath: path)
             log.notice("Warm start skipped for \(path, privacy: .public): \(reason, privacy: .public)")
             lastScanSummary = ScanSummaryComposer.cacheRejectedAtLaunch(reason: reason)
             WarmStartHistory.record(
@@ -430,7 +442,23 @@ extension AppState {
 
         fileTree = tree
         resetForNewScan()
-        if !preservingStaleView {
+        if preservingStaleView {
+            // ultrareview-caught (bug_002): resetForNewScan() just cleared hardlink
+            // groups even though the stale tree — still fully on screen and interactive
+            // per this function's preserving-stale contract — hasn't actually changed
+            // yet (the patch hasn't run). Without this, HardlinkView reads the cleared,
+            // not-yet-running state as a definitive "No files on this volume share an
+            // inode" for the whole multi-second patch. HardlinkGroup stores paths, not
+            // node indices, so recomputing from the CURRENT (pre-patch) tree here is
+            // safe even though the tree is about to be spliced in place — unlike
+            // index-keyed state (search results, recency factors, temporal-diff arrays;
+            // see CLAUDE.md), a fresh path-based recompute has nothing to invalidate.
+            // isHardlinkScanRunning flips true synchronously inside this call, before
+            // any observer can render the misleading gap — not just a shorter window,
+            // no window. The post-patch refreshHardlinkGroups() below (already present)
+            // replaces these again once the splice actually completes.
+            refreshHardlinkGroups()
+        } else {
             activeTab = .treeView
         }
         scanSession.markStarted(scanner: scanner)

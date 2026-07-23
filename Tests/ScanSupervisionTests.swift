@@ -348,6 +348,119 @@ struct ScanSupervisionTests {
         )
     }
 
+    @Test("ultrareview bug_002: a warm patch behind a stale view never shows a misleading 'No Hardlinks Found' — populated groups stay populated (or visibly recomputing) the whole time")
+    func warmPatchNeverShowsFalseEmptyHardlinks() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.warmPatchNeverShowsFalseEmptyHardlinksBody()
+        }
+    }
+
+    /// `commitWarmStart` used to call the shared `resetForNewScan()` unconditionally,
+    /// even in the preserving-stale-view branch — synchronously clearing
+    /// `hardlink.hardlinkGroups` and `isHardlinkScanRunning` while the stale tree stayed
+    /// fully on screen. `HardlinkView`'s empty state reads "No files on this volume
+    /// share an inode" — a definitive claim — for however long the subsequent
+    /// `await scanner.rescanSubtrees(...)` takes. The fix calls `refreshHardlinkGroups()`
+    /// again immediately (same synchronous scope, no `await` in between), which flips
+    /// `isHardlinkScanRunning` true before any observer — including this test's polling
+    /// loop — can get scheduled, so the bad `(empty && !running)` combination is not
+    /// just rare but structurally unreachable. This test polls continuously through the
+    /// whole patch window and fails immediately if that combination is ever observed,
+    /// rather than sampling once and hoping to get lucky/unlucky.
+    @MainActor
+    private func warmPatchNeverShowsFalseEmptyHardlinksBody() async throws {
+        var layout: [String: UInt64] = [:]
+        // Padding + churn: same two-part shape `warmPatchIsCancellableMidFlightBody`
+        // uses, for the same two reasons. Padding keeps the changed-item-fraction
+        // threshold comfortably satisfied (the decision judges the changed set against
+        // the CACHED size, before the mutation below grows it). Churn gives
+        // `rescanSubtrees` genuine work, wide enough for this test's polling loop to
+        // reliably land inside the patch window instead of racing a near-instant no-op.
+        for i in 0..<300 {
+            layout["pad\(i)/seed.txt"] = 1
+        }
+        for i in 0..<40 {
+            layout["churn\(i)/seed.txt"] = 1
+        }
+        let (rawRoot, cleanup) = try createTempTree(layout)
+        defer { cleanup() }
+        let root = realDirectoryPath(rawRoot)
+
+        // A hardlinked pair so hardlinkGroups is non-empty after the first scan —
+        // otherwise "stays empty" and "wrongly cleared" are indistinguishable.
+        let original = URL(fileURLWithPath: root).appendingPathComponent("pad0/original.txt")
+        try Data(repeating: 0xAB, count: 256).write(to: original)
+        let link = URL(fileURLWithPath: root).appendingPathComponent("pad0/hardlink.txt")
+        try FileManager.default.linkItem(at: original, to: link)
+        try await settleFSEventsJournal()
+
+        let savedEventId = FSEventsJournal.currentEventId()
+        let tree = await scanFixture(at: root)
+        #expect(tree.linkCountsCaptured)
+        try TreeCache.save(tree: tree, lastEventId: savedEventId)
+
+        // Grow each churn directory substantially — real work for the patch to chew
+        // through, even though the warm decision (based on the cache above) sees only a
+        // small fraction of the tree as changed.
+        for i in 0..<40 {
+            let dirURL = URL(fileURLWithPath: root).appendingPathComponent("churn\(i)")
+            for f in 0..<100 {
+                try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
+            }
+        }
+        try await settleFSEventsJournal()
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        defaults.set(root, forKey: Self.lastScannedVolumePathKey)
+
+        let state = AppState(defaults: defaults)
+        state.restoreOnLaunch()
+
+        // restoreOnLaunch's own post-restore refreshHardlinkGroups() call needs a beat
+        // to complete before the (fast, in-memory) hardlink group is actually populated.
+        await waitUntil(timeout: 5) { !state.hardlink.hardlinkGroups.isEmpty }
+        #expect(state.hardlink.hardlinkGroups.count == 1, "fixture must have exactly the one seeded hardlink group before the patch begins")
+
+        // Wait past the "preparing"/replay-wait sub-state into the actual patch, where
+        // commitWarmStart has registered its scanner via markStarted — same proven idiom
+        // as `warmPatchIsCancellableMidFlightBody`. This is the exact, reliable
+        // checkpoint right after commitWarmStart's synchronous top-of-function work
+        // (reset + this fix's immediate refreshHardlinkGroups()) has run and before the
+        // real `await rescanSubtrees(...)` suspension — the precise moment the OLD,
+        // unfixed code would have shown the misleading empty state.
+        await waitUntil(timeout: 10, pollInterval: .milliseconds(1)) {
+            state.scanProgress.isScanning && !state.isPreparingScan
+        }
+
+        // Confirm this is actually exercising a WARM patch, not a cold fallback that
+        // would make the rest of this test pass for the wrong reason.
+        #expect(state.scanProgress.currentPath.contains("last scan")
+            || state.scanProgress.currentPath.contains("changed folders"),
+            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" — did the fixture stop qualifying as warm?")
+
+        #expect(
+            !(state.hardlink.hardlinkGroups.isEmpty && !state.hardlink.isHardlinkScanRunning),
+            "hardlinkGroups read (empty && not running) right at patch entry — the exact bug_002 window"
+        )
+
+        // Keep watching through the remainder of the (real, churn-sized) patch — belt
+        // and suspenders alongside the entry-point checkpoint above.
+        var observedFalseEmpty = false
+        while state.scanProgress.isScanning {
+            if state.hardlink.hardlinkGroups.isEmpty && !state.hardlink.isHardlinkScanRunning {
+                observedFalseEmpty = true
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+
+        #expect(!observedFalseEmpty,
+            "hardlinkGroups must never read (empty && not running) while a warm patch is in flight behind a stale view")
+        #expect(!state.scanProgress.isScanning)
+        #expect(state.hardlink.hardlinkGroups.count == 1, "the group must still be present after the patch settles")
+    }
+
     // MARK: - 5. Every flow's scanner is cancellable
 
     @Test("cancelActiveScan actually stops the running scanner — no scan work keeps going in the background")
