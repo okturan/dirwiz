@@ -278,7 +278,18 @@ extension PerformanceSensitiveSuites {
             }
             print("[instant duplicates] 1M files: \(String(format: "%.0f", best * 1000))ms, \(candidateCount) candidate groups")
             #expect(candidateCount > 0, "control: the fixture really does contain duplicates")
+            // The claim "instant" is about RELEASE builds; the recorded figure is ~456 ms.
+            // Debug is roughly 2x slower before contention, and slower still on a CI runner
+            // sharing few cores - asserting a tight absolute bound there is a coin flip,
+            // which is the fragility that broke this repo's CI. The tight bound is asserted
+            // where it is meaningful; debug keeps a loose one that still catches the
+            // regression this test exists for (an accidental O(n^2) misses it by orders of
+            // magnitude, not by a factor of two).
+            #if DEBUG
+            #expect(best < 30.0, "instant grouping took \(best)s on 1M files")
+            #else
             #expect(best < 3.0, "instant grouping took \(best)s on 1M files")
+            #endif
         }
     }
 
