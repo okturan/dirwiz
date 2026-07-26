@@ -15,6 +15,7 @@ public struct CushionTreemapView: NSViewRepresentable {
     public var recencyFactors: [Float]
     public var recencyGeneration: UInt64
     public var isRecencyOverlayEnabled: Bool
+    public var renderStyle: TreemapRenderStyle
     public var temporalDiffKinds: [UInt8]
     public var temporalDiffStrengths: [Float]
     public var isTemporalDiffEnabled: Bool
@@ -36,6 +37,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         recencyFactors: [Float] = [],
         recencyGeneration: UInt64 = 0,
         isRecencyOverlayEnabled: Bool = false,
+        renderStyle: TreemapRenderStyle = .cushion,
         temporalDiffKinds: [UInt8] = [],
         temporalDiffStrengths: [Float] = [],
         isTemporalDiffEnabled: Bool = false,
@@ -56,6 +58,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         self.recencyFactors = recencyFactors
         self.recencyGeneration = recencyGeneration
         self.isRecencyOverlayEnabled = isRecencyOverlayEnabled
+        self.renderStyle = renderStyle
         self.temporalDiffKinds = temporalDiffKinds
         self.temporalDiffStrengths = temporalDiffStrengths
         self.isTemporalDiffEnabled = isTemporalDiffEnabled
@@ -98,12 +101,16 @@ public struct CushionTreemapView: NSViewRepresentable {
                              coordinator.isRecencyOverlayEnabled != isRecencyOverlayEnabled
         let temporalChanged = coordinator.temporalDiffGeneration != temporalDiffGeneration ||
                               coordinator.isTemporalDiffEnabled != isTemporalDiffEnabled
+        // Style is a pure repaint: same layout, same instances, different fragment shader
+        // branch — so it never invalidates the layout or the instance buffer.
+        let styleChanged = coordinator.renderStyle != renderStyle
 
         coordinator.currentFileTree = fileTree
         coordinator.currentTreeRevision = treeRevision
         coordinator.isScanning = isScanning
         coordinator.currentRootIndex = rootIndex
         coordinator.selectedNodeIndex = selectedNodeIndex
+        coordinator.renderStyle = renderStyle
         if paletteChanged {
             coordinator.extensionPalette = extensionPalette
             coordinator.instanceBufferDirty = true
@@ -141,7 +148,7 @@ public struct CushionTreemapView: NSViewRepresentable {
             }
         }
 
-        if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged || recencyChanged || temporalChanged {
+        if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged || recencyChanged || temporalChanged || styleChanged {
             mtkView.needsDisplay = true
         }
     }

@@ -47,6 +47,16 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     var isScanning: Bool = false
 
     var hoveredNodeIndex: UInt32?
+
+    /// Painting style only — both styles consume the same `SquarifyLayout` output, so hit
+    /// testing, zoom and the spatial index keep working off one set of rects regardless.
+    var renderStyle: TreemapRenderStyle = .cushion
+
+    /// The style actually painted last frame. Card style falls back to cushion above
+    /// `CardBudget.fallbackNodeThreshold`, where cards could only draw sub-pixel slivers;
+    /// the view reads this to tell the user rather than silently degrading.
+    private(set) var effectiveRenderStyle: TreemapRenderStyle = .cushion
+
     var extensionPalette = ExtensionPalette()
     var recencyFactors: [Float] = []
     var recencyGeneration: UInt64 = 0
@@ -420,6 +430,12 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             selectedInstance = nodeToInstanceIndex[selected] ?? -1
         }
 
+        // Card style spends pixels per nesting level, so past the budget it can only draw
+        // sub-pixel slivers — hand the view back to cushion rather than draw a lie.
+        effectiveRenderStyle =
+            (renderStyle == .cards && CardBudget.decide(nodeCount: instanceCount) == .fallbackToCushion)
+            ? .cushion : renderStyle
+
         let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
         var uniforms = CushionUniforms(
             viewportSize: SIMD2<Float>(Float(logicalSize.width), Float(logicalSize.height)),
@@ -427,7 +443,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             padding1: 0,
             lightDir: SIMD4<Float>(ld.x, ld.y, ld.z, 0),
             hoveredIndex: hoveredInstance,
-            selectedIndex: selectedInstance
+            selectedIndex: selectedInstance,
+            styleMode: effectiveRenderStyle == .cards ? 1 : 0
         )
 
         if uniformBuffers[currentBufferIndex] == nil {

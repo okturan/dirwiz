@@ -81,6 +81,23 @@ public final class AppState {
     /// Whether a Spotlight recency query is in progress.
     public var isRecencyQueryRunning: Bool = false
 
+    /// How the treemap paints its rectangles. A user preference, not scan state — it is
+    /// deliberately NOT reset by `resetForNewScan()`, and persists across launches.
+    public var treemapRenderStyle: TreemapRenderStyle = AppState.loadRenderStyle() {
+        didSet {
+            guard treemapRenderStyle != oldValue else { return }
+            UserDefaults.standard.set(treemapRenderStyle.rawValue, forKey: AppState.renderStyleKey)
+        }
+    }
+
+    static let renderStyleKey = "DirWizTreemapRenderStyle"
+
+    private static func loadRenderStyle() -> TreemapRenderStyle {
+        guard let raw = UserDefaults.standard.string(forKey: renderStyleKey),
+              let style = TreemapRenderStyle(rawValue: raw) else { return .cushion }
+        return style
+    }
+
     // MARK: - Space Analysis
 
     /// Results of the space categorization analysis.

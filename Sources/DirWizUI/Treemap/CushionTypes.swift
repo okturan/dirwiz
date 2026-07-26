@@ -20,7 +20,10 @@ struct CushionUniforms {
     var lightDir: SIMD4<Float>   // w unused; matches Metal float4 layout exactly
     var hoveredIndex: Int32
     var selectedIndex: Int32 = -1
-    var padding2: (Float, Float) = (0, 0)  // 8-byte tail padding; keep stride 48
+    /// 0 = cushion (default, unchanged), 1 = card. Occupies the first slot of what used to
+    /// be `padding2`, so the struct stride stays 48 and the layout assertion still holds.
+    var styleMode: Int32 = 0
+    var padding2: Float = 0
 }
 
 /// Verify Metal struct layout matches Swift struct layout. Called once from coordinator init.

@@ -34,6 +34,8 @@ public struct InteractiveTreemapView: View {
     @State private var hoverPoint: CGPoint?
     @State private var labelRects: [TreemapRect] = []
     @State private var layoutRectByNode: [UInt32: TreemapRect] = [:]
+    /// Drawn-rect count from the last layout, used to explain a card→cushion fallback.
+    @State private var drawnRectCount: Int = 0
 
     private var selectedLayoutRect: CGRect? {
         guard let idx = appState.selectedNodeIndex else { return nil }
@@ -134,6 +136,8 @@ public struct InteractiveTreemapView: View {
 
             Spacer(minLength: 4)
 
+            styleToggle
+
             // Show size of current root.
             if let tree = appState.fileTree,
                let rootNode = tree.node(at: appState.navigation.treemapRootIndex) {
@@ -145,6 +149,38 @@ public struct InteractiveTreemapView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(.bar)
+    }
+
+    /// Card style is abandoned above `CardBudget.fallbackNodeThreshold`, where cards could
+    /// only draw sub-pixel slivers. The renderer makes that call itself; this mirrors the
+    /// same pure decision so the user is told which style they are actually looking at.
+    private var styleFallbackNotice: String? {
+        guard appState.treemapRenderStyle == .cards, drawnRectCount > 0 else { return nil }
+        switch CardBudget.decide(nodeCount: drawnRectCount) {
+        case .drawAll:
+            return nil
+        case .aggregate:
+            return "Too dense for cards to stay legible — showing the largest \(CardBudget.maxDrawnNodes)."
+        case .fallbackToCushion:
+            return "Showing cushions: \(drawnRectCount.formatted()) rectangles is too dense for cards."
+        }
+    }
+
+    /// Cushion vs. card painting. Purely visual — it changes no geometry, so switching
+    /// mid-exploration keeps the current zoom, selection and hit targets exactly as they were.
+    private var styleToggle: some View {
+        Picker("", selection: $appState.treemapRenderStyle) {
+            Image(systemName: "circle.lefthalf.filled")
+                .tag(TreemapRenderStyle.cushion)
+                .help("Cushion")
+            Image(systemName: "square.grid.2x2")
+                .tag(TreemapRenderStyle.cards)
+                .help("Cards")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 72)
+        .help("Treemap style: cushion shading or rounded cards")
     }
 
     private func navButton(systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
@@ -184,6 +220,7 @@ public struct InteractiveTreemapView: View {
                 recencyFactors: appState.recencyFactors,
                 recencyGeneration: appState.recencyGeneration,
                 isRecencyOverlayEnabled: appState.isRecencyOverlayEnabled,
+                renderStyle: appState.treemapRenderStyle,
                 temporalDiffKinds: appState.temporalDiff.temporalDiffKinds,
                 temporalDiffStrengths: appState.temporalDiff.temporalDiffStrengths,
                 isTemporalDiffEnabled: appState.temporalDiff.isTemporalDiffEnabled,
@@ -229,6 +266,7 @@ public struct InteractiveTreemapView: View {
                     var byNode = [UInt32: TreemapRect](minimumCapacity: rects.count)
                     for r in rects { byNode[r.nodeIndex] = r }
                     layoutRectByNode = byNode
+                    drawnRectCount = rects.count
                 }
             )
             .contextMenu {
@@ -242,6 +280,18 @@ public struct InteractiveTreemapView: View {
             // Selection border overlay — visible even when the Metal highlight is too subtle.
             selectionBorderOverlay
                 .allowsHitTesting(false)
+
+            // Say why the picked style isn't what's on screen, rather than degrading silently.
+            if let notice = styleFallbackNotice {
+                Text(notice)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    .padding(8)
+                    .allowsHitTesting(false)
+            }
 
             // Hover tooltip overlay.
             if let nodeIndex = hoveredNodeIndex, let point = hoverPoint {

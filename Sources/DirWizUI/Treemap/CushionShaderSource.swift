@@ -18,7 +18,8 @@ enum CushionShaderSource {
         float4 lightDir;      // w unused; matches Swift SIMD4<Float> layout exactly
         int    hoveredIndex;
         int    selectedIndex;
-        float2 padding2;
+        int    styleMode;      // 0 = cushion, 1 = card
+        float  padding2;
     };
 
     struct VertexOut {
@@ -74,34 +75,68 @@ enum CushionShaderSource {
         // Gamma-correct: sRGB -> linear
         float3 baseLinear = srgbToLinear(in.baseColor.rgb);
 
-        // Compute cushion surface normal from parabolic coefficients.
-        float nx = -(2.0 * in.coefs.x * px + in.coefs.y);
-        float ny = -(2.0 * in.coefs.z * py + in.coefs.w);
-        float nz = 1.0;
-        float3 N = normalize(float3(nx, ny, nz));
+        float3 litColor;
+        float edgeDist;
 
-        // Lighting vectors.
-        float3 lightDir = normalize(uniforms.lightDir.xyz);
-        float3 viewDir = float3(0.0, 0.0, 1.0);
+        if (uniforms.styleMode == 1) {
+            // ---- Card style -------------------------------------------------------
+            // Hierarchy is drawn (containers + gaps), not lit, so no cushion normal.
+            // A soft top-left -> bottom-right gradient gives the flat card its form.
+            float grad = clamp((px + py) * 0.5, 0.0, 1.0);
+            litColor = baseLinear * mix(1.06, 0.88, grad);
 
-        // Diffuse (Lambertian).
-        float diffuse = max(0.0, dot(N, lightDir));
+            // Rounded-box SDF in pixel space. Radius and inset scale with the rect's
+            // smaller side and reach zero for small rects, so a shrinking card loses its
+            // rounding, then its gap, then draws as plain fill — it never becomes pure
+            // padding (mirrors CardGeometry on the Swift side).
+            float2 halfSize = in.rectSize * 0.5;
+            float  minSide  = min(in.rectSize.x, in.rectSize.y);
+            float  decorate = step(6.0, minSide);
+            float  radius   = decorate * min(6.0, minSide * 0.12);
+            float  inset    = decorate * min(2.0, minSide * 0.06);
 
-        // Specular (Blinn-Phong).
-        float3 H = normalize(lightDir + viewDir);
-        float spec = pow(max(dot(N, H), 0.0), 48.0);
-        float specIntensity = 0.15;
+            float2 p = (in.rectPos - 0.5) * in.rectSize;
+            float2 b = max(halfSize - inset - radius, float2(0.0));
+            float2 d = abs(p) - b;
+            float  sdf = length(max(d, float2(0.0))) + min(max(d.x, d.y), 0.0) - radius;
 
-        // Combined lighting.
-        float intensity = uniforms.ambient + (1.0 - uniforms.ambient) * diffuse;
-        float3 litColor = baseLinear * intensity + float3(specIntensity * spec);
+            // Cut the corners and the gap. Nothing is drawn outside the rounded box, so
+            // the view's background shows through between siblings.
+            if (sdf > 0.0) { discard_fragment(); }
 
-        // Anti-aliased borders using smoothstep.
-        float edgeX = min(px * in.rectSize.x, (1.0 - px) * in.rectSize.x);
-        float edgeY = min(py * in.rectSize.y, (1.0 - py) * in.rectSize.y);
-        float edgeDist = min(edgeX, edgeY);
-        float borderFactor = smoothstep(0.0, 1.5, edgeDist);
-        litColor *= mix(0.25, 1.0, borderFactor);
+            // Distance to the card's own edge drives hover/selection outlines below.
+            edgeDist = -sdf;
+        } else {
+            // ---- Cushion style (unchanged) ----------------------------------------
+            // Compute cushion surface normal from parabolic coefficients.
+            float nx = -(2.0 * in.coefs.x * px + in.coefs.y);
+            float ny = -(2.0 * in.coefs.z * py + in.coefs.w);
+            float nz = 1.0;
+            float3 N = normalize(float3(nx, ny, nz));
+
+            // Lighting vectors.
+            float3 lightDir = normalize(uniforms.lightDir.xyz);
+            float3 viewDir = float3(0.0, 0.0, 1.0);
+
+            // Diffuse (Lambertian).
+            float diffuse = max(0.0, dot(N, lightDir));
+
+            // Specular (Blinn-Phong).
+            float3 H = normalize(lightDir + viewDir);
+            float spec = pow(max(dot(N, H), 0.0), 48.0);
+            float specIntensity = 0.15;
+
+            // Combined lighting.
+            float intensity = uniforms.ambient + (1.0 - uniforms.ambient) * diffuse;
+            litColor = baseLinear * intensity + float3(specIntensity * spec);
+
+            // Anti-aliased borders using smoothstep.
+            float edgeX = min(px * in.rectSize.x, (1.0 - px) * in.rectSize.x);
+            float edgeY = min(py * in.rectSize.y, (1.0 - py) * in.rectSize.y);
+            edgeDist = min(edgeX, edgeY);
+            float borderFactor = smoothstep(0.0, 1.5, edgeDist);
+            litColor *= mix(0.25, 1.0, borderFactor);
+        }
 
         // Selection highlight: brighten selected instance (GPU-side, avoids CPU buffer rebuild).
         if (in.instanceID == uniforms.selectedIndex) {
