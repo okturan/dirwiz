@@ -8,6 +8,9 @@ import SwiftUI
 /// collapsed and invisible.
 @MainActor
 public final class SectionCollapseStore {
+    /// The app's store. Tests must construct their own with an isolated `UserDefaults`
+    /// rather than touching this one — writing to `.standard` from a test leaks
+    /// preferences into the user's real app.
     public static let shared = SectionCollapseStore()
 
     private let key: String

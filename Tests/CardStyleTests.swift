@@ -134,15 +134,55 @@ struct CardStyleTests {
         #expect(grid.hitTest(point: (x: 30, y: 30), rects: rects) == 1)
     }
 
+    /// Card style makes directory containers VISIBLE for the first time, which raises the
+    /// question the cushion style never had: can a container swallow a click meant for a
+    /// child sitting on top of it?
+    ///
+    /// It cannot. `SquarifyLayout` emits a container BEFORE its children, and
+    /// `SpatialGrid.hitTest` scans its cell in reverse, so the deepest rect covering a point
+    /// always wins. The container is only hit where no child covers the point — which, once
+    /// children are inset, is exactly its visible frame and header strip.
+    @Test("A visible container never swallows a click meant for a child")
+    func containerDoesNotSwallowChildClicks() {
+        // Container 0..100 with a child occupying the lower part, mirroring layout order.
+        let rects = [
+            TreemapRect(nodeIndex: 10, x: 0, y: 0, width: 100, height: 100, depth: 1,
+                        isBackground: true),
+            TreemapRect(nodeIndex: 11, x: 4, y: 22, width: 92, height: 74, depth: 2),
+        ]
+        let grid = SpatialGrid(viewportWidth: 100, viewportHeight: 100, rects: rects, gridSize: 8)
+
+        #expect(grid.hitTest(point: (x: 50, y: 60), rects: rects) == 11,
+                "a point over the child selects the child, not the container beneath it")
+        #expect(grid.hitTest(point: (x: 50, y: 8), rects: rects) == 10,
+                "the header strip, where no child sits, selects the container itself")
+        #expect(grid.hitTest(point: (x: 2, y: 60), rects: rects) == 10,
+                "the container's visible border likewise belongs to the container")
+    }
+
     /// Style is a user preference, not scan state — a new scan must not silently reset it.
-    @Test("Render style survives resetForNewScan")
+    /// Style is a user preference, not scan state — a new scan must not silently reset it.
+    /// Uses an ISOLATED defaults suite: writing to `.standard` here would change the real
+    /// app's stored preference (it did, before this was fixed).
+    @Test("Render style survives resetForNewScan and persists to its own store")
     @MainActor
     func stylePersistsAcrossScans() {
-        let state = AppState()
+        let suite = "dirwiz.test.style"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let state = AppState(defaults: defaults)
+        #expect(state.treemapRenderStyle == .cushion, "cushion is the default")
+
         state.treemapRenderStyle = .cards
         state.resetForNewScan()
         #expect(state.treemapRenderStyle == .cards)
-        state.treemapRenderStyle = .cushion   // restore the shared UserDefaults key
+
+        // A relaunch reading the same store sees the choice; `.standard` is untouched.
+        #expect(AppState(defaults: defaults).treemapRenderStyle == .cards)
+        #expect(defaults.string(forKey: AppState.renderStyleKey) == "cards",
+                "the choice is written to the injected store, not to .standard")
     }
 }
 

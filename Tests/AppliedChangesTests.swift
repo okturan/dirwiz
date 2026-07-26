@@ -307,6 +307,66 @@ struct AppliedChangesTests {
         #expect(!state.fsChanges.isEmpty, "should not have touched the accumulator without ever starting")
         #expect(!state.isApplyingChanges)
     }
+
+    // MARK: - Cache continuity under auto-apply (living-view-auto-apply 4.3)
+
+    /// Auto-apply calls this same function, so the cache write-back is the same code — but
+    /// the living view means the app now splices for hours without anyone clicking, and the
+    /// next launch's warm start depends on that write-back still being right afterwards.
+    @Test("An apply persists the tree and an event id the next warm start can replay from")
+    func applyPersistsCacheForWarmStart() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.applyPersistsCacheForWarmStartBody()
+        }
+    }
+
+    @MainActor
+    private func applyPersistsCacheForWarmStartBody() async throws {
+        let (path, cleanup) = try createTempTree(Self.layout)
+        defer { cleanup() }
+        let tree = await scanFixture(at: path)
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = AppState(defaults: defaults)
+        state.fileTree = tree
+        state.selectedVolume = URL(fileURLWithPath: path)
+        state.setTreemapRoot(0, recordHistory: false)
+
+        let eventIdBefore = FSEventsJournal.currentEventId()
+
+        try Data(count: 4_242).write(
+            to: URL(fileURLWithPath: path).appendingPathComponent("docs/live-added.txt"))
+        state.fsChanges = [
+            DirectoryChangeSummary(
+                id: path + "/docs", path: path + "/docs", changeCount: 1, lastChangeDate: Date(),
+                hasCreations: true, hasDeletions: false, hasModifications: false
+            )
+        ]
+
+        await state.applyAccumulatedChanges()
+        #expect(state.fsChanges.isEmpty, "control: the apply actually ran")
+
+        // The cache must hold the SPLICED tree, not the one from before the apply.
+        let cached = try #require(TreeCache.load(for: path),
+                                  "an apply must leave a usable warm-start cache")
+        #expect(cached.tree.count == tree.count)
+
+        let snap = cached.tree.pathBuildingSnapshot()
+        let cachedPaths = Set(snap.nodes.indices.map {
+            FileTree.pathFromSnapshot(at: UInt32($0), nodes: snap.nodes,
+                                      stringPool: snap.stringPool, rootPath: snap.rootPath)
+        })
+        #expect(cachedPaths.contains { $0.hasSuffix("/docs/live-added.txt") },
+                "the file added by the apply must be present in the persisted tree")
+
+        // The event id is captured BEFORE the splice on purpose: anything landing during it
+        // is covered by the next replay window rather than skipped.
+        #expect(cached.lastEventId >= eventIdBefore)
+        #expect(cached.lastEventId <= FSEventsJournal.currentEventId(),
+                "a future event id would make the next warm start replay nothing")
+    }
+
 }
 
 } // extension AppSupportEnvSuites

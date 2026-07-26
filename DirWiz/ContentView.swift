@@ -16,6 +16,9 @@ struct ContentView: View {
     @State private var showSkippedDirsPopover: Bool = false
     @State private var showWarmStartHistoryPopover: Bool = false
 
+    @State private var showPinSheet = false
+    @State private var pinName = ""
+
     var body: some View {
         VStack(spacing: 0) {
             NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -25,6 +28,7 @@ struct ContentView: View {
                 detailContent
             }
             .navigationTitle("")
+            .sheet(isPresented: $showPinSheet) { pinSheet }
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     HStack(spacing: 6) {
@@ -56,11 +60,12 @@ struct ContentView: View {
                                 .help("Saving snapshot…")
                         } else {
                             Button {
-                                appState.takeSnapshot()
+                                pinName = ""
+                                showPinSheet = true
                             } label: {
                                 Image(systemName: "camera")
                             }
-                            .help("Take Snapshot for Temporal Diff (Cmd+Opt+S)")
+                            .help("Pin this moment on the timeline (Cmd+Opt+S)")
                             .keyboardShortcut("s", modifiers: [.command, .option])
                             .disabled(!appState.scanProgress.scanComplete)
                         }
@@ -688,15 +693,19 @@ struct ContentView: View {
             Image(systemName: "timelapse")
                 .font(.system(size: 11))
                 .foregroundStyle(.orange)
-            Text("Comparing to snapshot from \(dateStr)")
+            Text("Comparing to")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+
+            checkpointPicker(current: snapshot, currentLabel: dateStr)
+
             Text("·")
                 .foregroundStyle(.tertiary)
             Text(snapshot.meta.rootPath)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+                .truncationMode(.head)
             Spacer()
             Button("Clear") {
                 appState.temporalDiff.isTemporalDiffEnabled = false
@@ -710,12 +719,101 @@ struct ContentView: View {
         .background(Color.orange.opacity(0.08))
     }
 
+    /// Naming a moment is what pins it: retention never thins a named checkpoint, so the
+    /// sheet is the difference between "a point that may be thinned away" and "a point that
+    /// will still be here next year".
+    private var pinSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pin this moment")
+                .font(.headline)
+            Text("Named checkpoints are kept forever. Unnamed ones are thinned over time.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            TextField("e.g. Before cleaning Downloads", text: $pinName)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 300)
+
+            HStack {
+                Button("Cancel") { showPinSheet = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Save Unnamed") {
+                    showPinSheet = false
+                    appState.takeSnapshot()
+                }
+                Button("Pin") {
+                    let name = pinName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    showPinSheet = false
+                    // An all-whitespace name is not a name; treat it as an ordinary
+                    // checkpoint rather than pinning something the user cannot identify.
+                    appState.takeSnapshot(name: name.isEmpty ? nil : name)
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+    }
+
+    /// Choose which recorded checkpoint the diff overlay compares against.
+    ///
+    /// Newest first, with each entry's own delta so the list reads as a timeline rather than
+    /// a pile of dates. The footer shows what the history costs on disk — keeping history
+    /// silently consuming space is exactly the thing this app exists to expose.
+    private func checkpointPicker(current: TemporalSnapshot, currentLabel: String) -> some View {
+        let checkpoints = appState.temporalDiff.availableCheckpoints
+        return Menu {
+            if checkpoints.isEmpty {
+                Text("No other checkpoints recorded")
+            } else {
+                ForEach(checkpoints) { checkpoint in
+                    Button {
+                        appState.selectDiffBaseline(checkpoint)
+                    } label: {
+                        let isCurrent = checkpoint.id == current.meta.id
+                        Text((isCurrent ? "✓ " : "")
+                             + (checkpoint.isPinned ? "★ " : "")
+                             + checkpointLabel(checkpoint))
+                    }
+                }
+                Divider()
+                Text("\(checkpoints.count) checkpoints · "
+                     + SizeFormatter.shared.format(appState.temporalDiff.storeBytes) + " on disk")
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(currentLabel)
+                    .font(.system(size: 11, weight: .medium))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .onAppear { appState.refreshCheckpointList() }
+        .help("Compare against a different recorded checkpoint")
+    }
+
+    private func checkpointLabel(_ checkpoint: SnapshotCheckpoint) -> String {
+        var parts = [Self.diffDateFormatter.string(from: checkpoint.createdAt)]
+        if let name = checkpoint.name { parts.append(name) }
+        if let summary = checkpoint.summary, summary.totalDelta != 0 {
+            let sign = summary.totalDelta > 0 ? "+" : "−"
+            parts.append(sign + SizeFormatter.shared.format(UInt64(abs(summary.totalDelta))))
+        }
+        return parts.joined(separator: "  ·  ")
+    }
+
     private var tabBar: some View {
         HStack(spacing: 0) {
             ForEach(DetailTab.allCases) { tab in
                 Button(action: { appState.activeTab = tab }) {
                     Text(tab.rawValue)
                         .font(.system(size: 12, weight: appState.activeTab == tab ? .semibold : .regular))
+                        // Without this a narrow window wraps "Extensions" to "Extension/s".
+                        // The bar scrolls instead; a tab name must never break mid-word.
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
                         .contentShape(Rectangle())

@@ -18,7 +18,7 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Screenshot pass at legend width extremes and long extension names (truncation)
+- [x] 4.1 Screenshot pass at legend width extremes and long extension names (truncation)
 - [x] 4.2 Full suite green; note the shared drill-down seam in the search-filter-upgrade change if it hasn't landed yet
 
 ## Implementation notes (as built)
@@ -36,10 +36,9 @@
 - Naming (`.swift` / `(no ext)` / `Other`) is derived in one place, `ExtensionRowModel
   .displayName`, and consumed by the legend row, the Extensions tab cell, and its tooltip.
 
-## Deferred (not implemented)
+## Screenshot pass (4.1, done after the first pass)
 
-- 4.1 the screenshot pass at legend width extremes. The legend is plain SwiftUI, so unlike
-  the treemap it WOULD capture via the repo's headless technique; the row guards against
-  the failure it was checking for directly (`lineLimit(1)` + `.truncationMode(.middle)` on
-  the name, `.fixedSize()` on the size column so the name yields first). Not visually
-  confirmed at extreme widths.
+- Captured at 220pt (default) and inside a 1000pt window. Rows render swatch, name, size,
+  count and percentage bar without clipping; long names truncate in the middle as intended
+  while the size column holds its width; the "See all file types →" footer sits correctly
+  at the bottom of the panel.

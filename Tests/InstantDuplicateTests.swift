@@ -279,3 +279,120 @@ struct InstantDuplicatePerformanceTests {
         #expect(best < 3.0, "instant grouping took \(best)s on 1M files")
     }
 }
+
+/// Characterization of the exhaustive `DuplicateFinder` (instant-duplicates 2.2).
+///
+/// Task 2.1 proposed refactoring `DuplicateFinder` to expose its passes 2–4 as a scoped
+/// entry point. That refactor was NOT done — scoped verification reuses
+/// `DuplicateContentVerifier` instead, which is already the guard on the existing trash
+/// path. These tests exist so that claim is verifiable rather than asserted: they pin the
+/// full-scan engine's observable outputs, so if anyone does attempt that refactor later,
+/// any behavior change shows up here.
+@Suite("Duplicate Finder Characterization Tests")
+struct DuplicateFinderCharacterizationTests {
+
+    private func fixture() throws -> (root: String, cleanup: () -> Void) {
+        let root = NSTemporaryDirectory() + "/dupchar-\(UUID().uuidString)"
+        let fm = FileManager.default
+        for d in ["a", "b", "c", "d"] {
+            try fm.createDirectory(atPath: root + "/" + d, withIntermediateDirectories: true)
+        }
+        // Two identical copies, one same-size decoy, one unique, one below any threshold.
+        let shared = Data((0..<120_000).map { UInt8($0 % 211) })
+        try shared.write(to: URL(fileURLWithPath: root + "/a/twin.bin"))
+        try shared.write(to: URL(fileURLWithPath: root + "/b/twin-renamed.bin"))
+        try Data(repeating: 0x5A, count: 120_000).write(to: URL(fileURLWithPath: root + "/c/decoy.bin"))
+        try Data(repeating: 0x01, count: 90_000).write(to: URL(fileURLWithPath: root + "/d/unique.bin"))
+        try Data(repeating: 0x02, count: 10).write(to: URL(fileURLWithPath: root + "/d/tiny.bin"))
+        return (root, { try? fm.removeItem(atPath: root) })
+    }
+
+    private func scan(_ path: String) async -> FileTree {
+        let tree = FileTree()
+        let scanner = FileScanner(computeBundleSizes: false, deferTreeMaterialization: false)
+        await scanner.scan(path: path, progress: ScanProgress(), tree: tree)
+        return tree
+    }
+
+    /// Content, not name, is what the exhaustive scan groups by — the complement of the
+    /// instant heuristic, and why the two are not interchangeable.
+    @Test("The full scan groups by content regardless of filename")
+    func groupsByContentNotName() async throws {
+        let (root, cleanup) = try fixture()
+        defer { cleanup() }
+
+        let groups = await DuplicateFinder(minimumFileSize: 1).findDuplicates(in: await scan(root))
+        #expect(groups.count == 1, "exactly one content group in this fixture")
+
+        let paths = Set(groups[0].paths.map { ($0 as NSString).lastPathComponent })
+        #expect(paths == ["twin.bin", "twin-renamed.bin"],
+                "differently-named identical files still group; the instant pass would miss these")
+        #expect(groups[0].fileSize == 120_000)
+        #expect(groups[0].wastedSpace == 120_000)
+    }
+
+    @Test("Same-size different-content files are never grouped")
+    func decoyIsNotGrouped() async throws {
+        let (root, cleanup) = try fixture()
+        defer { cleanup() }
+        let groups = await DuplicateFinder(minimumFileSize: 1).findDuplicates(in: await scan(root))
+        let all = Set(groups.flatMap(\.paths).map { ($0 as NSString).lastPathComponent })
+        #expect(!all.contains("decoy.bin"))
+        #expect(!all.contains("unique.bin"))
+    }
+
+    @Test("The minimum size threshold excludes small files")
+    func minimumSizeHonoured() async throws {
+        let (root, cleanup) = try fixture()
+        defer { cleanup() }
+        let tree = await scan(root)
+
+        let permissive = await DuplicateFinder(minimumFileSize: 1).findDuplicates(in: tree)
+        #expect(!permissive.isEmpty)
+
+        let strict = await DuplicateFinder(minimumFileSize: 1_000_000).findDuplicates(in: tree)
+        #expect(strict.isEmpty, "nothing in the fixture reaches 1 MB")
+    }
+
+    @Test("Results are ordered by wasted space, descending")
+    func orderedByWaste() async throws {
+        let root = NSTemporaryDirectory() + "/dupchar-\(UUID().uuidString)"
+        let fm = FileManager.default
+        for d in ["a", "b"] {
+            try fm.createDirectory(atPath: root + "/" + d, withIntermediateDirectories: true)
+        }
+        defer { try? fm.removeItem(atPath: root) }
+
+        let big = Data((0..<400_000).map { UInt8($0 % 131) })
+        let small = Data((0..<50_000).map { UInt8($0 % 67) })
+        try big.write(to: URL(fileURLWithPath: root + "/a/big.bin"))
+        try big.write(to: URL(fileURLWithPath: root + "/b/big.bin"))
+        try small.write(to: URL(fileURLWithPath: root + "/a/small.bin"))
+        try small.write(to: URL(fileURLWithPath: root + "/b/small.bin"))
+
+        let groups = await DuplicateFinder(minimumFileSize: 1).findDuplicates(in: await scan(root))
+        #expect(groups.count == 2)
+        #expect(groups[0].wastedSpace >= groups[1].wastedSpace)
+        #expect(groups[0].fileSize == 400_000)
+    }
+
+    /// The stats report is part of the engine's observable surface, so pin it too.
+    @Test("Reported stats stay consistent with the returned groups")
+    func statsMatchGroups() async throws {
+        let (root, cleanup) = try fixture()
+        defer { cleanup() }
+        let report = await DuplicateFinder(minimumFileSize: 1).findDuplicatesWithStats(in: await scan(root))
+        #expect(report.groups.count == 1)
+        #expect(report.stats.confirmedGroups == report.groups.count,
+                "the stats must describe the groups actually returned")
+        #expect(report.stats.sizeQualifiedFiles >= 5, "every fixture file is considered")
+    }
+
+    /// An empty tree must produce an empty result, not a crash or a phantom group.
+    @Test("An empty tree yields no duplicates")
+    func emptyTree() async throws {
+        let (root, cleanup) = try createTempTree(["only/one.bin": 5_000])
+        defer { cleanup() }
+        #expect(await DuplicateFinder(minimumFileSize: 1).findDuplicates(in: await scan(root)).isEmpty)
+    }
+}

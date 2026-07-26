@@ -124,6 +124,21 @@ public struct SearchView: View {
     // MARK: - Filter Bar
 
     private var filterBar: some View {
+        // Horizontally scrollable: the controls are fixed-width and there are now six of
+        // them, so at ~1000pt the trailing ones (Modified, File Types) were clipped off the
+        // edge and became unreachable rather than merely cramped. Verified at 1000×700.
+        ScrollView(.horizontal, showsIndicators: false) {
+            filterControls
+        }
+        // The controls are wider than the pane by design; clip so the overflow scrolls
+        // rather than drawing over the neighbouring sidebar.
+        .clipped()
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { chipsRow }
+    }
+
+    private var filterControls: some View {
         HStack(spacing: 8) {
             Picker("", selection: $filters.nodeType) {
                 Text("All").tag(SearchFilters.NodeType.all)
@@ -174,14 +189,11 @@ public struct SearchView: View {
 
             extensionPicker
 
-            Spacer()
         }
         .font(.system(size: 11))
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .bottom) { Divider() }
-        .safeAreaInset(edge: .bottom, spacing: 0) { chipsRow }
+        .fixedSize(horizontal: true, vertical: false)
         .onChange(of: filters.nodeType) { _, _ in
             previousMatchIndices = nil
             triggerSearch()

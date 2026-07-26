@@ -17,7 +17,7 @@
 ## 3. Verification
 
 - [x] 3.1 Latency sanity on a large tree (all filters active) — confirm no content I/O and instant-range timings; note numbers in PR
-- [ ] 3.2 Full suite green; screenshot pass of the filter bar at narrow window widths
+- [x] 3.2 Full suite green; screenshot pass of the filter bar at narrow window widths
 
 ## Implementation notes (as built)
 
@@ -47,8 +47,10 @@
   best-of-5 **22.8 ms**; scope bitset construction over 100k nodes **7.5 ms**. Both are
   gated by tests. No filesystem reads on any path.
 
-## Deferred (not implemented)
+## Screenshot pass (3.2, done after the first pass)
 
-- 3.2's screenshot pass of the filter bar at narrow widths. The chips row scrolls
-  horizontally and the bar's controls are fixed-width, so narrow windows clip the bar
-  rather than wrapping it — worth a visual pass before release.
+- Captured at 1000×700 and it CONFIRMED the defect I had only suspected: with six
+  fixed-width controls the bar clipped at the pane edge, leaving Modified and the File
+  Types picker unreachable — not merely cramped, but impossible to use.
+- Fixed by making the control row a horizontal `ScrollView` with explicit `.clipped()`, so
+  the overflow scrolls instead of drawing over the sidebar. Re-captured and verified.

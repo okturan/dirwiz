@@ -13,12 +13,21 @@ struct LiveRefreshCoordinatorTests {
     /// into without one. Every state here gets a minimal one so the tests exercise the
     /// policy rather than the no-tree short circuit.
     private func stateWithTree() -> AppState {
-        let state = AppState()
+        let state = AppState(defaults: Self.isolatedDefaults())
         let tree = FileTree()
         var root = FileNode(); root.isDirectory = true
         tree.addNode(root, name: "root")
         state.fileTree = tree
         return state
+    }
+
+    /// One reusable suite, CLEARED on each call. A fresh UUID suite per call would isolate
+    /// just as well but litters ~/Library/Preferences with a plist per test run.
+    static let suiteName = "dirwiz.test.live"
+    static func isolatedDefaults() -> UserDefaults {
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 
     private func change(_ path: String) -> DirectoryChangeSummary {
@@ -88,25 +97,27 @@ struct LiveRefreshCoordinatorTests {
         #expect(!state.liveRefreshPaused)
         #expect(state.liveRefreshDecision == .apply)
 
-        state.liveRefreshPaused = false   // restore the shared UserDefaults key
     }
 
     /// Pausing is a considered choice; silently resuming next launch would be exactly the
     /// surprise the pause exists to prevent.
     @Test("The pause preference persists")
     func pausePersists() {
-        let state = stateWithTree()
-        let original = state.liveRefreshPaused
-        defer {
-            state.liveRefreshPaused = original
-            UserDefaults.standard.set(original, forKey: AppState.livePausedKey)
-        }
+        // An isolated suite: writing this preference to `.standard` from a test changes the
+        // real app's behaviour on the developer's own machine (it did, before this fix).
+        let suite = "dirwiz.test.pause"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let state = AppState(defaults: defaults)
+        #expect(!state.liveRefreshPaused, "watching is on by default")
 
         state.liveRefreshPaused = true
-        #expect(UserDefaults.standard.bool(forKey: AppState.livePausedKey))
+        #expect(defaults.bool(forKey: AppState.livePausedKey))
 
-        let relaunched = AppState()
-        #expect(relaunched.liveRefreshPaused, "a fresh launch must honour the pause")
+        // A fresh launch reading the same store honours the pause.
+        #expect(AppState(defaults: defaults).liveRefreshPaused)
     }
 
     @Test("A storm routes to a full rescan rather than grinding splices")

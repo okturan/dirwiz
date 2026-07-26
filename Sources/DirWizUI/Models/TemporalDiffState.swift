@@ -36,6 +36,10 @@ public final class TemporalDiffState {
     /// Checkpoint the diff overlay compares against; nil means "the latest".
     public var selectedBaselineID: UUID? = nil
 
+    /// Total on-disk size of this volume's checkpoint store, shown in the picker footer so
+    /// the cost of keeping history is visible rather than a mystery folder.
+    public var storeBytes: UInt64 = 0
+
     public init() {}
 
     /// Reset temporal diff state for a new scan.

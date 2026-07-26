@@ -83,17 +83,17 @@ public final class AppState {
 
     /// How the treemap paints its rectangles. A user preference, not scan state — it is
     /// deliberately NOT reset by `resetForNewScan()`, and persists across launches.
-    public var treemapRenderStyle: TreemapRenderStyle = AppState.loadRenderStyle() {
+    public var treemapRenderStyle: TreemapRenderStyle = .cushion {
         didSet {
             guard treemapRenderStyle != oldValue else { return }
-            UserDefaults.standard.set(treemapRenderStyle.rawValue, forKey: AppState.renderStyleKey)
+            defaults.set(treemapRenderStyle.rawValue, forKey: AppState.renderStyleKey)
         }
     }
 
     static let renderStyleKey = "DirWizTreemapRenderStyle"
 
-    private static func loadRenderStyle() -> TreemapRenderStyle {
-        guard let raw = UserDefaults.standard.string(forKey: renderStyleKey),
+    static func loadRenderStyle(_ defaults: UserDefaults) -> TreemapRenderStyle {
+        guard let raw = defaults.string(forKey: renderStyleKey),
               let style = TreemapRenderStyle(rawValue: raw) else { return .cushion }
         return style
     }
@@ -155,17 +155,14 @@ public final class AppState {
     /// User preference: pause auto-apply. Persisted, because someone who paused it once
     /// meant it, and having it silently resume next launch would be the same surprise
     /// auto-apply is supposed to avoid.
-    public var liveRefreshPaused: Bool = AppState.loadLivePaused() {
+    public var liveRefreshPaused: Bool = false {
         didSet {
             guard liveRefreshPaused != oldValue else { return }
-            UserDefaults.standard.set(liveRefreshPaused, forKey: AppState.livePausedKey)
+            defaults.set(liveRefreshPaused, forKey: AppState.livePausedKey)
         }
     }
 
     static let livePausedKey = "DirWizLiveRefreshPaused"
-    private static func loadLivePaused() -> Bool {
-        UserDefaults.standard.bool(forKey: livePausedKey)
-    }
 
     /// When the most recent FSEvents batch arrived, and when the last auto-apply finished.
     /// Feed `LiveRefreshPolicy`; also drive the "updated Xs ago" pill.
@@ -278,6 +275,11 @@ public final class AppState {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.sessionStore = SessionStateStore(defaults: defaults)
+        // Read persisted preferences from the INJECTED store. Doing this here rather than
+        // in a property default is what keeps an isolated test suite from writing into the
+        // user's real defaults domain (it did, once).
+        self.treemapRenderStyle = AppState.loadRenderStyle(defaults)
+        self.liveRefreshPaused = defaults.bool(forKey: AppState.livePausedKey)
     }
 
     public enum HeavyTaskKind: String, Sendable, CaseIterable {

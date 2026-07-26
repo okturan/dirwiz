@@ -22,7 +22,7 @@
 
 - [x] 4.1 `ScanSupervisionTests` case: a policy tick during an active scan performs no apply and publishes no scan state; supervision invariant holds across auto-apply flows
 - [x] 4.2 Guard-interaction tests: apply defers during duplicate scan/bundle sizing; applies afterward; pause blocks applies entirely
-- [ ] 4.3 Cache continuity test: auto-apply persists tree + pre-splice event id (extend existing apply tests)
+- [x] 4.3 Cache continuity test: auto-apply persists tree + pre-splice event id (extend existing apply tests)
 - [x] 4.4 Update plan 037 decision-3a doc comments and CLAUDE.md living-view paragraph; full suite green
 
 ## Implementation notes (as built)
@@ -53,9 +53,10 @@
   `stateWithTree()` helper itself, making it infinitely recursive — signal 11 on every test
   in the suite, with no message. When a whole suite dies at once, suspect the shared helper.
 
-## Deferred (not implemented)
+## Cache continuity (4.3, added after the first pass)
 
-- 4.3 cache-continuity test for the auto-apply path. `applyAccumulatedChanges` already
-  captures the event id BEFORE the splice and writes back the cache — auto-apply calls that
-  exact function, adding no new persistence path — so the existing apply tests still cover
-  the behavior. A test asserting it specifically via the auto path was not added.
+- `AppliedChangesTests.applyPersistsCacheForWarmStart` now asserts the whole chain: after an
+  apply, `TreeCache.load` returns the SPLICED tree (the newly added file is present) and an
+  event id that is `>=` the pre-splice id and `<=` now. A future id would make the next
+  warm start replay nothing; an id captured after the splice would skip anything that
+  landed during it.

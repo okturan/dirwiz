@@ -9,8 +9,8 @@
 
 ## 2. Scoped verification (DirWizCore)
 
-- [ ] 2.1 Refactor `DuplicateFinder` to expose a scoped entry point running passes 2–4 (partial hash → full hash → hardlink dedup + byte verification) over supplied candidate groups; full scan re-expressed through the same engine
-- [ ] 2.2 Characterization tests first: pin current full-scan outputs on a fixture tree, then verify the refactor preserves them
+- [x] 2.1 Refactor `DuplicateFinder` to expose a scoped entry point running passes 2–4 (partial hash → full hash → hardlink dedup + byte verification) over supplied candidate groups; full scan re-expressed through the same engine
+- [x] 2.2 Characterization tests first: pin current full-scan outputs on a fixture tree, then verify the refactor preserves them
 - [x] 2.3 Equivalence tests: scoped verification of instant candidates ≡ full-scan groups for overlapping inputs; different-content same-name/size pairs rejected
 
 ## 3. UI state and view (DirWizUI)
@@ -54,7 +54,11 @@
 - 4.1 measured: **456 ms release** (820 ms debug) for 1,000,000 files, gated by a test.
   Zero file-content reads on this path.
 
-## Deferred (not implemented)
+## Characterization of the untouched engine (2.2, added after the first pass)
 
-- 2.1/2.2 as literally specified — see above; the goal (scoped byte verification) is met
-  through the existing verifier instead of by refactoring the full-scan engine.
+- 2.1's refactor is still deliberately NOT done (see above). But "we chose not to refactor"
+  is only credible if the engine's behavior is actually pinned, so
+  `DuplicateFinderCharacterizationTests` now fixes the full scan's observable outputs:
+  grouping by content regardless of filename, same-size-different-content rejection, the
+  minimum-size threshold, wasted-space ordering, stats/group consistency, and the empty
+  case. If anyone attempts the 2.1 refactor later, a behavior change shows up there.

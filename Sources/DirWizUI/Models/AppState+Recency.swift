@@ -109,6 +109,55 @@ extension AppState {
         }
     }
 
+    /// Switches the diff baseline to a specific checkpoint on the timeline.
+    ///
+    /// The overlay is index-keyed against the CURRENT tree, so changing the baseline has to
+    /// recompute it — leaving the old arrays in place would paint one checkpoint's diff with
+    /// another's numbers.
+    public func selectDiffBaseline(_ checkpoint: SnapshotCheckpoint?) {
+        guard let tree = fileTree else { return }
+        let rootPath = tree.path(at: 0)
+        let token = scanToken
+        temporalDiff.selectedBaselineID = checkpoint?.id
+
+        Task.detached(priority: .userInitiated) {
+            let store = SnapshotStore(rootPath: rootPath)
+            let snapshot: TemporalSnapshot? = {
+                guard let checkpoint else { return store.loadLatest() }
+                return try? store.load(checkpoint)
+            }()
+            await MainActor.run {
+                guard self.scanToken == token else { return }
+                self.temporalDiff.temporalSnapshot = snapshot
+                if snapshot == nil {
+                    // The checkpoint is gone (retention, or another process). Say nothing
+                    // false: drop the overlay rather than keep showing the previous diff.
+                    self.temporalDiff.isTemporalDiffEnabled = false
+                    self.temporalDiff.selectedBaselineID = nil
+                }
+                self.temporalDiff.availableCheckpoints = store.list()
+                self.temporalDiff.storeBytes = store.totalStoredBytes()
+            }
+        }
+    }
+
+    /// Refreshes the timeline listing without touching the current baseline.
+    public func refreshCheckpointList() {
+        guard let tree = fileTree else { return }
+        let rootPath = tree.path(at: 0)
+        let token = scanToken
+        Task.detached(priority: .background) {
+            let store = SnapshotStore(rootPath: rootPath)
+            let listed = store.list()
+            let bytes = store.totalStoredBytes()
+            await MainActor.run {
+                guard self.scanToken == token else { return }
+                self.temporalDiff.availableCheckpoints = listed
+                self.temporalDiff.storeBytes = bytes
+            }
+        }
+    }
+
     /// Try to load a persisted snapshot matching the current scan root.
     public func loadSnapshotIfAvailable() {
         guard let tree = fileTree else {
@@ -128,6 +177,7 @@ extension AppState {
                 guard self.scanToken == token else { return }
                 self.temporalDiff.temporalSnapshot = snapshot
                 self.temporalDiff.availableCheckpoints = store.list()
+                self.temporalDiff.storeBytes = store.totalStoredBytes()
                 if snapshot == nil {
                     self.temporalDiff.isTemporalDiffEnabled = false
                 }

@@ -13,8 +13,8 @@
 
 - [x] 2.1 Auto-checkpoint at cold and warm scan-completion commit points with 6h/1% throttle (constants env-overridable); token-guarded background work
 - [x] 2.2 Camera action → pin-with-name sheet creating a pinned checkpoint; `TemporalDiffState` gains selected-baseline checkpoint
-- [ ] 2.3 Compare-to picker in the diff banner/toolbar (newest-first, names + dates + summaries, default latest); diff overlay works against any selected checkpoint
-- [ ] 2.4 Store size shown in picker footer
+- [x] 2.3 Compare-to picker in the diff banner/toolbar (newest-first, names + dates + summaries, default latest); diff overlay works against any selected checkpoint
+- [x] 2.4 Store size shown in picker footer
 
 ## 3. CLI
 
@@ -54,10 +54,17 @@
   write, gated by a test. Comfortably inside the 500 MB default store budget for a long
   timeline.
 
-## Deferred (not implemented)
+## Compare-to picker (2.3 / 2.4, added after the first pass)
 
-- 2.3 / 2.4 — the compare-to picker in the diff banner and the store-size footer.
-  `TemporalDiffState` carries `availableCheckpoints` and `selectedBaselineID`, and the CLI
-  can list the timeline, but the GUI still diffs against the latest checkpoint only. This
-  is Phase A (storage/collection) per the proposal; the timeline scrubber UI is explicitly
-  Phase B.
+- The diff banner's date is now a menu listing every checkpoint newest-first, each with its
+  own delta and pin marker, with a footer giving the count and total bytes on disk.
+  Selecting one calls `selectDiffBaseline`, which RECOMPUTES the overlay — the diff arrays
+  are index-keyed to the current tree, so leaving them in place would paint one
+  checkpoint's diff using another's numbers.
+- A checkpoint that has since been thinned away drops the overlay rather than continuing to
+  show the previous diff.
+- The camera action now opens a small sheet: naming a moment pins it, "Save Unnamed"
+  records an ordinary thinnable checkpoint. An all-whitespace name is treated as unnamed —
+  pinning something the user cannot identify later is worse than not pinning.
+- Still Phase B per the proposal: the full timeline scrubber UI (cards, scrubbing) is not
+  built; this is a picker, not a scrubber.

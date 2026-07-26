@@ -18,7 +18,7 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Screenshot pass: default state, mixed collapsed state, space card in all three states; iterate per design-taste memory
+- [x] 4.1 Screenshot pass: default state, mixed collapsed state, space card in all three states; iterate per design-taste memory
 - [x] 4.2 Full suite green; release-note line for the Space tab move; note the InsightsView action-bar overlap in the living-view change for rebase ordering
 
 ## Implementation notes (as built)
@@ -37,8 +37,15 @@
   `AppState` starts on the first tab. That is what makes removing a `DetailTab` case safe —
   no saved state can point at the retired tab.
 
-## Deferred (not implemented)
+## Screenshot pass (4.1, done after the first pass)
 
-- 4.1 the screenshot pass (default / mixed-collapsed / space card in all three states).
-  These are plain SwiftUI and would capture correctly with the repo's headless technique,
-  unlike the Metal treemap — not visually confirmed.
+- Captured headlessly at 1200×800 and inspected. The cards render with correct chrome,
+  "Where did my disk go?" leads with its Analyze control in the header, and only iCloud
+  Status / Volume Info remain in the action bar (Run Analysis and Watch Changes are gone).
+- **The pass found a real defect**: at that width the tab bar wrapped "Extensions" to
+  "Extension/s" and "Duplicates" to "Duplicate/s". Fixed with `lineLimit(1)` +
+  `fixedSize(horizontal:)` on the tab labels. This is exactly the class of bug a screenshot
+  pass exists to catch and no test would have.
+- Hook note: the tab must be set AFTER the scan completes — `startSelectedVolumeScan` runs
+  `resetForNewScan`, which resets `activeTab`, so setting it first silently captures Tree
+  View.

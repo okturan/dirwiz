@@ -10,7 +10,7 @@ import Foundation
 struct InsightsRestructureTests {
 
     private func freshStore(_ name: String) -> (SectionCollapseStore, UserDefaults) {
-        let suite = "dirwiz.test.\(name)"
+        let suite = "dirwiz.test.insights.\(name)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         return (SectionCollapseStore(key: "collapsed", defaults: defaults), defaults)

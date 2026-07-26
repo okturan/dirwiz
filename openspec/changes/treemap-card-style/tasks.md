@@ -24,7 +24,7 @@
 
 - [x] 4.1 Keep `SpatialGrid` built from LAYOUT rects, not inset visual rects
 - [x] 4.2 Test: with Card insets active, hovering just inside a rect's inset edge selects the node whose layout rect contains the cursor — pins the drift bug before it can ship
-- [ ] 4.3 Decide and test directory-container click behavior (zoom into the directory) so containers don't swallow clicks meant for children
+- [x] 4.3 Decide and test directory-container click behavior (zoom into the directory) so containers don't swallow clicks meant for children
 
 ## 5. Settings + disclosure (DirWizUI)
 
@@ -81,9 +81,11 @@
   render of a 33-rect composed layout pushed through the real `CardNesting.place`, inspected
   in both styles, plus the pixel-level assertions in `CardStyleRenderTests`.
 
-## Deferred (not implemented)
+## Container click behavior (4.3, resolved after the first pass)
 
-- 4.3 — directory-container click behavior. Containers are drawn but never enter the
-  instance-index lookup ahead of their children, and `SpatialGrid.hitTest` already prefers
-  the last (deepest) overlapping rect, so a container cannot swallow a click meant for a
-  child. Explicit click-to-zoom on the visible container frame is a follow-up.
+- Decision: NO new click handling was needed, and there is now a test proving it rather
+  than an argument claiming it. `SquarifyLayout` emits a container before its children and
+  `SpatialGrid.hitTest` scans its cell in reverse, so the deepest rect covering a point
+  always wins. A container is therefore hit only where no child covers the point — which,
+  once children are inset, is exactly its visible frame and header strip. Clicking there
+  selects the directory (and double-click zooms, via the existing handler).
