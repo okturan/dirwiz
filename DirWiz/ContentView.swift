@@ -216,8 +216,8 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if !appState.fsChanges.isEmpty {
-                changeBadge
+            if appState.isFSMonitoringActive || !appState.fsChanges.isEmpty {
+                livePill
             }
             if let tree = appState.fileTree {
                 Text("\(SizeFormatter.shared.formatCount(tree.count)) items")
@@ -437,31 +437,98 @@ struct ContentView: View {
     }
 
     /// Live "N folders changed · Refresh" row shown inside `scanSummary` once
-    /// `FSEventsMonitor` (started via Insights' "Watch Changes") has accumulated changes.
-    /// One click applies them in place via `AppState.applyAccumulatedChanges()` — never
-    /// automatic (plan 037, decision 3a). Count = `fsChanges.count`, the per-directory
-    /// summaries the monitor tracks — the same set `applyAccumulatedChanges` feeds into
-    /// its splice before any outermost-root collapsing.
-    private var changeBadge: some View {
+    /// Living-view status. Monitoring auto-starts after every completed scan and
+    /// accumulated changes splice themselves in once `LiveRefreshPolicy` says so — this
+    /// pill exists to make that visible and reversible, not to be the trigger.
+    ///
+    /// This replaces the old "N folders changed · Refresh" badge and reverses plan 037's
+    /// decision 3a. Every state names its own reason: a view that quietly stops updating is
+    /// worse than one that never updated, because you cannot tell the difference.
+    private var livePill: some View {
         HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.2.circlepath")
+            Image(systemName: liveIcon)
                 .font(.caption)
-                .foregroundStyle(.blue)
-            Text("\(appState.fsChanges.count) folders changed")
+                .foregroundStyle(liveTint)
+            Text(liveLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+
             Spacer()
+
             if appState.isApplyingChanges {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Button("Refresh") {
+                ProgressView().controlSize(.small)
+            } else if case .storm = appState.liveRefreshDecision {
+                // Splicing this many directories is slower than rescanning outright.
+                Button("Full Rescan") { appState.startFullRescan() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+            } else if appState.liveRefreshPaused && !appState.fsChanges.isEmpty {
+                Button("Apply") {
                     Task { await appState.applyAccumulatedChanges() }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
                 .disabled(!appState.canStartHeavyTask(.applyChanges))
             }
+
+            Button(action: { appState.toggleLiveRefreshPaused() }) {
+                Image(systemName: appState.liveRefreshPaused ? "play.fill" : "pause.fill")
+                    .font(.system(size: 9))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(appState.liveRefreshPaused
+                  ? "Resume automatic updates"
+                  : "Pause automatic updates (keeps watching)")
+        }
+    }
+
+    private var liveIcon: String {
+        if appState.liveRefreshPaused { return "pause.circle" }
+        switch appState.liveRefreshDecision {
+        case .storm:    return "exclamationmark.triangle"
+        case .deferred: return "clock"
+        default:        return "circle.fill"
+        }
+    }
+
+    private var liveTint: Color {
+        if appState.liveRefreshPaused { return .secondary }
+        switch appState.liveRefreshDecision {
+        case .storm:    return .orange
+        case .deferred: return .secondary
+        default:        return .green
+        }
+    }
+
+    private var liveLabel: String {
+        let pending = appState.fsChanges.count
+        if appState.liveRefreshPaused {
+            return pending > 0
+                ? "Paused · \(pending) folders pending"
+                : "Paused"
+        }
+        switch appState.liveRefreshDecision {
+        case .storm(let count):
+            return "\(SizeFormatter.shared.formatCount(count)) folders changed — too many to patch"
+        case .deferred(let reason):
+            switch reason {
+            case .temporalDiffActive: return "\(pending) pending · waiting for the diff overlay"
+            case .scanning:           return "\(pending) pending · scanning"
+            case .heavyTaskRunning:   return "\(pending) pending · waiting for analysis"
+            case .paused:             return "Paused"
+            }
+        case .waitingForQuiescence, .waitingForInterval:
+            return "\(pending) folders changed · updating shortly"
+        case .apply:
+            return "\(pending) folders changed · updating"
+        case .idle:
+            if let last = appState.lastLiveApplyAt {
+                let ago = Int(CFAbsoluteTimeGetCurrent() - last)
+                return ago < 5 ? "Live · just updated" : "Live · updated \(ago)s ago"
+            }
+            return "Live"
         }
     }
 

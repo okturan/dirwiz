@@ -150,6 +150,37 @@ public final class AppState {
     /// point of a patch meant to feel instantaneous and keep the tree browsable throughout.
     public var isApplyingChanges: Bool = false
 
+    // MARK: - Living view (auto-apply)
+
+    /// User preference: pause auto-apply. Persisted, because someone who paused it once
+    /// meant it, and having it silently resume next launch would be the same surprise
+    /// auto-apply is supposed to avoid.
+    public var liveRefreshPaused: Bool = AppState.loadLivePaused() {
+        didSet {
+            guard liveRefreshPaused != oldValue else { return }
+            UserDefaults.standard.set(liveRefreshPaused, forKey: AppState.livePausedKey)
+        }
+    }
+
+    static let livePausedKey = "DirWizLiveRefreshPaused"
+    private static func loadLivePaused() -> Bool {
+        UserDefaults.standard.bool(forKey: livePausedKey)
+    }
+
+    /// When the most recent FSEvents batch arrived, and when the last auto-apply finished.
+    /// Feed `LiveRefreshPolicy`; also drive the "updated Xs ago" pill.
+    @ObservationIgnored public var lastLiveChangeAt: TimeInterval?
+    public var lastLiveApplyAt: TimeInterval?
+
+    /// Latest policy verdict, so the pill can explain itself instead of just spinning.
+    public var liveRefreshDecision: LiveRefreshPolicy.Decision = .idle
+
+    /// Bumped after each successful auto-apply. `SearchView` observes it to re-run the
+    /// current query, so results do not silently describe a tree that no longer exists.
+    public var liveRefreshGeneration: UInt64 = 0
+
+    @ObservationIgnored public var liveRefreshTask: Task<Void, Never>?
+
     // MARK: - Storage Trends
 
     /// Historical scan summaries.
@@ -375,6 +406,10 @@ public final class AppState {
         isBundleSizingRunning = false
         fsEventsMonitor?.stop()
         fsEventsMonitor = nil
+        liveRefreshTask?.cancel()
+        liveRefreshTask = nil
+        lastLiveChangeAt = nil
+        liveRefreshDecision = .idle
         fsChanges = []
         isFSMonitoringActive = false
         isApplyingChanges = false

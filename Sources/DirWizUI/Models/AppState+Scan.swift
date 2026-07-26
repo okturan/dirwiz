@@ -532,6 +532,7 @@ extension AppState {
         scanProgress.currentPath = summary
         lastScanSummary = summary
         staleViewAsOf = nil
+        startLiveMonitoring()
         WarmStartHistory.record(
             .init(date: Date(), wasWarm: true, reason: nil, itemCount: tree.count, elapsedSeconds: elapsed),
             for: path
@@ -647,6 +648,10 @@ extension AppState {
                 self.beginDeferredBundleSizing(
                     scanner: scanner, tree: tree, token: token, eventIdAtScanStart: eventIdAtScanStart
                 )
+                // The living view starts here rather than after bundle sizing: sizing runs
+                // in the background and the policy's own heavy-task guard defers any apply
+                // until it finishes, so there is nothing to gain by waiting.
+                self.startLiveMonitoring()
                 return (true, self.bundleSizingTask)
             }
 

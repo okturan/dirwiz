@@ -73,14 +73,6 @@ public struct InsightsView: View {
             }
             .disabled(!appState.canStartHeavyTask(.apfsQuery))
 
-            Button(action: { appState.toggleFSMonitoring() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: appState.isFSMonitoringActive ? "eye.slash" : "eye")
-                    Text(appState.isFSMonitoringActive ? "Stop Watching" : "Watch Changes")
-                }
-            }
-            .disabled(appState.fileTree == nil)
-
             Spacer()
 
             if let status = appState.activeHeavyTaskStatusText {

@@ -132,23 +132,103 @@ extension AppState {
 
     // MARK: - FSEvents Monitoring
 
+    /// Starts watching and begins the auto-apply loop. Called on every scan completion —
+    /// cold, warm, and post-restore refresh — so the living view is simply always on.
+    ///
+    /// Plan 037's "decision 3a: no auto-apply, ever" is deliberately reversed here. That
+    /// call was correct when the splice engine was new; it is now the same path warm start
+    /// takes on every launch, with path-keyed exploration restore. Pausing is a preference,
+    /// not the default.
+    public func startLiveMonitoring() {
+        stopLiveMonitoring()
+        guard let tree = fileTree, tree.count > 0 else { return }
+
+        let rootPath = tree.path(at: 0)
+        let monitor = FSEventsMonitor(watchPath: rootPath)
+        monitor.start { [weak self] changes in
+            Task { @MainActor in
+                guard let self else { return }
+                self.fsChanges = changes
+                // Every batch restarts the quiescence window, so a long burst (an install,
+                // a build) splices once at the end rather than repeatedly throughout.
+                self.lastLiveChangeAt = CFAbsoluteTimeGetCurrent()
+            }
+        }
+        fsEventsMonitor = monitor
+        isFSMonitoringActive = true
+        startLiveRefreshLoop()
+    }
+
+    public func stopLiveMonitoring() {
+        fsEventsMonitor?.stop()
+        fsEventsMonitor = nil
+        isFSMonitoringActive = false
+        liveRefreshTask?.cancel()
+        liveRefreshTask = nil
+        liveRefreshDecision = .idle
+    }
+
+    /// Pause/resume auto-apply. Watching continues while paused, so the pending count keeps
+    /// accumulating and the user can still apply manually — pausing suppresses the automatic
+    /// splice, it does not blind the app.
+    public func toggleLiveRefreshPaused() {
+        liveRefreshPaused.toggle()
+        evaluateLiveRefresh()
+    }
+
+    /// Retained for the existing Insights control path and tests; watching is now
+    /// lifecycle-driven rather than user-toggled.
     public func toggleFSMonitoring() {
         if isFSMonitoringActive {
-            fsEventsMonitor?.stop()
-            fsEventsMonitor = nil
-            isFSMonitoringActive = false
+            stopLiveMonitoring()
         } else {
-            guard let tree = fileTree else { return }
-            let rootPath = tree.path(at: 0)
-            let monitor = FSEventsMonitor(watchPath: rootPath)
-            monitor.start { [weak self] changes in
-                Task { @MainActor in
-                    self?.fsChanges = changes
-                }
-            }
-            fsEventsMonitor = monitor
-            isFSMonitoringActive = true
+            startLiveMonitoring()
         }
+    }
+
+    private func startLiveRefreshLoop() {
+        liveRefreshTask?.cancel()
+        liveRefreshTask = Task { @MainActor [weak self] in
+            // One second is fine: the policy, not the tick rate, decides when to apply.
+            // A faster tick would only re-evaluate the same verdict more often.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                await self.evaluateLiveRefreshAndApply()
+            }
+        }
+    }
+
+    /// Recomputes the verdict without acting — used when a guard changes (pause toggled,
+    /// overlay disabled) so the pill updates immediately instead of at the next tick.
+    public func evaluateLiveRefresh() {
+        liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
+    }
+
+    private func currentLiveRefreshInput() -> LiveRefreshPolicy.Input {
+        LiveRefreshPolicy.Input(
+            pendingCount: fsChanges.count,
+            now: CFAbsoluteTimeGetCurrent(),
+            lastChangeAt: lastLiveChangeAt,
+            lastAppliedAt: lastLiveApplyAt,
+            isPaused: liveRefreshPaused,
+            isScanning: scanProgress.isScanning,
+            canStartHeavyTask: canStartHeavyTask(.applyChanges),
+            isTemporalDiffActive: temporalDiff.isTemporalDiffEnabled
+        )
+    }
+
+    private func evaluateLiveRefreshAndApply() async {
+        let decision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
+        liveRefreshDecision = decision
+        guard decision == .apply else { return }
+
+        await applyAccumulatedChanges()
+
+        lastLiveApplyAt = CFAbsoluteTimeGetCurrent()
+        lastLiveChangeAt = nil
+        liveRefreshGeneration &+= 1
+        liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
     }
 
     /// Apply the accumulated FSEvents changes to the displayed tree incrementally — the

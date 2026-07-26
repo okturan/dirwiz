@@ -194,6 +194,9 @@ public struct SearchView: View {
         .onChange(of: appState.search.maximumSize) { _, _ in refilter() }
         .onChange(of: appState.search.datePreset) { _, _ in refilter() }
         .onChange(of: appState.search.scopePath) { _, _ in refilter() }
+        // An auto-apply renumbers node indices, so cached result indices are stale. Re-run
+        // through the normal path (its generation guard discards anything in flight).
+        .onChange(of: appState.liveRefreshGeneration) { _, _ in refilter() }
         // Clear stale node/pool snapshots when a new scan starts so the old
         // tree's memory is released and stale rows are never displayed.
         .onChange(of: appState.scanToken) { _, _ in
