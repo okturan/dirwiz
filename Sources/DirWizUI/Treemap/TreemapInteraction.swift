@@ -491,6 +491,12 @@ public struct InteractiveTreemapView: View {
                 NSPasteboard.general.setString(path, forType: .string)
             }
 
+            if node.isDirectory {
+                Button("Search in This Folder") {
+                    appState.scopeSearch(toPath: path, name: tree.name(at: nodeIndex))
+                }
+            }
+
             Button("Move to Trash") {
                 let url = URL(fileURLWithPath: path)
                 confirmTrash(name: tree.name(at: nodeIndex), size: node.fileSize) {

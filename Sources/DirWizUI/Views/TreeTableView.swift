@@ -181,6 +181,12 @@ public struct TreeTableView: View {
                     NSPasteboard.general.setString(path, forType: .string)
                 }
 
+                if let node = tree.node(at: item.id), node.isDirectory {
+                    Button("Search in This Folder") {
+                        appState.scopeSearch(toPath: path, name: tree.name(at: item.id))
+                    }
+                }
+
                 Button("Move to Trash") {
                     let size = tree.node(at: item.id)?.displaySize ?? 0
                     confirmTrash(name: item.name, size: size) {

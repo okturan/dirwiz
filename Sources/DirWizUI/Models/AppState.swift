@@ -404,6 +404,18 @@ extension AppState {
     }
 }
 
+extension AppState {
+    /// "Search in this folder": scope search to a subtree and go there.
+    ///
+    /// Stores the PATH, not the node index — `removeSubtree` renumbers every index, so a
+    /// stored index would silently come to mean a different folder after any trash action.
+    /// `SearchView` re-resolves the path before each query.
+    public func scopeSearch(toPath path: String, name: String) {
+        search.setScope(path: path, name: name)
+        activeTab = .search
+    }
+}
+
 public enum DetailTab: String, CaseIterable, Identifiable {
     case treeView = "Tree View"
     case extensions = "Extensions"

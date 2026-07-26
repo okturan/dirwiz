@@ -9,11 +9,59 @@ public struct SearchFilters: Sendable {
     public enum NodeType: Sendable { case all, filesOnly, directoriesOnly }
     public var nodeType: NodeType = .all
     public var minimumSize: UInt64 = 0
+    /// Inclusive upper size bound. nil = unbounded.
+    public var maximumSize: UInt64? = nil
     public var category: FileCategory? = nil
     /// Extension drill-down: exact extensionHash match. nil = no filter, 0 = no-extension files.
+    ///
+    /// Superseded by `extensionHashes` for multi-select, but kept because the Extensions-tab
+    /// drill-down and its tests speak in terms of one extension. When the set is non-empty it
+    /// wins; the two are never ANDed, which would make selecting two extensions match nothing.
     public var extensionHash: UInt32? = nil
+    /// OR-combined extension multi-select. Empty = not filtering by extension.
+    public var extensionHashes: Set<UInt32> = []
+
+    /// Inclusive Unix-seconds bounds on `FileNode.modifiedDate`.
+    ///
+    /// `modifiedDate == 0` means the scanner never learned a date. Such nodes are excluded
+    /// whenever a date bound is set: claiming an unknown date falls inside a "last 7 days"
+    /// window would be inventing data.
+    public var modifiedAfter: UInt32? = nil
+    public var modifiedBefore: UInt32? = nil
+
+    /// Restricts matches to a subtree. Built by `SearchEngine.scopeBitset`; nil = whole tree.
+    ///
+    /// A bitset rather than a per-node ancestor walk: the walk is O(depth) per node on a
+    /// path that must stay instant, while the bitset is one ascending pass over the tree.
+    public var scope: ScopeBitset? = nil
 
     public init() {}
+
+    /// True when the filters can only be satisfied by nothing at all. Callers can skip the
+    /// scan entirely, and it keeps an impossible band from looking like a slow search.
+    public var isUnsatisfiable: Bool {
+        if let maximumSize, maximumSize < minimumSize { return true }
+        if let after = modifiedAfter, let before = modifiedBefore, after > before { return true }
+        return false
+    }
+}
+
+/// Subtree membership as a packed bitset, one bit per node index.
+public struct ScopeBitset: Sendable {
+    @usableFromInline var words: [UInt64]
+    public let rootIndex: UInt32
+
+    init(words: [UInt64], rootIndex: UInt32) {
+        self.words = words
+        self.rootIndex = rootIndex
+    }
+
+    @inlinable
+    public func contains(_ index: Int) -> Bool {
+        let word = index >> 6
+        guard word >= 0, word < words.count else { return false }
+        return words[word] & (1 << UInt64(index & 63)) != 0
+    }
 }
 
 /// Result of a search operation.
@@ -29,6 +77,32 @@ public struct SearchResult: Sendable {
 public enum SearchEngine {
 
     public static let defaultResultCap = 10_000
+
+    /// Builds subtree membership for `rootIndex` in ONE ascending pass.
+    ///
+    /// This relies on the tree's parent-index-< -child-index invariant: by the time node `i`
+    /// is visited, its parent's membership is already final, so membership is just inherited.
+    /// If that invariant ever breaks, this silently under-reports rather than crashing —
+    /// hence the test that pins deep descendants.
+    public static func scopeBitset(rootIndex: UInt32, nodes: [FileNode]) -> ScopeBitset? {
+        let count = nodes.count
+        guard Int(rootIndex) < count else { return nil }
+        var words = [UInt64](repeating: 0, count: (count + 63) / 64)
+        let root = Int(rootIndex)
+        words[root >> 6] |= (1 << UInt64(root & 63))
+
+        nodes.withUnsafeBufferPointer { buf in
+            // Nothing before the root can be a descendant of it.
+            for i in (root + 1)..<count {
+                let parent = Int(buf[i].parentIndex)
+                guard parent < i else { continue }   // defensive: never read a later node
+                if words[parent >> 6] & (1 << UInt64(parent & 63)) != 0 {
+                    words[i >> 6] |= (1 << UInt64(i & 63))
+                }
+            }
+        }
+        return ScopeBitset(words: words, rootIndex: rootIndex)
+    }
 
     public static func search(
         query: String,
@@ -49,9 +123,25 @@ public enum SearchEngine {
             #endif
         }
 
-        // Allow empty query when an extension filter is active (show all files with that extension).
-        let hasExtFilter = filters.extensionHash != nil
-        guard (!query.isEmpty || hasExtFilter), !nodes.isEmpty, !searchEntries.isEmpty else {
+        // An empty query is meaningful for filters that are themselves an explicit
+        // "show me this set" gesture: an extension pick, a folder scope, a date window.
+        //
+        // Category and size bounds are deliberately NOT in this list. They predate this
+        // change with the documented behavior "an empty query returns nothing regardless of
+        // filters" (pinned by SearchEngineTests), and a size filter in particular tends to
+        // sit at a non-zero default — flipping it would make an empty search box suddenly
+        // enumerate the volume. New filter kinds get the better semantics; existing ones
+        // keep the contract they shipped with.
+        let hasNarrowingFilter = filters.extensionHash != nil
+            || !filters.extensionHashes.isEmpty
+            || filters.scope != nil
+            || filters.modifiedAfter != nil
+            || filters.modifiedBefore != nil
+        guard !filters.isUnsatisfiable else {
+            return SearchResult(matchingIndices: [], totalMatches: 0,
+                                elapsedTime: CFAbsoluteTimeGetCurrent() - start)
+        }
+        guard (!query.isEmpty || hasNarrowingFilter), !nodes.isEmpty, !searchEntries.isEmpty else {
             return SearchResult(matchingIndices: [], totalMatches: 0,
                                 elapsedTime: CFAbsoluteTimeGetCurrent() - start)
         }
@@ -158,10 +248,30 @@ public enum SearchEngine {
         default: break
         }
         if node.fileSize < filters.minimumSize { return false }
+        if let maxSize = filters.maximumSize, node.fileSize > maxSize { return false }
+
+        // Date bounds. modifiedDate == 0 means "unknown", which is never inside a window —
+        // treating it as a match would invent a date the scanner never read.
+        if filters.modifiedAfter != nil || filters.modifiedBefore != nil {
+            let mod = node.modifiedDate
+            if mod == 0 { return false }
+            if let after = filters.modifiedAfter, mod < after { return false }
+            if let before = filters.modifiedBefore, mod > before { return false }
+        }
+
+        if let scope = filters.scope, !scope.contains(i) { return false }
+
+        // Extension: the multi-select set wins when present; ANDing it with the single-hash
+        // drill-down would make any two-extension selection match nothing.
+        if !filters.extensionHashes.isEmpty {
+            if !filters.extensionHashes.contains(node.extensionHash) { return false }
+        } else if let extHash = filters.extensionHash, node.extensionHash != extHash {
+            return false
+        }
+
         if let cat = filterCategory, let map = colorMap {
             if map.category(forHash: node.extensionHash) != cat { return false }
         }
-        if let extHash = filters.extensionHash, node.extensionHash != extHash { return false }
         if !hasQuery { return true }
 
         let entry = entriesBuf[i]

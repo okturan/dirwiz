@@ -146,37 +146,33 @@ public struct SearchView: View {
             Divider().frame(height: 18)
 
             Picker("Min Size", selection: $filters.minimumSize) {
-                Text("Any Size").tag(UInt64(0))
-                Text("> 1 KB").tag(UInt64(1_024))
-                Text("> 1 MB").tag(UInt64(1_048_576))
-                Text("> 10 MB").tag(UInt64(10_485_760))
-                Text("> 100 MB").tag(UInt64(104_857_600))
-                Text("> 1 GB").tag(UInt64(1_073_741_824))
-            }
-            .frame(width: 130)
-
-            // Extension drill-down chip — shown when an extension filter is active.
-            if appState.search.extensionFilter != nil {
-                Divider().frame(height: 18)
-
-                Button(action: {
-                    appState.search.extensionFilter = nil
-                    appState.search.extensionFilterName = ""
-                }) {
-                    HStack(spacing: 4) {
-                        Text(appState.search.extensionFilterName)
-                            .font(.system(size: 11, weight: .medium))
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.accentColor.opacity(0.15))
-                    .clipShape(Capsule())
+                Text("Any Min").tag(UInt64(0))
+                ForEach(Self.sizeSteps, id: \.value) { step in
+                    Text("> " + step.label).tag(step.value)
                 }
-                .buttonStyle(.plain)
-                .help("Clear extension filter")
             }
+            .frame(width: 118)
+
+            Picker("Max Size", selection: $appState.search.maximumSize) {
+                Text("Any Max").tag(UInt64?.none)
+                ForEach(Self.sizeSteps, id: \.value) { step in
+                    Text("< " + step.label).tag(UInt64?.some(step.value))
+                }
+            }
+            .frame(width: 118)
+
+            Divider().frame(height: 18)
+
+            Picker("Modified", selection: $appState.search.datePreset) {
+                ForEach(SearchDatePreset.allCases) { preset in
+                    Text(preset.displayName).tag(preset)
+                }
+            }
+            .frame(width: 150)
+
+            Divider().frame(height: 18)
+
+            extensionPicker
 
             Spacer()
         }
@@ -184,6 +180,8 @@ public struct SearchView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { chipsRow }
         .onChange(of: filters.nodeType) { _, _ in
             previousMatchIndices = nil
             triggerSearch()
@@ -192,10 +190,10 @@ public struct SearchView: View {
             previousMatchIndices = nil
             triggerSearch()
         }
-        .onChange(of: filters.minimumSize) { _, _ in
-            previousMatchIndices = nil
-            triggerSearch()
-        }
+        .onChange(of: filters.minimumSize) { _, _ in refilter() }
+        .onChange(of: appState.search.maximumSize) { _, _ in refilter() }
+        .onChange(of: appState.search.datePreset) { _, _ in refilter() }
+        .onChange(of: appState.search.scopePath) { _, _ in refilter() }
         // Clear stale node/pool snapshots when a new scan starts so the old
         // tree's memory is released and stale rows are never displayed.
         .onChange(of: appState.scanToken) { _, _ in
@@ -420,6 +418,183 @@ public struct SearchView: View {
 
     // MARK: - Search Execution
 
+    static let sizeSteps: [(label: String, value: UInt64)] = [
+        ("1 KB", 1_024), ("1 MB", 1_048_576), ("10 MB", 10_485_760),
+        ("100 MB", 104_857_600), ("1 GB", 1_073_741_824),
+    ]
+
+    /// Searchable multi-select over the extensions the scan actually found, largest first —
+    /// so the picker is ordered by what is worth looking at, not alphabetically.
+    private var extensionPicker: some View {
+        Menu {
+            if !appState.search.extensionFilters.isEmpty {
+                Button("Clear all file types") {
+                    appState.search.extensionFilters = [:]
+                    appState.search.extensionFilter = nil
+                    appState.search.extensionFilterName = ""
+                    filters.extensionHash = nil
+                    refilter()
+                }
+                Divider()
+            }
+            ForEach(appState.fileTypeStats.prefix(40)) { stat in
+                let name = ExtensionRowModel(id: stat.extensionHash, rawName: stat.extensionName,
+                                             color: .zero, totalSize: 0, fileCount: 0).displayName
+                Button {
+                    toggleExtension(hash: stat.extensionHash, name: name)
+                } label: {
+                    if appState.search.extensionFilters[stat.extensionHash] != nil {
+                        Label("\(name)  ·  \(SizeFormatter.shared.format(stat.totalSize))",
+                              systemImage: "checkmark")
+                    } else {
+                        Text("\(name)  ·  \(SizeFormatter.shared.format(stat.totalSize))")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                Text(appState.search.extensionFilters.isEmpty
+                     ? "File Types"
+                     : "\(appState.search.extensionFilters.count) types")
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 110)
+        .help("Filter by one or more file types")
+    }
+
+    /// Removable chips for everything currently narrowing the search. Hidden entirely when
+    /// nothing is active, so the bar does not grow a permanent empty row.
+    @ViewBuilder
+    private var chipsRow: some View {
+        if appState.search.hasActiveFilters || appState.search.scopeClearedNotice != nil {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    if let notice = appState.search.scopeClearedNotice {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                            Text(notice).font(.system(size: 10))
+                        }
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                        .onTapGesture { appState.search.scopeClearedNotice = nil }
+                    }
+
+                    if appState.search.scopePath != nil {
+                        chip(label: "in: " + appState.search.scopeName, icon: "folder") {
+                            appState.search.clearScope()
+                            refilter()
+                        }
+                    }
+
+                    ForEach(appState.search.extensionFilters.sorted(by: { $0.value < $1.value }), id: \.key) { pair in
+                        chip(label: pair.value, icon: nil) {
+                            toggleExtension(hash: pair.key, name: pair.value)
+                        }
+                    }
+
+                    if appState.search.datePreset != .any {
+                        chip(label: appState.search.datePreset.displayName, icon: "calendar") {
+                            appState.search.datePreset = .any
+                            refilter()
+                        }
+                    }
+
+                    if let maxSize = appState.search.maximumSize {
+                        chip(label: "< " + SizeFormatter.shared.format(maxSize), icon: nil) {
+                            appState.search.maximumSize = nil
+                            refilter()
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+            }
+            .background(.bar)
+        }
+    }
+
+    private func chip(label: String, icon: String?, onClear: @escaping () -> Void) -> some View {
+        Button(action: onClear) {
+            HStack(spacing: 4) {
+                if let icon {
+                    Image(systemName: icon).font(.system(size: 9))
+                }
+                Text(label).font(.system(size: 11, weight: .medium))
+                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.accentColor.opacity(0.15))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Remove this filter")
+    }
+
+    private func toggleExtension(hash: UInt32, name: String) {
+        if appState.search.extensionFilters[hash] != nil {
+            appState.search.extensionFilters.removeValue(forKey: hash)
+        } else {
+            appState.search.extensionFilters[hash] = name
+        }
+        // The single-hash drill-down is subsumed once the set is in play; leaving it set
+        // would keep an invisible extra constraint on the query.
+        if !appState.search.extensionFilters.isEmpty {
+            appState.search.extensionFilter = nil
+            appState.search.extensionFilterName = ""
+            filters.extensionHash = nil
+        }
+        refilter()
+    }
+
+    /// Single path for "a filter changed": drops refinement state, then re-queries.
+    /// Refinement narrows the PREVIOUS result set, so reusing it after a filter loosens
+    /// would hide matches that were excluded a moment ago.
+    private func refilter() {
+        previousMatchIndices = nil
+        triggerSearch()
+    }
+
+    /// Folds the local filter-bar state and the shared `SearchState` into one
+    /// `SearchFilters`, re-resolving the folder scope by PATH.
+    ///
+    /// Re-resolving matters: `removeSubtree` renumbers every node index, so a scope stored
+    /// as an index would quietly point at a different folder after any trash action.
+    private func composeFilters(tree: FileTree) -> (filters: SearchFilters, hasNarrowingFilter: Bool) {
+        var f = filters
+        let search = appState.search
+
+        f.extensionHashes = Set(search.extensionFilters.keys)
+        f.maximumSize = search.maximumSize
+
+        let bounds = search.datePreset.bounds(now: UInt32(Date().timeIntervalSince1970))
+        f.modifiedAfter = bounds.after
+        f.modifiedBefore = bounds.before
+
+        if let path = search.scopePath {
+            if let idx = tree.nodeIndex(forPath: path) {
+                f.scope = SearchEngine.scopeBitset(rootIndex: idx, nodes: tree.nodesSnapshot())
+            } else {
+                // The folder is gone (trashed, or a rescan dropped it). Clear rather than
+                // silently searching the whole volume as if the scope were still honored.
+                DispatchQueue.main.async {
+                    appState.search.clearScope(
+                        notice: "Scope cleared — that folder is no longer in the scan."
+                    )
+                }
+            }
+        }
+
+        let narrowing = f.extensionHash != nil || !f.extensionHashes.isEmpty
+            || f.scope != nil || f.modifiedAfter != nil || f.modifiedBefore != nil
+        return (f, narrowing)
+    }
+
     private func triggerSearch() {
         searchTask?.cancel()
         showMoreCount = pageSize
@@ -427,9 +602,21 @@ public struct SearchView: View {
         let thisGeneration = searchGeneration
         let thisScanToken = appState.scanToken
 
-        // Allow empty query when an extension filter is active — show all files with that extension.
-        guard (!appState.search.searchQuery.isEmpty || filters.extensionHash != nil),
-              let tree = appState.fileTree else {
+        // One composition point: every filter mutation funnels through here, so a new
+        // filter kind cannot be wired to the UI and forgotten on the query path.
+        guard let tree = appState.fileTree else {
+            appState.search.searchResults = []
+            totalMatches = 0
+            searchTimeMs = 0
+            isCapped = false
+            appState.search.isSearching = false
+            previousQuery = ""
+            previousMatchIndices = nil
+            previousWasCapped = false
+            return
+        }
+        let composed = composeFilters(tree: tree)
+        guard !appState.search.searchQuery.isEmpty || composed.hasNarrowingFilter else {
             appState.search.searchResults = []
             totalMatches = 0
             searchTimeMs = 0
@@ -443,7 +630,7 @@ public struct SearchView: View {
 
         appState.search.isSearching = true
         let currentQuery = appState.search.searchQuery
-        let currentFilters = filters
+        let currentFilters = composed.filters
         let currentSort = sortOrder
         let currentAscending = sortAscending
         let oldQuery = previousQuery

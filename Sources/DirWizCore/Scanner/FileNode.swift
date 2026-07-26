@@ -293,6 +293,20 @@ public final class FileTree: @unchecked Sendable {
     /// Adapted from the technique in `TreeActions.findNodeIndex`, decoupled from stripping
     /// an absolute path's `rootPath` prefix — callers that start from an absolute path derive
     /// the relative components themselves.
+    /// Resolves an absolute path to a node index in the CURRENT tree.
+    ///
+    /// Paths, not indices, are the durable way to refer to a node: `removeSubtree` compacts
+    /// the array and renumbers everything, so any index held across a mutation is garbage.
+    /// Callers that persist a target (search scope, session state) store the path and come
+    /// back through here. Returns nil when the path is outside the scan or no longer exists.
+    public func nodeIndex(forPath path: String) -> UInt32? {
+        let snapshot = pathBuildingSnapshot()
+        guard let components = FileScanner.relativeComponents(of: path, rootPath: snapshot.rootPath) else {
+            return nil
+        }
+        return FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool)
+    }
+
     public static func descendPath(
         _ components: [String],
         nodes: [FileNode],
