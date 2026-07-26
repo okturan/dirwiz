@@ -6,8 +6,20 @@ macOS disk usage analyzer with a Metal cushion treemap, fast filesystem scans, d
   <img src="docs/assets/dirwiz-logo.png" width="140" alt="DirWiz logo">
 </p>
 
-![macOS](https://img.shields.io/badge/macOS-15%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-6-orange)
+<p align="center">
+  <a href="https://dirwiz.app"><strong>dirwiz.app</strong></a> ·
+  <a href="https://github.com/okturan/dirwiz/releases/latest">Download</a> ·
+  <a href="#build">Build from source</a> ·
+  <a href="#cli">CLI</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/okturan/dirwiz/releases/latest"><img src="https://img.shields.io/github/v/release/okturan/dirwiz?label=download&color=blue" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-15%2B-blue" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/Swift-6-orange" alt="Swift 6">
+  <img src="https://img.shields.io/badge/signed-Developer%20ID%20%2B%20notarized-green" alt="Signed and notarized">
+  <img src="https://img.shields.io/badge/dependencies-0-lightgrey" alt="Zero dependencies">
+</p>
 
 ![DirWiz tree table and Metal treemap after scanning a Mac boot volume](docs/assets/dirwiz-showcase.webp)
 
@@ -24,13 +36,16 @@ The main UI combines a WinDirStat-style treemap, a sortable file tree, extension
 - **Fast scanner**: Uses bulk filesystem metadata reads, bounded worker pools, compact node storage, and deferred tree materialization for large scans.
 - **Warm start**: Rescanning a volume with an unchanged-since-last-time cache loads the saved tree and patches only what an FSEvents journal replay says changed, instead of a full enumeration. Falls back to a normal cold scan automatically on any doubt; "Full Rescan" always forces cold. A "Scan history" popover shows the last 20 warm/cold decisions per volume and why, so an unexpectedly slow refresh is never unexplained.
 - **Deferred bundle sizing**: App bundles stay as opaque leaves during the first scan so the UI becomes usable sooner. Bundle sizes are resolved in the background and propagated into parent totals.
-- **Metal cushion treemap**: Shows disk usage visually with extension-based color mapping, zoom, selection, and hover details.
+- **Metal treemap, two styles**: Cushion shading conveys hierarchy with *lighting*, so it stays readable at extreme density; card style conveys it with *geometry* — rounded tiles, gaps and folder headers. Both share one layout, so switching is a pure repaint that keeps your zoom and selection.
+- **Living view**: After a scan the tree keeps itself true. Filesystem changes are watched and spliced in automatically once things go quiet, preserving your selection, expansion and zoom. A status pill names what it's doing, and pausing is one click.
 - **Sortable tree table**: Browse folders and files by on-disk size, logical size, item count, modified date, and parent percentage.
-- **Duplicate finder**: Groups candidate files by size and hashes, then verifies byte-for-byte before any cleanup action.
+- **Duplicate finder, two tiers**: Likely duplicates (same name and size) appear the moment a scan finishes — about half a second for a million files, with zero file reads. They are labelled as unverified and offer no delete button; only files that pass a byte-for-byte comparison become actionable.
 - **Hardlink analysis**: Automatically finds files that share inode identity after every scan (no separate scan step) and reports extra linked bytes for analysis. These bytes are not the same as reclaimable duplicate space.
-- **Space insights**: Breaks usage into categories, file ages, size distributions, iCloud status, APFS clone checks, and local snapshot information.
+- **Search that composes**: Filter by several file types at once, a size range, a modified-date window, and a folder scope — all at once, all instant (200k nodes with every filter active: ~23 ms). "Search in this folder" is on the right-click menu of any directory.
+- **Space insights**: Collapsible cards covering where your disk went, file ages, size distributions, iCloud status, APFS clone checks, and local snapshot information.
+- **Timeline snapshots**: Every scan can record a checkpoint, compressed to roughly a tenth of its size. Compare today against any recorded point, and pin the moments worth keeping — pinned checkpoints are never thinned away.
 - **Quick Look and Finder actions**: Preview files, reveal them in Finder, copy paths, or move selected items to Trash.
-- **CLI**: `dirwiz-cli` supports scripted scans, JSON export, duplicate checks, volume info, and benchmark runs.
+- **CLI**: `dirwiz-cli` supports scripted scans, JSON export, duplicate checks, volume info, snapshot timelines, and benchmark runs. It shares its snapshot store with the app, so a checkpoint taken in either shows up in both.
 
 ## Build
 
@@ -49,21 +64,33 @@ open dist/DirWiz.app
 
 The package script creates `dist/DirWiz.app` and `dist/DirWiz-<version>-macos.zip` (version read from `Info.plist`). A release build is small: roughly 11 MB installed, about 3 MB zipped for distribution.
 
-### Published v1.0.0 artifact
+### Download
 
-The [v1.0.0 download](https://github.com/okturan/dirwiz/releases/tag/v1.0.0) is a historical Apple-silicon (`arm64`) build for macOS 15 or newer. It is ad-hoc signed, not notarized, and therefore may require an explicit Gatekeeper override on first launch. Its SHA-256 checksum is:
+Grab the latest build from [dirwiz.app](https://dirwiz.app) or the
+[releases page](https://github.com/okturan/dirwiz/releases/latest).
+
+**v1.1.1** — universal (`arm64` + `x86_64`), macOS 15+, ~2.9 MB zipped / ~11 MB installed.
+Signed with a Developer ID and notarized by Apple, so it opens without a Gatekeeper
+override.
 
 ```text
-763351f50f3087720b537914f6edbd91f238e01179a011d6f0d9d4036730fe4b  DirWiz-1.0.0-macos.zip
+e8e04c446506d137b4f8b61e8daae94f47b91d22b33ceaa973eab0cda9cd07fd  DirWiz-1.1.1-macos.zip
 ```
 
-Verify a download before opening it:
+Verify before opening — and don't take the checksum above on faith either; the same
+commands confirm signing and architecture for yourself:
 
 ```bash
-shasum -a 256 DirWiz-1.0.0-macos.zip
+shasum -a 256 DirWiz-1.1.1-macos.zip
+spctl -a -vvv DirWiz.app      # expect: source=Notarized Developer ID
+lipo -archs DirWiz.app/Contents/MacOS/DirWiz   # expect: x86_64 arm64
 ```
 
-Current source has moved beyond that artifact: `scripts/package-release.sh` now requires a universal `arm64` + `x86_64` binary and supports Developer ID signing plus notarization when the maintainer supplies Apple credentials. Those improvements do not retroactively make the v1.0.0 zip universal or notarized; Intel users should build current source until a newer verified release is published.
+Earlier tags remain downloadable but are superseded: [v1.0.0](https://github.com/okturan/dirwiz/releases/tag/v1.0.0)
+is Apple-silicon only, ad-hoc signed and **not** notarized, so it needs an explicit
+Gatekeeper override on first launch.
+
+### CLI
 
 Run the CLI:
 
@@ -74,6 +101,8 @@ Run the CLI:
 .build/release/dirwiz-cli duplicates /path/to/scan --min-size 1048576
 .build/release/dirwiz-cli info /path/to/scan
 .build/release/dirwiz-cli snapshot /path/to/scan
+.build/release/dirwiz-cli snapshot /path/to/scan --name "Before cleanup"   # pins it
+.build/release/dirwiz-cli snapshot list /path/to/scan
 .build/release/dirwiz-cli diff /path/to/scan
 .build/release/dirwiz-cli benchmark /path/to/scan --iterations 3
 ```
@@ -133,7 +162,7 @@ DIRWIZ_DIST_DIR=/path/to/output
 DIRWIZ_CODESIGN_IDENTITY="Developer ID Application: ..."
 ```
 
-Advanced: `DIRWIZ_APP_SUPPORT_DIR` overrides where `snapshot`/`diff` persist saved snapshots (defaults to Application Support); mainly useful for tests and sandboxed runs.
+Advanced: `DIRWIZ_APP_SUPPORT_DIR` overrides where the snapshot timeline and tree cache are persisted (defaults to Application Support); mainly useful for tests and sandboxed runs.
 
 ## Requirements
 
