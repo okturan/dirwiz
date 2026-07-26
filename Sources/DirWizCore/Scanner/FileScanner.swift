@@ -56,14 +56,33 @@ private struct InodeKey: Hashable, Sendable {
 
 // MARK: - Visited Directory Tracker
 
-/// Thread-safe set tracking visited (dev, inode) pairs to avoid firmlink/hardlink loops.
+/// Thread-safe set tracking visited (dev, inode) pairs to avoid hardlink/mount loops,
+/// plus the firmlink duplicate paths that `(dev, inode)` provably cannot catch.
 private final class VisitedDirectories: Sendable {
     private let seen = Mutex(Set<InodeKey>())
+
+    /// Absolute Data-volume paths already reachable via a firmlink (see `FirmlinkTable`).
+    /// Empty when deduplication is off, which reproduces the previous behavior exactly.
+    private let firmlinkDuplicates: Set<String>
+
+    init(firmlinkDuplicates: Set<String> = []) {
+        self.firmlinkDuplicates = firmlinkDuplicates
+    }
 
     /// Returns true if this is the first time seeing this (dev, inode) pair.
     func insert(dev: Int32, inode: UInt64) -> Bool {
         let key = InodeKey(dev: dev, inode: inode)
         return seen.withLock { $0.insert(key).inserted }
+    }
+
+    /// The single "should I descend into this directory?" gate.
+    ///
+    /// Checks the firmlink table FIRST and deliberately does not mark the inode visited
+    /// when skipping: the `/`-side copy of the same content must stay free to claim it.
+    /// Marking it here would trade a double count for a silent omission.
+    func shouldTraverse(path: String, dev: Int32, inode: UInt64) -> Bool {
+        if !firmlinkDuplicates.isEmpty, firmlinkDuplicates.contains(path) { return false }
+        return insert(dev: dev, inode: inode)
     }
 }
 
@@ -355,6 +374,12 @@ public final class FileScanner: @unchecked Sendable {
     private let deferTreeMaterialization: Bool
     let filesystem: FilesystemProvider
 
+    /// Test seam for firmlink deduplication. Real firmlinks can't be created in a fixture
+    /// (APFS has no directory hard links), so tests inject the set of paths that would be
+    /// firmlink duplicates instead of depending on the host's `/usr/share/firmlinks`.
+    /// `nil` means "read the live system table", which is what production always does.
+    let firmlinkDuplicatesOverride: Set<String>?
+
     public init(
         filesystem: FilesystemProvider = RealFilesystemProvider(),
         computeBundleSizes: Bool = ProcessInfo.processInfo.environment["DIRWIZ_SKIP_BUNDLE_SIZES"] != "1",
@@ -363,6 +388,28 @@ public final class FileScanner: @unchecked Sendable {
         self.filesystem = filesystem
         self.computeBundleSizes = computeBundleSizes
         self.deferTreeMaterialization = deferTreeMaterialization
+        self.firmlinkDuplicatesOverride = nil
+    }
+
+    /// Test-only initializer that injects the firmlink duplicate set directly.
+    init(
+        filesystem: FilesystemProvider = RealFilesystemProvider(),
+        computeBundleSizes: Bool = false,
+        deferTreeMaterialization: Bool = false,
+        firmlinkDuplicates: Set<String>
+    ) {
+        self.filesystem = filesystem
+        self.computeBundleSizes = computeBundleSizes
+        self.deferTreeMaterialization = deferTreeMaterialization
+        self.firmlinkDuplicatesOverride = firmlinkDuplicates
+    }
+
+    /// Resolves the duplicate set for a scan: an injected override wins (tests), otherwise
+    /// the live system table, and only when the scan actually spans both sides.
+    func resolveFirmlinkDuplicates(forScanRoot root: String) -> Set<String> {
+        if let firmlinkDuplicatesOverride { return firmlinkDuplicatesOverride }
+        guard FirmlinkTable.isActive(forScanRoot: root) else { return [] }
+        return FirmlinkTable.loadSystemTable()
     }
 
     /// Cancel an in-progress scan. Safe to call from any thread.
@@ -514,7 +561,15 @@ public final class FileScanner: @unchecked Sendable {
         // One instance shared across every target in this batch — matches cold scan's
         // single firmlink/hardlink guard for the whole operation, not one per target. Its
         // internal Mutex makes sharing it across Phase A's concurrent tasks safe.
-        let visited = VisitedDirectories()
+        //
+        // Seeded with the same firmlink duplicates the cold scan uses, keyed off the tree's
+        // own root: the warm-start equivalence gate asserts a patched tree equals a fresh
+        // cold scan, so if cold skips the Data-side copies and a splice re-enumerated them,
+        // the two would diverge the moment a firmlinked path changed.
+        let treeRoot = tree.path(at: 0)
+        let visited = VisitedDirectories(
+            firmlinkDuplicates: resolveFirmlinkDuplicates(forScanRoot: treeRoot)
+        )
 
         let plans = planRescanTargets(rescannedRoots, tree: tree)
         let staged = await stageChangedRoots(plans, progress: progress, visited: visited)
@@ -977,8 +1032,15 @@ public final class FileScanner: @unchecked Sendable {
         rootNode.isDirectory = true
         let displayRootName = rootName.isEmpty ? path : rootName
 
-        // Visited directory tracker (prevents firmlink/hardlink double-counting)
-        let visited = VisitedDirectories()
+        // Visited directory tracker (prevents hardlink/mount double-counting), seeded with
+        // the firmlink duplicates that (dev, inode) provably can't catch — but only when
+        // this scan actually covers both sides. A scan rooted at or below the Data volume
+        // must enumerate everything (see `FirmlinkTable.isActive`).
+        let firmlinkDuplicates = resolveFirmlinkDuplicates(forScanRoot: path)
+        if !firmlinkDuplicates.isEmpty {
+            scanLog.notice("Firmlink dedup active for \(path, privacy: .public): \(firmlinkDuplicates.count, privacy: .public) duplicate Data-volume paths will be skipped")
+        }
+        let visited = VisitedDirectories(firmlinkDuplicates: firmlinkDuplicates)
 
         // Mark root as visited
         if let di = filesystem.deviceAndInode(forPath: path) {
@@ -1291,14 +1353,15 @@ public final class FileScanner: @unchecked Sendable {
             }
         }
 
-        // Enqueue subdirectories — skip already-visited (dev, inode) pairs (firmlinks, hardlinks)
+        // Enqueue subdirectories — skips already-visited (dev, inode) pairs (hardlinks,
+        // repeat mounts) and firmlink duplicates, which (dev, inode) cannot catch.
         for subdir in subdirs {
             guard !isCancelled else { break }
-            guard visited.insert(dev: subdir.dev, inode: subdir.inode) else {
-                continue // Already visited this directory via another path (firmlink)
+            let subdirPath = appendPathComponent(dirPath, subdir.name)
+            guard visited.shouldTraverse(path: subdirPath, dev: subdir.dev, inode: subdir.inode) else {
+                continue
             }
             let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
-            let subdirPath = appendPathComponent(dirPath, subdir.name)
             enqueue(subdirPath, childTreeIndex)
         }
     }
@@ -1434,13 +1497,13 @@ public final class FileScanner: @unchecked Sendable {
 
         for subdir in scratch.subdirs {
             guard !isCancelled else { break }
-            guard visited.insert(dev: subdir.dev, inode: subdir.inode) else {
-                continue
-            }
             let subdirName = Self.nameString(in: scratch.namePool, offset: subdir.nameOffset, length: subdir.nameLength)
             guard !subdirName.isEmpty else { continue }
-            let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
             let subdirPath = appendPathComponent(dirPath, subdirName)
+            guard visited.shouldTraverse(path: subdirPath, dev: subdir.dev, inode: subdir.inode) else {
+                continue
+            }
+            let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
             enqueue(subdirPath, childTreeIndex)
         }
     }
