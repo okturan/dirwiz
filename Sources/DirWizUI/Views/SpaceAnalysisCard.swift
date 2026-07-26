@@ -1,94 +1,79 @@
 import SwiftUI
 import DirWizCore
 
-/// Tab view for the "Explain My Disk" space categorization feature.
-/// Shows categorized disk usage with safety ratings and cleanup suggestions.
-public struct SpaceAnalysisView: View {
+/// "Where did my disk go?" — the space categorization card, first section of Insights.
+///
+/// This used to be its own tab, driven by a "Run Analysis" button that lived on the
+/// Insights tab and populated a DIFFERENT tab. Users experienced that as a button doing
+/// nothing. The action and its results now live together in one card.
+public struct SpaceAnalysisCard: View {
     @Bindable var appState: AppState
 
     public init(appState: AppState) {
         self.appState = appState
     }
 
-    public var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
-
-            if appState.isSpaceAnalysisRunning {
-                analysisProgress
-            } else if let result = appState.spaceAnalysis, !result.categories.isEmpty {
-                categoryList(result)
-            } else {
-                emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    /// The Analyze control sits in the section header so it stays reachable even when the
+    /// card is collapsed.
+    public var headerAccessory: AnyView {
+        AnyView(
+            HStack(spacing: 8) {
+                if let result = appState.spaceAnalysis, !appState.isSpaceAnalysisRunning {
+                    Text(SizeFormatter.shared.format(result.categorizedSize) + " categorized")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Button(action: { appState.startSpaceAnalysis() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chart.pie")
+                        Text(appState.spaceAnalysis == nil ? "Analyze" : "Re-analyze")
+                    }
+                    .font(.system(size: 11))
+                }
+                .disabled(!appState.canStartHeavyTask(.spaceAnalysis))
             }
-        }
+        )
     }
 
-    // MARK: - Toolbar
-
-    private var toolbar: some View {
-        HStack(spacing: 12) {
-            Button(action: { appState.startSpaceAnalysis() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chart.pie")
-                    Text("Analyze Space")
-                }
-            }
-            .disabled(!appState.canStartHeavyTask(.spaceAnalysis))
-
-            Spacer()
-
-            if let result = appState.spaceAnalysis {
-                Text("\(result.categories.count) categories")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text(SizeFormatter.shared.format(result.categorizedSize) + " categorized")
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.orange)
-            }
+    public var body: some View {
+        if appState.isSpaceAnalysisRunning {
+            analysisProgress
+        } else if let result = appState.spaceAnalysis, !result.categories.isEmpty {
+            categoryList(result)
+        } else {
+            emptyState
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 
     private var analysisProgress: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.large)
-            Text("Analyzing disk space...")
-                .font(.headline)
+        VStack(spacing: 8) {
             if appState.spaceAnalysisProgress.total > 0 {
                 Text(
                     "\(appState.spaceAnalysisProgress.completed) / " +
                     "\(appState.spaceAnalysisProgress.total) passes complete"
                 )
-                    .font(.callout)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 ProgressView(
                     value: Double(appState.spaceAnalysisProgress.completed),
                     total: Double(max(appState.spaceAnalysisProgress.total, 1))
                 )
                 .progressViewStyle(.linear)
-                .frame(maxWidth: 260)
+            } else {
+                ProgressView().controlSize(.small)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Category List
 
     private func categoryList(_ result: SpaceAnalysisResult) -> some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(result.categories) { category in
-                    categoryRow(category, totalSize: result.totalAnalyzed)
-                }
+        LazyVStack(spacing: 2) {
+            ForEach(result.categories) { category in
+                categoryRow(category, totalSize: result.totalAnalyzed)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
         }
     }
 
@@ -204,10 +189,10 @@ public struct SpaceAnalysisView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("Space Analysis", systemImage: "chart.pie")
-        } description: {
-            Text("Click \"Analyze Space\" to categorize disk usage into system data, developer caches, application data, and more.")
-        }
+        Text("Categorize disk usage into system data, developer caches, application data and more.")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
     }
 }

@@ -410,7 +410,6 @@ public enum DetailTab: String, CaseIterable, Identifiable {
     case duplicates = "Duplicates"
     case hardlinks = "Hardlinks"
     case search = "Search"
-    case spaceAnalysis = "Space"
     case insights = "Insights"
 
     public var id: String { rawValue }

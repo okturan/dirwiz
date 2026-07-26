@@ -543,8 +543,6 @@ struct ContentView: View {
                                     HardlinkView(appState: appState)
                                 case .search:
                                     SearchView(appState: appState)
-                                case .spaceAnalysis:
-                                    SpaceAnalysisView(appState: appState)
                                 case .insights:
                                     InsightsView(appState: appState)
                                 }

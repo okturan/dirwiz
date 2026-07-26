@@ -14,13 +14,40 @@ public struct InsightsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 analysisActions
-                fileAgeSection
-                sizeDistributionSection
-                volumeInfoSection
-                tmSnapshotSection
-                iCloudSection
-                fsChangesSection
-                storageTrendsSection
+
+                // "Where did my disk go?" leads: it answers the question the tab exists for.
+                let spaceCard = SpaceAnalysisCard(appState: appState)
+                CollapsibleSection(id: "space", title: "Where did my disk go?",
+                                   icon: "chart.pie", accessory: spaceCard.headerAccessory) {
+                    spaceCard
+                }
+                CollapsibleSection(id: "fileAge", title: "File Age Distribution", icon: "calendar") {
+                    fileAgeSection
+                }
+                CollapsibleSection(id: "sizeDistribution", title: "Size Distribution",
+                                   icon: "chart.bar.xaxis") {
+                    sizeDistributionSection
+                }
+                CollapsibleSection(id: "volumeInfo", title: "Volume Space", icon: "internaldrive") {
+                    volumeInfoSection
+                }
+                CollapsibleSection(id: "tmSnapshots",
+                                   title: "Time Machine Local Snapshots"
+                                       + (appState.tmSnapshots.map { " (\($0.snapshots.count))" } ?? ""),
+                                   icon: "clock.arrow.2.circlepath") {
+                    tmSnapshotSection
+                }
+                CollapsibleSection(id: "icloud", title: "iCloud Drive", icon: "icloud") {
+                    iCloudSection
+                }
+                CollapsibleSection(id: "fsChanges", title: "Filesystem Changes Since Scan (\(appState.fsChanges.count))", icon: "eye") {
+                    fsChangesSection
+                }
+                CollapsibleSection(id: "storageTrends",
+                                   title: "Storage Trends (\(appState.storageTrendHistory.count) scans)",
+                                   icon: "chart.line.uptrend.xyaxis") {
+                    storageTrendsSection
+                }
             }
             .padding(12)
         }
@@ -30,14 +57,6 @@ public struct InsightsView: View {
 
     private var analysisActions: some View {
         HStack(spacing: 8) {
-            Button(action: { appState.startSpaceAnalysis() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chart.bar")
-                    Text("Run Analysis")
-                }
-            }
-            .disabled(!appState.canStartHeavyTask(.spaceAnalysis))
-
             Button(action: { appState.startICloudAnalysis() }) {
                 HStack(spacing: 4) {
                     Image(systemName: "icloud")
@@ -80,7 +99,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var fileAgeSection: some View {
         if let result = appState.fileAgeResult, !result.buckets.isEmpty {
-            sectionHeader("File Age Distribution", icon: "calendar")
             VStack(spacing: 2) {
                 ForEach(result.buckets.filter { $0.fileCount > 0 }) { bucket in
                     HStack {
@@ -126,7 +144,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var sizeDistributionSection: some View {
         if let result = appState.sizeDistribution, !result.buckets.isEmpty {
-            sectionHeader("Size Distribution", icon: "chart.bar.xaxis")
             VStack(spacing: 2) {
                 let maxCount = result.buckets.map(\.fileCount).max() ?? 1
                 ForEach(result.buckets.filter { $0.fileCount > 0 }) { bucket in
@@ -167,7 +184,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var volumeInfoSection: some View {
         if let info = appState.purgeableSpace {
-            sectionHeader("Volume Space", icon: "internaldrive")
             HStack(spacing: 20) {
                 statPill("Total", SizeFormatter.shared.format(info.totalCapacity))
                 statPill("Free", SizeFormatter.shared.format(info.availableCapacity))
@@ -188,7 +204,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var tmSnapshotSection: some View {
         if let info = appState.tmSnapshots, !info.snapshots.isEmpty {
-            sectionHeader("Time Machine Local Snapshots (\(info.snapshots.count))", icon: "clock.arrow.2.circlepath")
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(info.snapshots.prefix(8)) { snap in
                     HStack {
@@ -213,7 +228,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var iCloudSection: some View {
         if let result = appState.iCloudResult, !result.groups.isEmpty {
-            sectionHeader("iCloud Drive", icon: "icloud")
             VStack(spacing: 4) {
                 HStack(spacing: 16) {
                     statPill("Local", SizeFormatter.shared.format(result.totalLocalSize))
@@ -256,7 +270,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var fsChangesSection: some View {
         if !appState.fsChanges.isEmpty {
-            sectionHeader("Filesystem Changes Since Scan (\(appState.fsChanges.count))", icon: "eye")
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(appState.fsChanges.prefix(15)) { change in
                     HStack(spacing: 6) {
@@ -305,7 +318,6 @@ public struct InsightsView: View {
     @ViewBuilder
     private var storageTrendsSection: some View {
         if !appState.storageTrendHistory.isEmpty {
-            sectionHeader("Storage Trends (\(appState.storageTrendHistory.count) scans)", icon: "chart.line.uptrend.xyaxis")
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text("Date")
@@ -338,17 +350,6 @@ public struct InsightsView: View {
     }
 
     // MARK: - Shared Components
-
-    private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-        }
-        .padding(.top, 4)
-    }
 
     private func barView(fraction: Double, color: Color) -> some View {
         GeometryReader { geo in
