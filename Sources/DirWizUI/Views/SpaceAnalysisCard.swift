@@ -1,7 +1,7 @@
 import SwiftUI
 import DirWizCore
 
-/// "Where did my disk go?" — the space categorization card, first section of Insights.
+/// "Where did my disk go?" - the space categorization card, first section of Insights.
 ///
 /// This used to be its own tab, driven by a "Run Analysis" button that lived on the
 /// Insights tab and populated a DIFFERENT tab. Users experienced that as a button doing

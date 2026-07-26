@@ -19,7 +19,7 @@ func confirmTrash(name: String, size: UInt64, then action: @escaping () -> Void)
                 if response == .alertFirstButtonReturn { action() }
             }
         } else {
-            // No key window — fall back to app-modal alert.
+            // No key window - fall back to app-modal alert.
             if alert.runModal() == .alertFirstButtonReturn { action() }
         }
     } else {
@@ -44,7 +44,7 @@ public struct InteractiveTreemapView: View {
                       width: CGFloat(r.width), height: CGFloat(r.height))
     }
 
-    /// Whether navigation (zoom) is allowed — disabled during scanning.
+    /// Whether navigation (zoom) is allowed - disabled during scanning.
     private var canNavigate: Bool {
         !appState.scanProgress.isScanning
     }
@@ -160,13 +160,13 @@ public struct InteractiveTreemapView: View {
         case .drawAll:
             return nil
         case .aggregate:
-            return "Too dense for cards to stay legible — showing the largest \(CardBudget.maxDrawnNodes)."
+            return "Too dense for cards to stay legible - showing the largest \(CardBudget.maxDrawnNodes)."
         case .fallbackToCushion:
             return "Showing cushions: \(drawnRectCount.formatted()) rectangles is too dense for cards."
         }
     }
 
-    /// Cushion vs. card painting. Purely visual — it changes no geometry, so switching
+    /// Cushion vs. card painting. Purely visual - it changes no geometry, so switching
     /// mid-exploration keeps the current zoom, selection and hit targets exactly as they were.
     private var styleToggle: some View {
         Picker("", selection: $appState.treemapRenderStyle) {
@@ -236,7 +236,7 @@ public struct InteractiveTreemapView: View {
                         appState.setTreemapRoot(nodeIndex)
                     } else {
                         // Progressive zoom: find the nearest ancestor that is a
-                        // direct child of the current treemap root — this zooms
+                        // direct child of the current treemap root - this zooms
                         // one level at a time instead of jumping to the immediate parent.
                         let target = progressiveZoomTarget(for: nodeIndex, tree: tree)
                         if let target = target {
@@ -277,7 +277,7 @@ public struct InteractiveTreemapView: View {
             textLabelOverlay
                 .allowsHitTesting(false)
 
-            // Selection border overlay — visible even when the Metal highlight is too subtle.
+            // Selection border overlay - visible even when the Metal highlight is too subtle.
             selectionBorderOverlay
                 .allowsHitTesting(false)
 
@@ -542,7 +542,7 @@ public struct InteractiveTreemapView: View {
 
             Divider()
 
-            Text("\(tree.name(at: nodeIndex)) — \(SizeFormatter.shared.format(node.fileSize))")
+            Text("\(tree.name(at: nodeIndex)) - \(SizeFormatter.shared.format(node.fileSize))")
         }
     }
 }

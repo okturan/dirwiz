@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import DirWizUI
 
-/// Tests for `ColumnWidthsStore` — clamping, persistence, corruption handling, and
+/// Tests for `ColumnWidthsStore` - clamping, persistence, corruption handling, and
 /// the `revision` invalidation counter. Each test gets its own `UserDefaults` suite
 /// (removed in `defer`) so tests can run in parallel without clobbering each other.
 @MainActor
@@ -59,7 +59,7 @@ struct ColumnWidthsStoreTests {
         }
     }
 
-    @Test("setWidth persists — a new store on the same suite reads it back")
+    @Test("setWidth persists - a new store on the same suite reads it back")
     func setWidthPersists() {
         withDefaults { defaults, key in
             let store1 = ColumnWidthsStore(specs: Self.specs, storageKey: key, defaults: defaults)

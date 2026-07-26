@@ -88,7 +88,7 @@ struct InstantDuplicateTests {
 
         let report = InstantDuplicateFinder(minimumFileSize: 1).findCandidates(in: await scan(root))
         #expect(report.candidates.isEmpty,
-                "two names for one inode is not a duplicate — nothing would be reclaimed")
+                "two names for one inode is not a duplicate - nothing would be reclaimed")
     }
 
     @Test("A real copy alongside a hardlink still reports exactly one reclaimable copy")
@@ -137,7 +137,7 @@ struct InstantDuplicateTests {
 
         let report = InstantDuplicateFinder(minimumFileSize: 1).findCandidates(in: await scan(root))
         let candidate = try #require(report.candidates.first)
-        #expect(candidate.paths.count == 2, "the heuristic does flag them — that is the point")
+        #expect(candidate.paths.count == 2, "the heuristic does flag them - that is the point")
 
         #expect(InstantDuplicateVerifier.verify(candidate).isEmpty,
                 "byte verification must reject them")
@@ -235,55 +235,59 @@ struct InstantDuplicateTests {
 
 /// The premise of "instant": no file content is read, so grouping is bounded by the
 /// in-memory walk. This is the gate on that.
-@Suite("Instant Duplicate Performance Tests")
-struct InstantDuplicatePerformanceTests {
+extension PerformanceSensitiveSuites {
 
-    @Test("Grouping a very large tree stays well under a second")
-    func largeTreeIsFast() {
-        let tree = FileTree()
-        var root = FileNode(); root.isDirectory = true
-        tree.addNode(root, name: "root")
+    @Suite("Instant Duplicate Performance Tests")
+    struct InstantDuplicatePerformanceTests {
 
-        // 500 dirs × 2,000 files = 1M files, with heavy name reuse across directories so
-        // the bucket map is genuinely exercised rather than trivially all-singletons.
-        var dirs: [(node: FileNode, name: String)] = []
-        for d in 0..<500 {
-            var n = FileNode(); n.isDirectory = true
-            dirs.append((node: n, name: "d\(d)"))
-        }
-        tree.addChildren(dirs, parentIndex: 0)
+        @Test("Grouping a very large tree stays well under a second")
+        func largeTreeIsFast() {
+            let tree = FileTree()
+            var root = FileNode(); root.isDirectory = true
+            tree.addNode(root, name: "root")
 
-        for d in 0..<500 {
-            var files: [(node: FileNode, name: String)] = []
-            files.reserveCapacity(2_000)
-            for f in 0..<2_000 {
-                var n = FileNode()
-                n.fileSize = UInt64(2_000_000 + (f % 500))
-                n.inode = UInt64(d * 2_000 + f + 1)
-                files.append((node: n, name: "shared\(f % 500).bin"))
+            // 500 dirs × 2,000 files = 1M files, with heavy name reuse across directories so
+            // the bucket map is genuinely exercised rather than trivially all-singletons.
+            var dirs: [(node: FileNode, name: String)] = []
+            for d in 0..<500 {
+                var n = FileNode(); n.isDirectory = true
+                dirs.append((node: n, name: "d\(d)"))
             }
-            tree.addChildren(files, parentIndex: UInt32(d + 1))
-        }
-        #expect(tree.count > 1_000_000)
+            tree.addChildren(dirs, parentIndex: 0)
 
-        let finder = InstantDuplicateFinder(minimumFileSize: 1_048_576)
-        var best = Double.greatestFiniteMagnitude
-        var candidateCount = 0
-        for _ in 0..<3 {
-            let report = finder.findCandidates(in: tree)
-            best = min(best, report.elapsedTime)
-            candidateCount = report.candidates.count
+            for d in 0..<500 {
+                var files: [(node: FileNode, name: String)] = []
+                files.reserveCapacity(2_000)
+                for f in 0..<2_000 {
+                    var n = FileNode()
+                    n.fileSize = UInt64(2_000_000 + (f % 500))
+                    n.inode = UInt64(d * 2_000 + f + 1)
+                    files.append((node: n, name: "shared\(f % 500).bin"))
+                }
+                tree.addChildren(files, parentIndex: UInt32(d + 1))
+            }
+            #expect(tree.count > 1_000_000)
+
+            let finder = InstantDuplicateFinder(minimumFileSize: 1_048_576)
+            var best = Double.greatestFiniteMagnitude
+            var candidateCount = 0
+            for _ in 0..<3 {
+                let report = finder.findCandidates(in: tree)
+                best = min(best, report.elapsedTime)
+                candidateCount = report.candidates.count
+            }
+            print("[instant duplicates] 1M files: \(String(format: "%.0f", best * 1000))ms, \(candidateCount) candidate groups")
+            #expect(candidateCount > 0, "control: the fixture really does contain duplicates")
+            #expect(best < 3.0, "instant grouping took \(best)s on 1M files")
         }
-        print("[instant duplicates] 1M files: \(String(format: "%.0f", best * 1000))ms, \(candidateCount) candidate groups")
-        #expect(candidateCount > 0, "control: the fixture really does contain duplicates")
-        #expect(best < 3.0, "instant grouping took \(best)s on 1M files")
     }
-}
+
+} // extension PerformanceSensitiveSuites
 
 /// Characterization of the exhaustive `DuplicateFinder` (instant-duplicates 2.2).
 ///
 /// Task 2.1 proposed refactoring `DuplicateFinder` to expose its passes 2–4 as a scoped
-/// entry point. That refactor was NOT done — scoped verification reuses
+/// entry point. That refactor was NOT done - scoped verification reuses
 /// `DuplicateContentVerifier` instead, which is already the guard on the existing trash
 /// path. These tests exist so that claim is verifiable rather than asserted: they pin the
 /// full-scan engine's observable outputs, so if anyone does attempt that refactor later,
@@ -314,7 +318,7 @@ struct DuplicateFinderCharacterizationTests {
         return tree
     }
 
-    /// Content, not name, is what the exhaustive scan groups by — the complement of the
+    /// Content, not name, is what the exhaustive scan groups by - the complement of the
     /// instant heuristic, and why the two are not interchangeable.
     @Test("The full scan groups by content regardless of filename")
     func groupsByContentNotName() async throws {

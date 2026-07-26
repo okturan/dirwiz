@@ -180,7 +180,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
         bufferSize: Int,
         _ body: (RawDirectoryEntry) -> Bool
     ) -> Bool {
-        // Open directory — O_NOFOLLOW prevents following symlinks at the directory itself
+        // Open directory - O_NOFOLLOW prevents following symlinks at the directory itself
         let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { return false }  // false signals open failure (permission denied, etc.)
         defer { close(fd) }
@@ -340,7 +340,7 @@ public struct RealFilesystemProvider: FilesystemProvider {
 
 // MARK: - Shared inode key (used by RealFilesystemProvider.computeBundleSize)
 
-/// Hashable (dev, inode) pair — avoids XOR collision risk.
+/// Hashable (dev, inode) pair - avoids XOR collision risk.
 struct InodeKeyPublic: Hashable {
     let dev: Int32
     let inode: UInt64
@@ -377,11 +377,11 @@ private let kOffsetDevID:    Int = 32
 private let kOffsetObjType:  Int = 36
 private let kOffsetModTime:  Int = 40
 private let kOffsetFileID:   Int = 56
-/// End of the fixed common-attribute region — the minimum plausible entry length for ANY
+/// End of the fixed common-attribute region - the minimum plausible entry length for ANY
 /// object type (directories carry no meaningful file-group data we read).
 private let kOffsetCommonEnd: Int = 64
 /// Returned-attrs bitmap (attribute_set_t at offset 4): commonattr, volattr, dirattr,
-/// fileattr, forkattr — one UInt32 each. The file group's bitmap is the fourth.
+/// fileattr, forkattr - one UInt32 each. The file group's bitmap is the fourth.
 /// `internal` so the parsing contract tests can set the bitmap in crafted fixtures.
 let kOffsetReturnedFileAttrs: Int = 4 + 3 * 4
 let kOffsetFileLinkCount: Int = 64

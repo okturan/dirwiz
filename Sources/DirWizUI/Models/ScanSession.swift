@@ -15,7 +15,7 @@ public final class ScanSession {
     /// Cancels whatever scanner is currently registered and immediately drops the
     /// reference. Clearing it here (rather than leaving it for `markFinished()`) makes
     /// `activeScanner == nil` a reliable "no real scanner registered yet for the current
-    /// flow" signal the instant a click lands — including during another flow's
+    /// flow" signal the instant a click lands - including during another flow's
     /// replay-wait, before it has registered a scanner of its own (`AppState.isPreparingScan`
     /// relies on exactly this).
     public func cancelActiveScan() {

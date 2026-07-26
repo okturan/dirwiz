@@ -11,13 +11,13 @@ struct SessionSnapshot: Codable, Equatable {
 
 /// Persists `SessionSnapshot`s to `UserDefaults`, one JSON blob per volume root path
 /// (mirrors `ColumnWidthsStore`'s shape). Fail-soft throughout: corrupt or missing data
-/// yields `nil`/an empty session, never a crash — a lost session just means the next
+/// yields `nil`/an empty session, never a crash - a lost session just means the next
 /// launch reopens at the volume root instead of where the user left off.
 @MainActor
 @Observable
 final class SessionStateStore {
     /// Above this many expanded folders, restoring them is noise rather than a
-    /// convenience (and an unbounded set could grow the stored JSON without limit) — cap
+    /// convenience (and an unbounded set could grow the stored JSON without limit) - cap
     /// and drop the arbitrary excess (paths carry no recency to prefer one over another,
     /// so sorted-then-truncated is as good a cut as any). Revisit only on evidence.
     static let maxExpandedPaths = 2000
@@ -49,13 +49,13 @@ final class SessionStateStore {
     }
 
     /// Exposed (rather than kept private) so tests can inject corrupt data at the exact
-    /// key the store reads from — mirrors `TemporalSnapshot.snapshotURL(for:)`.
+    /// key the store reads from - mirrors `TemporalSnapshot.snapshotURL(for:)`.
     static func storageKey(forVolume rootPath: String) -> String {
         "sessionState.\(String(fnv1a64(rootPath), radix: 16))"
     }
 
     /// Same 3-line FNV-1a algorithm as `TemporalSnapshot`'s private helper, duplicated
-    /// rather than shared — that file is off-limits here (plan 038) and DirWizUI can't
+    /// rather than shared - that file is off-limits here (plan 038) and DirWizUI can't
     /// reach a `private` member of a DirWizCore type regardless.
     private static func fnv1a64(_ value: String) -> UInt64 {
         var hash: UInt64 = 0xcbf29ce484222325

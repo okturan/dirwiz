@@ -19,7 +19,7 @@ public struct DeletedSummary: Sendable {
     public let count: UInt32
 }
 
-/// Result of a diff computation — parallel arrays over the current tree's nodes.
+/// Result of a diff computation - parallel arrays over the current tree's nodes.
 public struct TemporalDiffResult: Sendable {
     public let kinds: [UInt8]        // TemporalDiffKind.rawValue per node
     public let strengths: [Float]    // 0…1 blend strength per node
@@ -262,7 +262,7 @@ public struct TemporalSnapshot: Sendable {
             isCaseSensitive = flagBytes[flagBytes.startIndex] != 0
         }
 
-        // Clamp the reservation to what the remaining bytes could actually hold —
+        // Clamp the reservation to what the remaining bytes could actually hold -
         // a corrupted/hostile header declaring a huge count must not force a huge
         // pre-allocation. Minimum entry size: UInt16 path length (2) + empty path (0)
         // + UInt64 size (8) = 10 bytes.

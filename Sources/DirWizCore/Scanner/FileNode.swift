@@ -52,7 +52,7 @@ public struct FileNode: Sendable {
 
     // Bit 2: file's scan-time link count exceeded 1 (ATTR_FILE_LINKCOUNT). Never set on
     // directories (their link count means child count). Meaningful only on trees whose
-    // `FileTree.linkCountsCaptured` is true — hand-built trees leave it false.
+    // `FileTree.linkCountsCaptured` is true - hand-built trees leave it false.
     public var hasMultipleHardlinks: Bool {
         get { flags & FileNodeFlags.hasMultipleHardlinks != 0 }
         set {
@@ -128,7 +128,7 @@ struct BundleSizeCandidate: Sendable {
 ///
 /// `@unchecked Sendable` safety: all mutable state is behind a `Mutex`.
 /// `rootPath` is set once before any concurrent access (in `FileScanner.scan()`
-/// before `enqueueDirectory`) and never mutated again — reads via `path(at:)`
+/// before `enqueueDirectory`) and never mutated again - reads via `path(at:)`
 /// and `withCPath` occur under the lock where rootPath is captured.
 /// Snapshot methods (`nodesSnapshot()`, `stringPoolSnapshot()`) return CoW copies
 /// that are safe to use without the lock.
@@ -144,7 +144,7 @@ public final class FileTree: @unchecked Sendable {
     /// When true, the search index stores original-case names instead of lowercased.
     public private(set) var isCaseSensitive: Bool = false
     /// Whether this tree's `FileNode.hasMultipleHardlinks` bits are meaningful. True only
-    /// for scanner-produced trees (and caches thereof) — hand-built trees leave it false,
+    /// for scanner-produced trees (and caches thereof) - hand-built trees leave it false,
     /// which tells `HardlinkFinder` to fall back to full per-file grouping instead of
     /// trusting absent flags.
     public private(set) var linkCountsCaptured: Bool = false
@@ -219,14 +219,14 @@ public final class FileTree: @unchecked Sendable {
     }
 
     /// The root node's on-disk size, read under the lock. Use this instead of a raw
-    /// `nodes.first?.displaySize` — the root can be mutated concurrently by deferred
+    /// `nodes.first?.displaySize` - the root can be mutated concurrently by deferred
     /// bundle sizing or trash operations.
     public var rootDisplaySize: UInt64 {
         lock.withLock { _ in nodes.first?.displaySize ?? 0 }
     }
 
     /// Snapshot the string pool for lock-free search.
-    /// Data is CoW — O(1) unless mutated later.
+    /// Data is CoW - O(1) unless mutated later.
     public func stringPoolSnapshot() -> Data {
         lock.withLock { _ in stringPool }
     }
@@ -287,7 +287,7 @@ public final class FileTree: @unchecked Sendable {
     /// Iterate non-directory nodes of a snapshot with a uniform cancellation cadence.
     /// Returns false if cancelled (caller should treat this as "produced nothing usable").
     /// This is the single blessed walk for post-scan analyzers (file age, size distribution,
-    /// etc.) — new analyzers that need to visit every file should use this instead of a
+    /// etc.) - new analyzers that need to visit every file should use this instead of a
     /// fresh hand-rolled loop.
     public static func forEachFileInSnapshot(
         _ nodes: [FileNode],
@@ -310,7 +310,7 @@ public final class FileTree: @unchecked Sendable {
     /// array returns the root (index 0).
     ///
     /// Adapted from the technique in `TreeActions.findNodeIndex`, decoupled from stripping
-    /// an absolute path's `rootPath` prefix — callers that start from an absolute path derive
+    /// an absolute path's `rootPath` prefix - callers that start from an absolute path derive
     /// the relative components themselves.
     /// Resolves an absolute path to a node index in the CURRENT tree.
     ///
@@ -606,7 +606,7 @@ public final class FileTree: @unchecked Sendable {
     ///
     /// `nodes.reserveCapacity(nodes.count + k)` on a path invoked once per directory collapses
     /// spare capacity to exactly the current count, so the very next append reallocates and
-    /// copies the whole array — O(n) per directory, O(n²) across an immediate-mode scan
+    /// copies the whole array - O(n) per directory, O(n²) across an immediate-mode scan
     /// (measured: 0.096s vs 0.001s at 800k nodes over 160k small batches). Growing to at least
     /// double when growth is actually needed restores amortized O(1) appends for the
     /// many-small-batches case while still honoring an occasional large single batch.
@@ -865,7 +865,7 @@ public final class FileTree: @unchecked Sendable {
     }
 
     /// Accumulate size up the parent chain (thread-safe with atomics approach via lock).
-    /// Note: For bulk scanning, prefer propagateSizes() after all nodes are added — it's O(n)
+    /// Note: For bulk scanning, prefer propagateSizes() after all nodes are added - it's O(n)
     /// with a single pass and avoids lock contention from 32 concurrent threads.
     public func accumulateSize(from index: UInt32, fileSize: UInt64, allocatedSize: UInt64) {
         lock.withLock { _ in
@@ -885,7 +885,7 @@ public final class FileTree: @unchecked Sendable {
     /// Used after trashing a file to keep the tree consistent without a full re-scan.
     /// Subtracts `fileSize` and `allocatedSize` independently (matching
     /// `setNodeSizeAndPropagate`) since the two can diverge under APFS compression,
-    /// sparse files, or block rounding — subtracting one value from both would corrupt
+    /// sparse files, or block rounding - subtracting one value from both would corrupt
     /// whichever aggregate doesn't match.
     public func zeroNodeSize(at index: UInt32) {
         lock.withLock { _ in
@@ -1021,13 +1021,13 @@ public final class FileTree: @unchecked Sendable {
     }
 
     /// Remove all descendants of `index`, keeping the node itself in place with an empty
-    /// child range. Compacts the array and renumbers every remaining index — same
+    /// child range. Compacts the array and renumbers every remaining index - same
     /// discipline as `removeSubtree`, but the target node survives so its identity and
     /// position in the tree are preserved. Used by subtree rescan to clear a changed
     /// directory's stale children before re-enumerating it.
     ///
     /// Does NOT repair aggregate sizes (the target and its ancestors are left with stale
-    /// totals) — callers must follow with `recomputeAggregates()` once all splices in a
+    /// totals) - callers must follow with `recomputeAggregates()` once all splices in a
     /// batch are done. Repairing sizes incrementally per-splice here would require either
     /// double-counting or a second recompute pass anyway, so subtree rescan does the
     /// bookkeeping once at the end instead.
@@ -1091,7 +1091,7 @@ public final class FileTree: @unchecked Sendable {
             }
 
             // Rebuild parent/child links for every survivor (indices shifted for anything
-            // after the target). Root's parentIndex stays invalid — nothing sets it below.
+            // after the target). Root's parentIndex stays invalid - nothing sets it below.
             for oldIndex in oldNodes.indices {
                 let newIndex = oldToNew[oldIndex]
                 guard newIndex != FileNode.invalid else { continue }
@@ -1117,7 +1117,7 @@ public final class FileTree: @unchecked Sendable {
         }
     }
 
-    /// Count every node in the subtree rooted at `index` — the root itself plus every
+    /// Count every node in the subtree rooted at `index` - the root itself plus every
     /// descendant. A subtree's member indices are NOT one contiguous range (only a single
     /// node's DIRECT children are), so this walks an explicit stack, the same technique
     /// `removeSubtree` uses to find a subtree's members. Used by the cost-based warm-start
@@ -1146,12 +1146,12 @@ public final class FileTree: @unchecked Sendable {
     }
 
     /// Merge a detached staged subtree (built by `FileScanner.rescanSubtrees`'s parallel
-    /// Phase A into its own small `FileTree` via `stagingCapacityHint:` — index 0 there is
+    /// Phase A into its own small `FileTree` via `stagingCapacityHint:` - index 0 there is
     /// a placeholder standing in for `at`'s on-disk descendants) into this tree at `at`,
     /// whose existing children the caller has already cleared via `removeChildren(of:)`.
     ///
     /// Appends the staged tree's nodes (skipping its placeholder root) to the end of this
-    /// tree's array, remapping every parent/child index and rebasing every name offset —
+    /// tree's array, remapping every parent/child index and rebasing every name offset -
     /// the same appending discipline `replaceContents` uses when merging cold-scan worker
     /// arenas, scoped to one subtree instead of the whole tree. Aggregate sizes are left
     /// for the caller's `recomputeAggregates()`, matching `removeChildren`'s own contract.
@@ -1165,7 +1165,7 @@ public final class FileTree: @unchecked Sendable {
             guard targetIndex >= 0, targetIndex < nodes.count else { return }
 
             guard stagedNodes.count > 1 else {
-                // Only the placeholder root staged — the target directory is empty on
+                // Only the placeholder root staged - the target directory is empty on
                 // disk now. `removeChildren` already cleared it; nothing more to splice.
                 nodes[targetIndex].firstChildIndex = FileNode.invalid
                 nodes[targetIndex].childCount = 0
@@ -1183,7 +1183,7 @@ public final class FileTree: @unchecked Sendable {
             }
 
             // Raw-pointer name copying, matching `addChildren(encoded:namePool:parentIndex:)`
-            // — per-node `Data` slicing (`stagedStringPool[start..<end]`) measurably
+            // - per-node `Data` slicing (`stagedStringPool[start..<end]`) measurably
             // dominated Phase B's cost on a large staged subtree (benchmarked: ~30k nodes
             // took ~300ms via slicing vs a small fraction of that here), apparently from
             // `Data`'s slice/COW bookkeeping on every iteration rather than the copy itself.
@@ -1224,13 +1224,13 @@ public final class FileTree: @unchecked Sendable {
 
     /// Recompute every directory's aggregate size from scratch: zero non-bundle directory
     /// totals (bundles are opaque leaves whose size comes from `computeBundleSize`, not
-    /// from summing children — same distinction `removeSubtree` makes), then bottom-up
+    /// from summing children - same distinction `removeSubtree` makes), then bottom-up
     /// accumulate each node into its immediate parent.
     ///
     /// Safe to call any number of times, unlike `propagateSizes()`: that method assumes
     /// every node starts holding only its own direct size, so re-running it on an
     /// already-propagated tree would add already-aggregated child totals into parents a
-    /// second time. Zeroing directory totals first makes this idempotent — repeated
+    /// second time. Zeroing directory totals first makes this idempotent - repeated
     /// subtree splices can't accumulate error. Requires the parent-index-less-than-
     /// child-index invariant, which `addChildren` and `removeChildren` both preserve.
     public func recomputeAggregates() {
@@ -1271,7 +1271,7 @@ public final class FileTree: @unchecked Sendable {
     /// **Correctness invariant**: each directory's child slice `[firstChildIndex..<firstChildIndex+childCount]`
     /// is contiguous and non-overlapping with every other directory's slice (guaranteed by `addChildren`
     /// which appends children in a single batch). Sorting within a slice only permutes elements within
-    /// that slice — no other directory's indices are affected. `firstChildIndex` and `childCount` travel
+    /// that slice - no other directory's indices are affected. `firstChildIndex` and `childCount` travel
     /// with the node during permutation, so they remain valid. The second pass stamps all children's
     /// `parentIndex` to fix the only field that becomes stale (a child's parent may have moved within
     /// *its* parent's slice).
@@ -1325,7 +1325,7 @@ public final class FileTree: @unchecked Sendable {
             // Fix parentIndex on all children. After reordering, a child's parentIndex
             // may point to the wrong slot because its parent sibling was shuffled.
             // Each directory's firstChildIndex/childCount were carried with the node
-            // so they're still correct — just walk all dirs and stamp children.
+            // so they're still correct - just walk all dirs and stamp children.
             for i in 0..<nodes.count {
                 guard nodes[i].isDirectory, nodes[i].firstChildIndex != FileNode.invalid else { continue }
                 let start = Int(nodes[i].firstChildIndex)

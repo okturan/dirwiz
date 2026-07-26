@@ -191,7 +191,7 @@ struct TreemapColorResolverTests {
         #expect(abs(blended.z - expectedB) < 0.0001)
     }
 
-    // MARK: 4. Recency overlay disabled — alpha always 1.0
+    // MARK: 4. Recency overlay disabled - alpha always 1.0
 
     @Test("Recency overlay disabled: alpha is 1.0 regardless of recencyFactors")
     func recencyOverlayDisabled() {
@@ -208,7 +208,7 @@ struct TreemapColorResolverTests {
         #expect(color.w == 1.0, "Alpha must be 1.0 when overlay is disabled")
     }
 
-    // MARK: 5. Recency overlay enabled, empty factors — alpha 1.0 (loading state)
+    // MARK: 5. Recency overlay enabled, empty factors - alpha 1.0 (loading state)
 
     @Test("Recency overlay enabled with empty factors yields alpha 1.0")
     func recencyOverlayEnabledEmptyFactors() {
@@ -225,7 +225,7 @@ struct TreemapColorResolverTests {
         #expect(color.w == 1.0, "Empty recency factors should produce alpha 1.0")
     }
 
-    // MARK: 6. Recency overlay enabled, factor present — alpha equals the factor
+    // MARK: 6. Recency overlay enabled, factor present - alpha equals the factor
 
     @Test("Recency overlay enabled: alpha equals recencyFactors[nodeIndex]")
     func recencyOverlayEnabledFactorPresent() {
@@ -242,7 +242,7 @@ struct TreemapColorResolverTests {
         #expect(abs(color.w - 0.42) < 0.0001, "Alpha should equal recencyFactors[1] = 0.42")
     }
 
-    // MARK: 7. Recency overlay enabled, index out of bounds — alpha 0.0
+    // MARK: 7. Recency overlay enabled, index out of bounds - alpha 0.0
 
     @Test("Recency overlay enabled: out-of-bounds nodeIndex yields alpha 0.0")
     func recencyOverlayOutOfBounds() {
@@ -260,7 +260,7 @@ struct TreemapColorResolverTests {
         #expect(color.w == 0.0, "Out-of-bounds recency index should yield alpha 0.0")
     }
 
-    // MARK: 8. Temporal diff .new — RGB shifts toward green tint (0.20, 0.82, 0.35)
+    // MARK: 8. Temporal diff .new - RGB shifts toward green tint (0.20, 0.82, 0.35)
 
     @Test("Temporal diff .new shifts RGB toward green tint")
     func temporalDiffNew() {
@@ -289,7 +289,7 @@ struct TreemapColorResolverTests {
         #expect(abs(tinted.z - expectedB) < 0.0001, "B should shift toward green tint")
     }
 
-    // MARK: 9. Temporal diff .grown — RGB shifts toward blue tint (0.20, 0.55, 0.95)
+    // MARK: 9. Temporal diff .grown - RGB shifts toward blue tint (0.20, 0.55, 0.95)
 
     @Test("Temporal diff .grown shifts RGB toward blue tint")
     func temporalDiffGrown() {
@@ -317,7 +317,7 @@ struct TreemapColorResolverTests {
         #expect(abs(tinted.z - expectedB) < 0.0001)
     }
 
-    // MARK: 10. Temporal diff .shrunk — RGB shifts toward orange tint (0.95, 0.72, 0.20)
+    // MARK: 10. Temporal diff .shrunk - RGB shifts toward orange tint (0.95, 0.72, 0.20)
 
     @Test("Temporal diff .shrunk shifts RGB toward orange tint")
     func temporalDiffShrunk() {
@@ -345,7 +345,7 @@ struct TreemapColorResolverTests {
         #expect(abs(tinted.z - expectedB) < 0.0001)
     }
 
-    // MARK: 11. Temporal diff .deletedDescendants — RGB shifts toward red tint (0.90, 0.25, 0.25)
+    // MARK: 11. Temporal diff .deletedDescendants - RGB shifts toward red tint (0.90, 0.25, 0.25)
 
     @Test("Temporal diff .deletedDescendants shifts RGB toward red tint")
     func temporalDiffDeletedDescendants() {
@@ -373,7 +373,7 @@ struct TreemapColorResolverTests {
         #expect(abs(tinted.z - expectedB) < 0.0001)
     }
 
-    // MARK: 12. Temporal diff disabled — color unchanged even with diff data populated
+    // MARK: 12. Temporal diff disabled - color unchanged even with diff data populated
 
     @Test("Temporal diff disabled: color is unchanged even when kinds array has data")
     func temporalDiffDisabled() {
@@ -414,7 +414,7 @@ struct TreemapColorResolverTests {
         #expect(color.w == fallback.w)
     }
 
-    // MARK: Temporal diff .none — no tinting even when diff enabled
+    // MARK: Temporal diff .none - no tinting even when diff enabled
 
     @Test("Temporal diff kind .none: no tinting applied")
     func temporalDiffKindNone() {
@@ -488,7 +488,7 @@ struct ExtensionPaletteTests {
         #expect(c.w == fallback.w)
     }
 
-    // MARK: 2. Fewer than 17 extensions — all get distinct palette colors (not fallback)
+    // MARK: 2. Fewer than 17 extensions - all get distinct palette colors (not fallback)
 
     @Test("Fewer than 17 extensions all receive distinct palette colors")
     func fewerThan17Extensions() {
@@ -528,7 +528,7 @@ struct ExtensionPaletteTests {
         }
     }
 
-    // MARK: 3. Exactly 17 extensions — all 17 get palette colors; none get fallback
+    // MARK: 3. Exactly 17 extensions - all 17 get palette colors; none get fallback
 
     @Test("Exactly 17 extensions all receive palette colors, none get fallback")
     func exactly17Extensions() {
@@ -546,7 +546,7 @@ struct ExtensionPaletteTests {
         }
         palette.assign(from: stats)
 
-        // Exactly 17 entries — no "Other" row.
+        // Exactly 17 entries - no "Other" row.
         #expect(palette.entries.count == 17, "Should have exactly 17 entries")
 
         let fallback = ExtensionPalette.fallbackColor
@@ -557,7 +557,7 @@ struct ExtensionPaletteTests {
         }
     }
 
-    // MARK: 4. More than 17 extensions — top 17 by bytes get palette; rest get fallback
+    // MARK: 4. More than 17 extensions - top 17 by bytes get palette; rest get fallback
 
     @Test("More than 17 extensions: top 17 get palette, 18th+ get fallback")
     func moreThan17Extensions() {
@@ -592,7 +592,7 @@ struct ExtensionPaletteTests {
         }
     }
 
-    // MARK: 5. Sorted by size — largest extension gets palette index 0
+    // MARK: 5. Sorted by size - largest extension gets palette index 0
 
     @Test("Largest extension by bytes receives palette index 0 color")
     func sortedBySize() {
@@ -638,7 +638,7 @@ struct ExtensionPaletteTests {
         _ = color  // ensure the SwiftUI Color was actually created without crash
     }
 
-    // MARK: 7. entries — ordered largest-first, count matches assigned extensions
+    // MARK: 7. entries - ordered largest-first, count matches assigned extensions
 
     @Test("entries are ordered largest-first and count matches assigned extensions")
     func entriesOrderAndCount() {

@@ -2,7 +2,7 @@
 
 ## Why
 
-The FSEvents watcher currently requires opting in from the Insights tab and its only output is a "N folders changed · Refresh" badge the user must click — a watcher that watches but doesn't act. Every safety rail auto-apply needs already exists and is proven in the manual path (`applyAccumulatedChanges`: path-keyed exploration restore, idempotent splice engine, cache write-back, mutual exclusion with scans). This change formally reverses plan 037's "decision 3a" (no auto-apply, ever) now that the machinery has matured: the displayed tree should simply stay true.
+The FSEvents watcher currently requires opting in from the Insights tab and its only output is a "N folders changed · Refresh" badge the user must click - a watcher that watches but doesn't act. Every safety rail auto-apply needs already exists and is proven in the manual path (`applyAccumulatedChanges`: path-keyed exploration restore, idempotent splice engine, cache write-back, mutual exclusion with scans). This change formally reverses plan 037's "decision 3a" (no auto-apply, ever) now that the machinery has matured: the displayed tree should simply stay true.
 
 ## What Changes
 
@@ -20,7 +20,7 @@ The FSEvents watcher currently requires opting in from the Insights tab and its 
 - `live-tree-refresh`: automatic monitoring lifecycle, quiescence/storm/politeness policies for applying filesystem changes to the displayed tree, the Live pill status UI, and cache continuity.
 
 ### Modified Capabilities
-None — no baseline specs exist yet.
+None - no baseline specs exist yet.
 
 ## Impact
 

@@ -5,7 +5,7 @@ import Testing
 /// Unit tests for `ExplorationCapture.resolveOrAncestor`: given a path captured before a
 /// tree mutation, does it resolve to the right node (itself, or nearest surviving
 /// ancestor) against a tree that no longer has some of the original nodes? This is pure
-/// over snapshots — no on-disk fixture or real trash operation needed.
+/// over snapshots - no on-disk fixture or real trash operation needed.
 /// `Tests/TrashInvalidationTests.swift` covers the AppState-level wiring against a real
 /// `trashNode`/`batchTrashPaths` call.
 @Suite("Exploration State Tests")

@@ -18,7 +18,7 @@ private func makeTree(
     let tree = FileTree()
     tree.setRootPath(rootPath)
 
-    // Root node (index 0) — its fileSize will be the sum of all content.
+    // Root node (index 0) - its fileSize will be the sum of all content.
     var root = FileNode()
     root.isDirectory = true
     tree.addNode(root, name: rootPath.split(separator: "/").last.map(String.init) ?? "root")
@@ -143,7 +143,7 @@ struct TemporalDiffTests {
             dirs: [("Documents", 50_000_000)]
         )
 
-        // Build snapshot from same tree — sizes match exactly.
+        // Build snapshot from same tree - sizes match exactly.
         let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
         let result = await TemporalDiffService.computeDiff(currentTree: tree, snapshot: snapshot)
 
@@ -285,7 +285,7 @@ struct TemporalDiffTests {
 
         let result = await TemporalDiffService.computeDiff(currentTree: tree, snapshot: snapshot)
 
-        // "documents/oldsub" is deleted — should aggregate to "documents" (index 1).
+        // "documents/oldsub" is deleted - should aggregate to "documents" (index 1).
         #expect(result.deletedByNode[1] != nil,
             "Documents should have deleted descendants")
         #expect(result.deletedByNode[1]?.count == 1,
@@ -402,11 +402,11 @@ struct TemporalDiffTests {
             bytes.append(contentsOf: Array(repeating: UInt8(0), count: 16)) // uuid
             bytes.append(contentsOf: leBytes(Date().timeIntervalSince1970)) // createdAt
             bytes.append(contentsOf: leBytes(UInt64(0)))        // totalBytes
-            bytes.append(contentsOf: leBytes(UInt32.max))       // dirCount — hostile, huge
+            bytes.append(contentsOf: leBytes(UInt32.max))       // dirCount - hostile, huge
             bytes.append(contentsOf: leBytes(UInt16(rootPathUTF8.count))) // rootPathLen
             bytes.append(contentsOf: rootPathUTF8)              // rootPath
             bytes.append(0)                                     // v2 case-sensitivity flag
-            // No entry bytes follow — the declared dirCount vastly exceeds what the
+            // No entry bytes follow - the declared dirCount vastly exceeds what the
             // remaining (zero) bytes could hold.
 
             let data = Data(bytes)
@@ -427,7 +427,7 @@ struct TemporalDiffTests {
         }
     }
 
-    // MARK: 9c. Legacy Format Decode — v1 Binary
+    // MARK: 9c. Legacy Format Decode - v1 Binary
 
     @Test("v1 binary snapshot (no case-sensitivity byte) decodes with isCaseSensitive defaulting to false")
     func v1BinaryDecodesWithCaseSensitiveDefault() async throws {
@@ -457,7 +457,7 @@ struct TemporalDiffTests {
             bytes.append(contentsOf: leBytes(UInt32(entries.count))) // dirCount
             bytes.append(contentsOf: leBytes(UInt16(rootPathUTF8.count)))
             bytes.append(contentsOf: rootPathUTF8)
-            // No case-sensitivity byte here — v1 predates it.
+            // No case-sensitivity byte here - v1 predates it.
             bytes.append(contentsOf: entryBytes)
 
             let data = Data(bytes)
@@ -481,7 +481,7 @@ struct TemporalDiffTests {
         }
     }
 
-    // MARK: 9d. Legacy Format Decode — JSON
+    // MARK: 9d. Legacy Format Decode - JSON
 
     @Test("Legacy JSON snapshot decodes via the public load(for:), defaulting isCaseSensitive to false")
     func legacyJSONDecodes() async throws {
@@ -587,7 +587,7 @@ struct TemporalDiffTests {
     @Test("Case-insensitive path matching works")
     func caseInsensitiveMatching() async {
         // Tree has "Documents" → relative path becomes "documents" (lowercased).
-        // Snapshot has "documents" — should match.
+        // Snapshot has "documents" - should match.
         let tree = makeTree(
             rootPath: "/TestRoot",
             dirs: [("Documents", 50_000_000)]
@@ -644,7 +644,7 @@ struct TemporalDiffTests {
 
         let result = await TemporalDiffService.computeDiff(currentTree: tree, snapshot: snapshot)
 
-        // File node (index 2) should remain .none — diff only classifies directories.
+        // File node (index 2) should remain .none - diff only classifies directories.
         #expect(result.kinds[2] == TemporalDiffKind.none.rawValue,
             "File nodes should stay .none (not classified)")
     }

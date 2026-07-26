@@ -10,7 +10,7 @@ public struct SearchView: View {
     @State private var sortOrder: SortOrder = .size
     @State private var sortAscending: Bool = false
 
-    // Raw sorted indices — no pre-built display objects.
+    // Raw sorted indices - no pre-built display objects.
     // Cached snapshots for lock-free rendering of visible rows.
     @State private var cachedNodes: [FileNode] = []
     @State private var cachedPool: Data = Data()
@@ -30,7 +30,7 @@ public struct SearchView: View {
     private enum FocusField { case searchBar, resultsList }
     private let pageSize = 200
 
-    /// Resizable-column specs — Path is the flexible column, absorbing the width
+    /// Resizable-column specs - Path is the flexible column, absorbing the width
     /// the fixed Name/Size/Modified columns don't use.
     private static let columnSpecs: [ColumnSpec] = [
         ColumnSpec(id: "name", defaultWidth: 250, minWidth: 120, maxWidth: 500, isFlexible: false),
@@ -227,7 +227,7 @@ public struct SearchView: View {
     private var headerRow: some View {
         HStack(spacing: 0) {
             sortButton("Name", key: .name, width: columnStore.width(for: "name"), alignment: .leading)
-            // Path column header (not sortable — paths are lazy). Flexible: absorbs
+            // Path column header (not sortable - paths are lazy). Flexible: absorbs
             // whatever width the fixed columns don't use.
             Text("Path")
                 .frame(minWidth: 200, maxWidth: .infinity, alignment: .leading)
@@ -308,7 +308,7 @@ public struct SearchView: View {
         }
     }
 
-    /// Render a single result row. Display data is resolved lazily from cached snapshots —
+    /// Render a single result row. Display data is resolved lazily from cached snapshots -
     /// only ~30 visible rows pay the cost, not all 10K matches.
     private func resultRowView(_ idx: UInt32) -> some View {
         let i = Int(idx)
@@ -327,7 +327,7 @@ public struct SearchView: View {
             }
             .frame(width: columnStore.width(for: "name"), alignment: .leading)
 
-            // Path — computed lazily per visible row via FileTree.path(at:).
+            // Path - computed lazily per visible row via FileTree.path(at:).
             Text(appState.fileTree?.path(at: idx) ?? "")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -438,7 +438,7 @@ public struct SearchView: View {
         ("100 MB", 104_857_600), ("1 GB", 1_073_741_824),
     ]
 
-    /// Searchable multi-select over the extensions the scan actually found, largest first —
+    /// Searchable multi-select over the extensions the scan actually found, largest first -
     /// so the picker is ordered by what is worth looking at, not alphabetically.
     private var extensionPicker: some View {
         Menu {
@@ -599,7 +599,7 @@ public struct SearchView: View {
                 // silently searching the whole volume as if the scope were still honored.
                 DispatchQueue.main.async {
                     appState.search.clearScope(
-                        notice: "Scope cleared — that folder is no longer in the scan."
+                        notice: "Scope cleared - that folder is no longer in the scan."
                     )
                 }
             }
@@ -651,7 +651,7 @@ public struct SearchView: View {
         let oldQuery = previousQuery
         let oldMatches = previousMatchIndices
         let wasCapped = previousWasCapped
-        // Only use refinement if the previous query wasn't capped — otherwise
+        // Only use refinement if the previous query wasn't capped - otherwise
         // we'd miss valid matches that were beyond the 10K cap.
         let canRefine = !currentQuery.isEmpty && currentQuery.hasPrefix(oldQuery)
             && oldQuery.count > 0 && !wasCapped
@@ -727,7 +727,7 @@ public struct SearchView: View {
         }
     }
 
-    /// Sort indices using direct node field comparison — no String allocation for size/date.
+    /// Sort indices using direct node field comparison - no String allocation for size/date.
     /// Name sort uses byte-level comparison on the string pool.
     private nonisolated static func sortIndices(
         _ indices: inout [UInt32],
@@ -776,7 +776,7 @@ public struct SearchView: View {
         }
     }
 
-    /// Extract name from string pool data — no lock needed.
+    /// Extract name from string pool data - no lock needed.
     private nonisolated static func extractName(node: FileNode, pool: Data) -> String {
         let start = Int(node.nameOffset)
         let end = start + Int(node.nameLength)

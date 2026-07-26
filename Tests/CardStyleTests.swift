@@ -40,7 +40,7 @@ struct CardStyleTests {
     }
 
     /// The shader is compiled from source at runtime, so a Metal syntax error in the new
-    /// branch would never fail `swift build` — only a blank treemap on the user's machine.
+    /// branch would never fail `swift build` - only a blank treemap on the user's machine.
     @Test("Shader source compiles and exposes both entry points")
     func shaderCompiles() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }  // CI without a GPU
@@ -49,7 +49,7 @@ struct CardStyleTests {
         #expect(library.makeFunction(name: "cushionFragmentShader") != nil)
     }
 
-    /// The card branch must actually exist and be gated on styleMode — a shader that
+    /// The card branch must actually exist and be gated on styleMode - a shader that
     /// compiles but never takes the branch would render cushions in both modes.
     @Test("Shader branches on styleMode and discards outside the rounded box")
     func shaderHasGatedCardBranch() {
@@ -110,7 +110,7 @@ struct CardStyleTests {
     /// The known trap in this change: card style insets its *visual* rect, so it is tempting
     /// to inset the rects handed to `SpatialGrid` too. That would make clicks near a card's
     /// edge miss, and the gaps between siblings dead. The inset lives entirely in the
-    /// fragment shader, so the grid keeps indexing full layout rects — pin that here.
+    /// fragment shader, so the grid keeps indexing full layout rects - pin that here.
     @Test("Hit testing uses full layout rects, so gaps and card edges stay clickable")
     func hitTestingIgnoresVisualInset() {
         // Two adjacent 60×60 siblings sharing the boundary at x = 60.
@@ -140,7 +140,7 @@ struct CardStyleTests {
     ///
     /// It cannot. `SquarifyLayout` emits a container BEFORE its children, and
     /// `SpatialGrid.hitTest` scans its cell in reverse, so the deepest rect covering a point
-    /// always wins. The container is only hit where no child covers the point — which, once
+    /// always wins. The container is only hit where no child covers the point - which, once
     /// children are inset, is exactly its visible frame and header strip.
     @Test("A visible container never swallows a click meant for a child")
     func containerDoesNotSwallowChildClicks() {
@@ -160,8 +160,8 @@ struct CardStyleTests {
                 "the container's visible border likewise belongs to the container")
     }
 
-    /// Style is a user preference, not scan state — a new scan must not silently reset it.
-    /// Style is a user preference, not scan state — a new scan must not silently reset it.
+    /// Style is a user preference, not scan state - a new scan must not silently reset it.
+    /// Style is a user preference, not scan state - a new scan must not silently reset it.
     /// Uses an ISOLATED defaults suite: writing to `.standard` here would change the real
     /// app's stored preference (it did, before this was fixed).
     @Test("Render style survives resetForNewScan and persists to its own store")
@@ -277,7 +277,7 @@ struct CardStyleRenderTests {
         #expect(!cushion.isBackground(x: 1, y: 1), "cushion fills its whole rect")
         #expect(cards.isBackground(x: 1, y: 1), "the card's corner must be cut away")
 
-        // Both must still paint the middle — a card that discarded everything would also
+        // Both must still paint the middle - a card that discarded everything would also
         // pass the corner assertion above.
         #expect(!cushion.isBackground(x: side / 2, y: side / 2))
         #expect(!cards.isBackground(x: side / 2, y: side / 2))
@@ -344,7 +344,7 @@ struct CardNestingTests {
         let a = try #require(placed(out, 1))
         let b = try #require(placed(out, 2))
 
-        // The container itself is not moved — only its children are pulled inward.
+        // The container itself is not moved - only its children are pulled inward.
         #expect(parent.x == 0 && parent.y == 0 && parent.width == 400 && parent.height == 300)
 
         for child in [a, b] {
@@ -353,7 +353,7 @@ struct CardNestingTests {
             #expect(child.x + child.width < parent.x + parent.width)
             #expect(child.y + child.height < parent.y + parent.height)
         }
-        // Siblings stay adjacent and in order — nesting must not reshuffle the layout.
+        // Siblings stay adjacent and in order - nesting must not reshuffle the layout.
         #expect(a.x < b.x)
         #expect(abs((a.x + a.width) - b.x) < 0.01, "siblings stay flush with each other")
     }
@@ -381,7 +381,7 @@ struct CardNestingTests {
     }
 
     /// The degradation floor. A container too small to give up padding hands its children
-    /// the full rect, exactly as cushion does — the child stays visible.
+    /// the full rect, exactly as cushion does - the child stays visible.
     @Test("A container too small to inset leaves its child untouched")
     func tinyContainerDoesNotShrinkChildren() throws {
         let items = [
@@ -402,7 +402,7 @@ struct CardNestingTests {
         #expect(p.x == 10 && p.y == 20 && p.width == 30 && p.height == 40)
     }
 
-    /// Every input produces exactly one output, in order — the transform places, it never
+    /// Every input produces exactly one output, in order - the transform places, it never
     /// filters. Culling decisions belong to the renderer.
     @Test("Placement is total and order-preserving")
     func placementIsTotal() {

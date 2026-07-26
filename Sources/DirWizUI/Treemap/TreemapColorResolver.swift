@@ -30,7 +30,7 @@ struct TreemapColorResolver {
         self.isTemporalDiffEnabled = isTemporalDiffEnabled
     }
 
-    /// Convenience overload for tests and one-off calls — allocates a local scratch dict.
+    /// Convenience overload for tests and one-off calls - allocates a local scratch dict.
     func resolveColor(for rect: TreemapRect, nodes: [FileNode]) -> SIMD4<Float> {
         var scratch: [UInt32: UInt64] = [:]
         return resolveColor(for: rect, nodes: nodes, scratchSizeByExt: &scratch)

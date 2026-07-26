@@ -3,7 +3,7 @@ import Foundation
 /// Pure summarization of a `TemporalDiffResult` into per-kind counts and a size-ranked
 /// list of changed directories. Used by the CLI's `diff` command (and any future reporting
 /// surface) to turn the node-parallel diff arrays into something printable, without any
-/// I/O of its own — this makes it directly unit-testable.
+/// I/O of its own - this makes it directly unit-testable.
 public struct TemporalDiffSummary: Sendable {
     /// One changed directory: where it is, how it changed, and its size at scan time.
     public struct Entry: Sendable {
@@ -15,13 +15,13 @@ public struct TemporalDiffSummary: Sendable {
     public let newCount: Int
     public let grownCount: Int
     public let shrunkCount: Int
-    /// Number of surviving directories flagged `.deletedDescendants` in `result.kinds` —
+    /// Number of surviving directories flagged `.deletedDescendants` in `result.kinds` -
     /// i.e. directories whose own size change (if any) wasn't enough to earn `.grown`/
     /// `.shrunk`, but that lost one or more sub-directories since the snapshot.
     ///
     /// This counts *ancestor directories*, not deleted paths: `TemporalDiffService`
     /// assigns `.deletedDescendants` to a node only when it would otherwise be `.none`
-    /// (a stronger `.grown`/`.shrunk` classification always wins — see
+    /// (a stronger `.grown`/`.shrunk` classification always wins - see
     /// `TemporalDiffService.computeDiffSync`), and a single surviving ancestor can absorb
     /// many deleted paths in `deletedByNode`. So this count can be smaller than
     /// `deletedByNode.count` (ancestors that are also `.grown`/`.shrunk` are excluded here)
@@ -35,7 +35,7 @@ public struct TemporalDiffSummary: Sendable {
 
     /// Summarize a diff result computed over the given node snapshot.
     /// `nodes`, `stringPool`, and `rootPath` must be the same snapshot passed to
-    /// `TemporalDiffService.computeDiff` that produced `result` — indices in
+    /// `TemporalDiffService.computeDiff` that produced `result` - indices in
     /// `result.kinds` / `result.strengths` are positional over `nodes`.
     public static func summarize(
         result: TemporalDiffResult,

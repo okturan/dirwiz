@@ -31,7 +31,7 @@ public final class ScanProgress: @unchecked Sendable {
     public var skippedDirectories: Int = 0
 
     /// The skipped directories' paths, capped at `maxRecordedSkippedPaths` entries.
-    /// `skippedDirectories` stays exact beyond the cap — this list is a sample for
+    /// `skippedDirectories` stays exact beyond the cap - this list is a sample for
     /// display, not the authoritative count.
     public var skippedDirectoryPaths: [String] = []
 
@@ -60,7 +60,7 @@ public final class ScanProgress: @unchecked Sendable {
     /// `fractionCompleted` and `reset()`, both main-thread-only (see their `@MainActor`).
     @ObservationIgnored private var estimateUndershot = false
 
-    /// Below this many items scanned, the estimate's plausibility is unknowable — matches
+    /// Below this many items scanned, the estimate's plausibility is unknowable - matches
     /// 039's damping spirit (wait for a meaningful sample before trusting a signal).
     private static let minItemsForEstimate = 10_000
 
@@ -83,18 +83,18 @@ public final class ScanProgress: @unchecked Sendable {
     /// Progress fraction 0.0–1.0, or nil if the estimate can't be trusted right now.
     ///
     /// `estimatedTotalItems` comes from volume-root inode statistics, which only loosely
-    /// correlate with the true item count on APFS — `BenchmarkTelemetry` measures this
+    /// correlate with the true item count on APFS - `BenchmarkTelemetry` measures this
     /// error per run, and it is routinely large. Trusting it blindly caused a real
     /// incident: the bar sat at "~50%" for a scan that was actually near done (the
     /// estimate had overshot the real total), making a stranded scan look merely slow.
     /// This computes bounded honesty instead of blind trust:
     ///
     /// - Below `minItemsForEstimate` items scanned, the estimate's quality is unknowable
-    ///   this early — return nil (indeterminate) rather than a number nobody can vouch for.
+    ///   this early - return nil (indeterminate) rather than a number nobody can vouch for.
     /// - While scanning, cap the result at 0.95: the bar keeps *moving* toward 95% but
     ///   never claims near-done on estimate authority alone. Completion is signaled by the
     ///   terminal state (`isScanning` flipping false), never by the estimate crossing 1.0.
-    /// - If the raw fraction ever exceeds 1.0 (the estimate undershot — more items turned
+    /// - If the raw fraction ever exceeds 1.0 (the estimate undershot - more items turned
     ///   up than predicted), the estimate has proven wrong for this scan: latch to
     ///   indeterminate for the remainder so it doesn't flap back and forth as counts climb.
     ///   `reset()` clears the latch for the next scan.
@@ -197,7 +197,7 @@ public final class ScanProgress: @unchecked Sendable {
         // Early-churn guard (plan 039): with live tree building, the first bumps would
         // otherwise lay out a near-empty tree whose rectangles then violently reshuffle
         // as real content arrives. Suppress the periodic bump until the scan has *some*
-        // shape to show — 1,000 files scanned (fast, file-dense volumes get a live map
+        // shape to show - 1,000 files scanned (fast, file-dense volumes get a live map
         // almost immediately) or 20 publishes/≈5s elapsed (slow scans still get a bump
         // once something exists, rather than waiting on a files count that may never
         // arrive quickly). The completion force-bump is untouched so the final layout

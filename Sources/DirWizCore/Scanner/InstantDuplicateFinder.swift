@@ -4,7 +4,7 @@ import Foundation
 ///
 /// This is deliberately a DIFFERENT type from `DuplicateGroup`, not a flag on it. The
 /// cleanup and trash paths take `DuplicateGroup`, so a heuristic candidate cannot reach
-/// them by accident — the compiler enforces the gate that a boolean would leave to
+/// them by accident - the compiler enforces the gate that a boolean would leave to
 /// reviewer discipline. Files only become a `DuplicateGroup` by passing byte verification.
 public struct InstantDuplicateCandidate: Identifiable, Sendable {
     public let id = UUID()
@@ -39,7 +39,7 @@ public struct InstantDuplicateReport: Sendable {
     }
 }
 
-/// Groups files by `(size, case-folded name)` using only the scanned tree — zero file
+/// Groups files by `(size, case-folded name)` using only the scanned tree - zero file
 /// content reads, so it finishes in well under a second where the hashing scan takes
 /// minutes. It answers "what is worth verifying?", never "what is safe to delete?".
 public struct InstantDuplicateFinder: Sendable {

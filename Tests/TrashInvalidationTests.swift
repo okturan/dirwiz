@@ -95,7 +95,7 @@ struct TrashInvalidationTests {
         let generationBefore = state.recencyGeneration
         state.isRecencyOverlayEnabled = true
 
-        // Out-of-bounds index — TreeActions.trash reports failure without touching the tree.
+        // Out-of-bounds index - TreeActions.trash reports failure without touching the tree.
         let result = await state.trashNode(at: UInt32.max)
 
         #expect(!result.success)

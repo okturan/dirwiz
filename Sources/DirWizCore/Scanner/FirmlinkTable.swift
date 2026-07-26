@@ -7,7 +7,7 @@ import Foundation
 /// sides report DIFFERENT identities. `stat /Applications` resolves to the real inode
 /// (e.g. `283981561`), but the directory entry `getattrlistbulk` returns while enumerating
 /// `/` carries a synthetic firmlink id (e.g. `1152921500311879701`, `0x0FFFFFFF00000015`).
-/// They never compare equal, so both subtrees get enumerated — measured on a real 4.45M-item
+/// They never compare equal, so both subtrees get enumerated - measured on a real 4.45M-item
 /// scan as `/Applications` 48.4 GB *and* `/System/Volumes/Data/Applications` 47.4 GB both
 /// counted, while `/Library` came back empty with its real 92.6 GB stranded under the Data
 /// path. Which side "wins" depends on which worker claims the inode first, so it varies
@@ -33,7 +33,7 @@ public enum FirmlinkTable {
     ///
     /// `systemSideExists` gates each entry: a target is only skipped when its `/`-side path
     /// is actually present. Otherwise skipping the Data copy would drop the content from
-    /// both sides and under-report — worse than the double count being fixed.
+    /// both sides and under-report - worse than the double count being fixed.
     public static func duplicateDataPaths(
         contents: String?,
         dataVolumeRoot: String = defaultDataVolumeRoot,
@@ -76,7 +76,7 @@ public enum FirmlinkTable {
     }
 
     /// Deduplication only applies when the scan actually covers both sides. A scan rooted
-    /// AT the Data volume (or anywhere below it) must enumerate everything — skipping there
+    /// AT the Data volume (or anywhere below it) must enumerate everything - skipping there
     /// would hide content the user explicitly asked to see.
     public static func isActive(forScanRoot scanRoot: String, dataVolumeRoot: String = defaultDataVolumeRoot) -> Bool {
         guard let components = FileScanner.relativeComponents(of: dataVolumeRoot, rootPath: scanRoot) else {

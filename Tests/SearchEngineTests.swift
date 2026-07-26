@@ -219,11 +219,11 @@ struct SearchEngineTests {
             (name: "license.txt", size: 300, isDir: false),
         ])
 
-        // Cold search for "read" — matches readme.md and readback.log
+        // Cold search for "read" - matches readme.md and readback.log
         let first = search(tree: tree, query: "read")
         #expect(first.totalMatches == 2)
 
-        // Refine to "readme" using previous matches — should narrow to 1
+        // Refine to "readme" using previous matches - should narrow to 1
         let refined = search(tree: tree, query: "readme", previousMatches: first.matchingIndices)
         #expect(refined.totalMatches == 1)
         let name = tree.name(at: refined.matchingIndices[0])
@@ -256,7 +256,7 @@ struct SearchEngineTests {
         tree.sortAllChildren()
 
         let result = search(tree: tree, query: ".png")
-        // Only icon.png and wallpaper.png should match — NOT DFonts or LLVM.
+        // Only icon.png and wallpaper.png should match - NOT DFonts or LLVM.
         #expect(result.totalMatches == 2)
         let names = result.matchingIndices.map { tree.name(at: $0) }
         #expect(names.contains("icon.png"))
@@ -316,7 +316,7 @@ struct SearchEngineTests {
         files.append((name: "item_special.dat", size: 100, isDir: false))
         let tree = makeTree(files: files)
 
-        // Search with a very small cap — simulating capped results
+        // Search with a very small cap - simulating capped results
         let broad = search(tree: tree, query: "item", resultCap: 10)
         #expect(broad.totalMatches == 201)
         #expect(broad.matchingIndices.count == 10) // capped
@@ -396,8 +396,8 @@ struct SearchEngineTests {
 
     @Test("Composed and decomposed Unicode filenames are found by either query form")
     func unicodeNFCNormalization() {
-        // "Café" decomposed: "Cafe" + combining acute (U+0301) — NFD form.
-        // "Café" composed: single precomposed character (U+00E9) — NFC form.
+        // "Café" decomposed: "Cafe" + combining acute (U+0301) - NFD form.
+        // "Café" composed: single precomposed character (U+00E9) - NFC form.
         let nfd = "Cafe\u{301}.txt"        // é as combining sequence
         let nfc = "Caf\u{E9}.txt"          // é as single code point
 

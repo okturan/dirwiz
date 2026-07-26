@@ -6,7 +6,7 @@ import Foundation
 /// during a cold scan, the first periodic layout-revision bumps would otherwise lay out a
 /// near-empty tree whose rectangles then violently reshuffle as real content arrives.
 /// `ScanProgress.publishCounters` suppresses the every-10th bump until the scan has
-/// `filesScanned >= 1_000` OR `publishCount >= 20` (≈5s at the ~250ms publish cadence) —
+/// `filesScanned >= 1_000` OR `publishCount >= 20` (≈5s at the ~250ms publish cadence) -
 /// whichever comes first, so a fast/file-dense scan gets a live map almost immediately and
 /// a slow scan still gets one once it's been running a while. The completion force-bump
 /// (`forceLayoutRevision: true`) is untouched and must always fire.
@@ -20,7 +20,7 @@ struct ScanProgressTests {
     func periodicBumpSuppressedBeforeThreshold() {
         let progress = ScanProgress()
         for _ in 1...10 {
-            progress.incrementFiles(count: 5) // 50 files total after 10 calls — well under 1,000
+            progress.incrementFiles(count: 5) // 50 files total after 10 calls - well under 1,000
             progress.publishCounters()
         }
         #expect(progress.treeLayoutRevision == 0,
@@ -33,7 +33,7 @@ struct ScanProgressTests {
     func periodicBumpFiresAtPublishCountBoundary() {
         let progress = ScanProgress()
         for _ in 1...20 {
-            progress.incrementFiles(count: 5) // 100 files total — still under 1,000
+            progress.incrementFiles(count: 5) // 100 files total - still under 1,000
             progress.publishCounters()
         }
         #expect(progress.treeLayoutRevision == 1,
@@ -75,7 +75,7 @@ struct ScanProgressTests {
 }
 
 /// Plan 041: `fractionCompleted` must never sit at a fabricated fraction. The estimate
-/// (`estimatedTotalItems`) is volume-root inode statistics — routinely wrong on APFS (the
+/// (`estimatedTotalItems`) is volume-root inode statistics - routinely wrong on APFS (the
 /// user-reported incident: the bar read "~50%" for a near-done scan because the estimate
 /// had overshot the real total). These tests pin the three honesty mechanisms: a floor
 /// below which the estimate is too young to trust, a 0.95 cap so the bar never claims
@@ -86,7 +86,7 @@ struct ScanProgressTests {
 @Suite("ScanProgress fractionCompleted honesty")
 struct ScanProgressFractionHonestyTests {
 
-    /// Below the floor, the estimate's quality is unknowable this early — nil regardless of
+    /// Below the floor, the estimate's quality is unknowable this early - nil regardless of
     /// how plausible the raw ratio looks. At/above the floor, with a sane (non-undershooting,
     /// non-cap-triggering) estimate, the true ratio is returned.
     @Test("nil below the floor; determinate above it with a sane estimate")
@@ -96,7 +96,7 @@ struct ScanProgressFractionHonestyTests {
         progress.estimatedTotalItems = 100_000
 
         progress.filesScanned = 9_999
-        #expect(progress.fractionCompleted == nil, "9,999 items is one below the 10,000 floor — must stay indeterminate")
+        #expect(progress.fractionCompleted == nil, "9,999 items is one below the 10,000 floor - must stay indeterminate")
 
         progress.filesScanned = 10_000
         #expect(progress.fractionCompleted == 0.1, "At the floor with a sane estimate, the true ratio (10,000/100,000) must show")
@@ -107,14 +107,14 @@ struct ScanProgressFractionHonestyTests {
 
     /// Overshooting estimate (2x the eventual actual total): the raw ratio stays low for the
     /// whole scan by construction (bigger denominator), so it never approaches the 0.95 cap
-    /// or crosses 1.0 — this is the user's original incident shape. Pin that the fraction
+    /// or crosses 1.0 - this is the user's original incident shape. Pin that the fraction
     /// still moves as counts rise (it is not stuck), and that the terminal state (scan
     /// complete) reports the same true ratio rather than something the cap/latch distorts.
     @Test("Overshooting estimate: fraction moves and completion reports the true ratio")
     func overshootingEstimateStillMovesAndCompletes() {
         let progress = ScanProgress()
         progress.isScanning = true
-        progress.estimatedTotalItems = 40_000 // true final total will be 20,000 — a 2x overshoot
+        progress.estimatedTotalItems = 40_000 // true final total will be 20,000 - a 2x overshoot
 
         progress.filesScanned = 12_000
         #expect(progress.fractionCompleted == 0.3)
@@ -129,7 +129,7 @@ struct ScanProgressFractionHonestyTests {
 
     /// Cap: as the raw ratio approaches 1.0 while still scanning (an estimate that turns out
     /// to be roughly accurate, or a slight undershoot short of the 1.0 latch threshold), the
-    /// displayed fraction never exceeds 0.95 — it holds there rather than flapping upward
+    /// displayed fraction never exceeds 0.95 - it holds there rather than flapping upward
     /// with every tick. Once the scan actually completes, the true (uncapped) ratio is shown.
     @Test("Cap holds the displayed fraction at 0.95 pre-completion; completion overrides it")
     func capHoldsAt095UntilCompletion() {
@@ -140,7 +140,7 @@ struct ScanProgressFractionHonestyTests {
         progress.filesScanned = 97_000 // raw 0.97
         #expect(progress.fractionCompleted == 0.95, "Raw 0.97 must be capped to 0.95 while still scanning")
 
-        progress.filesScanned = 99_000 // raw 0.99 — still short of the 1.0 undershoot latch
+        progress.filesScanned = 99_000 // raw 0.99 - still short of the 1.0 undershoot latch
         #expect(progress.fractionCompleted == 0.95, "Cap must hold at 0.95, not creep up with raw")
 
         progress.isScanning = false // scan completes with the same counts
@@ -148,7 +148,7 @@ struct ScanProgressFractionHonestyTests {
     }
 
     /// Undershooting estimate: once the raw ratio crosses 1.0 (more items scanned than the
-    /// estimate predicted), the estimate has proven wrong for this scan — latch to
+    /// estimate predicted), the estimate has proven wrong for this scan - latch to
     /// indeterminate for the remainder, even as counts keep climbing well past the estimate,
     /// rather than flapping back to determinate.
     @Test("Undershooting estimate: crossing 1.0 latches to nil and never flaps back")
@@ -157,14 +157,14 @@ struct ScanProgressFractionHonestyTests {
         progress.isScanning = true
         progress.estimatedTotalItems = 50_000
 
-        progress.filesScanned = 45_000 // raw 0.9 — still below both the cap-visible zone and 1.0
+        progress.filesScanned = 45_000 // raw 0.9 - still below both the cap-visible zone and 1.0
         #expect(progress.fractionCompleted == 0.9)
 
-        progress.filesScanned = 51_000 // raw 1.02 — crosses 1.0, latch trips
+        progress.filesScanned = 51_000 // raw 1.02 - crosses 1.0, latch trips
         #expect(progress.fractionCompleted == nil, "Crossing 1.0 must latch to indeterminate")
 
         progress.filesScanned = 60_000 // counts keep rising well past the estimate
-        #expect(progress.fractionCompleted == nil, "Latch must hold — no flapping back to determinate as counts keep climbing")
+        #expect(progress.fractionCompleted == nil, "Latch must hold - no flapping back to determinate as counts keep climbing")
     }
 
     /// The latch is scoped to one scan: `reset()` (called at the start of every new scan)
@@ -174,14 +174,14 @@ struct ScanProgressFractionHonestyTests {
         let progress = ScanProgress()
         progress.isScanning = true
         progress.estimatedTotalItems = 10_000
-        progress.filesScanned = 11_000 // raw 1.1 — trips the latch
+        progress.filesScanned = 11_000 // raw 1.1 - trips the latch
         #expect(progress.fractionCompleted == nil)
 
         progress.reset()
 
         progress.isScanning = true
         progress.estimatedTotalItems = 100_000
-        progress.filesScanned = 20_000 // raw 0.2, well-formed — must not still be latched from the prior scan
+        progress.filesScanned = 20_000 // raw 0.2, well-formed - must not still be latched from the prior scan
         #expect(progress.fractionCompleted == 0.2, "A fresh scan after reset() must not inherit the previous scan's latch")
     }
 }
@@ -232,7 +232,7 @@ struct ScanProgressSkippedPathTests {
         #expect(progress.skippedDirectories == 0)
         #expect(progress.skippedDirectoryPaths.isEmpty)
 
-        // The hot side must be cleared too — a publish after reset must not resurrect old paths.
+        // The hot side must be cleared too - a publish after reset must not resurrect old paths.
         progress.publishCounters()
         #expect(progress.skippedDirectoryPaths.isEmpty, "Hot-counter path list must be cleared by reset(), not just the published copy")
     }

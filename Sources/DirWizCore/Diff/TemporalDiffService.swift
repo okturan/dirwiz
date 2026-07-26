@@ -102,7 +102,7 @@ public struct TemporalDiffService {
 
             if let oldSize = snapshot.byPath[relPath] {
                 let currentSize = node.fileSize
-                // Threshold: max(4 MB, 5 % of old size) — ignore noise
+                // Threshold: max(4 MB, 5 % of old size) - ignore noise
                 let threshold = max(UInt64(4 * 1024 * 1024), oldSize / 20)
                 // Compare UInt64 values directly to avoid Int64 overflow on files > 8 EB.
                 if currentSize >= oldSize {
@@ -129,7 +129,7 @@ public struct TemporalDiffService {
 
         // --- Second pass: aggregate deleted snapshot entries to nearest ancestor ---
         // A snapshot path is "deleted" if it doesn't appear in relPathToIndex (no
-        // separate matchedPaths set needed — saves a Set<String> allocation).
+        // separate matchedPaths set needed - saves a Set<String> allocation).
         var deletedByNode: [UInt32: DeletedSummary] = [:]
         for (deletedPath, deletedBytes) in snapshot.byPath where relPathToIndex[deletedPath] == nil {
             guard let ancestorIdx = nearestAncestor(

@@ -68,7 +68,7 @@ struct CushionMathTests {
         let leafRect = leaves[0]
         // depth=2: root(0) -> dir(1) -> file(2)
         #expect(leafRect.depth == 2, "Leaf at depth 2 should have depth=2")
-        // cachedCoefs are computed inline from ancestor stack — non-zero confirms ancestor ridges applied.
+        // cachedCoefs are computed inline from ancestor stack - non-zero confirms ancestor ridges applied.
         #expect(leafRect.cachedCoefs != .zero, "Leaf coefs should reflect ancestor ridge contribution")
     }
 

@@ -31,7 +31,7 @@ struct SystemPathClassifierTests {
         #expect(!SystemPathClassifier.isSystemManaged("/Users/okan/x"))
     }
 
-    @Test("Does not match /usr/local/ — the carved-out exception")
+    @Test("Does not match /usr/local/ - the carved-out exception")
     func doesNotMatchUsrLocal() {
         #expect(!SystemPathClassifier.isSystemManaged("/usr/local/bin/x"))
     }

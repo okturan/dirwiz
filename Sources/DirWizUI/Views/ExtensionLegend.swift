@@ -3,7 +3,7 @@ import DirWizCore
 
 /// Right sidebar showing top extensions by size with WinDirStat-style palette colors.
 ///
-/// This is the treemap's color key, and it is always on screen — so it is also the most
+/// This is the treemap's color key, and it is always on screen - so it is also the most
 /// natural place to say "show me these files". Rows share `ExtensionLegendRow` with the
 /// Extensions tab and perform the same drill-down, rather than being an inert twin of it.
 public struct ExtensionLegend: View {

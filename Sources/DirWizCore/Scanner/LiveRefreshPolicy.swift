@@ -3,13 +3,13 @@ import Foundation
 /// Decides WHEN accumulated FSEvents changes should be spliced into the displayed tree.
 ///
 /// This formally reverses plan 037's "decision 3a: no auto-apply, ever". That decision was
-/// right at the time — the splice engine was young. It is now the same proven path warm
+/// right at the time - the splice engine was young. It is now the same proven path warm
 /// start uses, with path-keyed exploration restore and an idempotent splice, so the
 /// displayed tree can simply stay true instead of asking the user to click Refresh.
 ///
 /// Kept pure and clock-injected so every branch is testable without waiting real seconds.
 /// The corresponding decision for warm start lives in `WarmStartPlanner`; both follow the
-/// same shape — a pure planner, a thin caller.
+/// same shape - a pure planner, a thin caller.
 public enum LiveRefreshPolicy {
 
     /// FSEvents silence required before applying. Splicing mid-burst (an install, a build)
@@ -35,7 +35,7 @@ public enum LiveRefreshPolicy {
         case waitingForInterval
         /// Deferred by a guard (a scan, a heavy task, the temporal-diff overlay, or pause).
         case deferred(reason: DeferralReason)
-        /// Too many changed directories to splice honestly — offer a full rescan.
+        /// Too many changed directories to splice honestly - offer a full rescan.
         case storm(pendingCount: Int)
     }
 

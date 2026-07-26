@@ -5,7 +5,7 @@ import Foundation
 /// Coverage for `FirmlinkTable` (firmlink-double-traversal).
 ///
 /// Parsing is tested against INJECTED table contents, never the host's real
-/// `/usr/share/firmlinks` — otherwise these assertions would drift with the macOS version
+/// `/usr/share/firmlinks` - otherwise these assertions would drift with the macOS version
 /// the suite happens to run on.
 @Suite("FirmlinkTable Tests")
 struct FirmlinkTableTests {
@@ -35,7 +35,7 @@ struct FirmlinkTableTests {
     @Test("A target whose system-side path is missing is NOT skipped")
     func missingSystemSideIsNotSkipped() {
         // Skipping the Data copy when the /-side path doesn't exist would drop the content
-        // from BOTH sides — under-reporting, which is worse than the double count.
+        // from BOTH sides - under-reporting, which is worse than the double count.
         let paths = FirmlinkTable.duplicateDataPaths(
             contents: sample, dataVolumeRoot: "/System/Volumes/Data",
             systemSideExists: { $0 != "/AppleInternal" }
@@ -45,7 +45,7 @@ struct FirmlinkTableTests {
         #expect(paths.count == 5)
     }
 
-    @Test("Missing table yields an empty set — fails open")
+    @Test("Missing table yields an empty set - fails open")
     func missingTableFailsOpen() {
         #expect(FirmlinkTable.duplicateDataPaths(contents: nil, systemSideExists: { _ in true }).isEmpty)
     }

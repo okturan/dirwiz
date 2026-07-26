@@ -18,7 +18,7 @@ struct TreeTableViewTests {
         let expandedPaths: Set<String> = ["/vol/dirA", "/vol/dirB"]
 
         // "After" shape simulates dirA (and its child subA1) having been trashed: only
-        // dirB survives, and — because removeSubtree compacts the array — it now sits at
+        // dirB survives, and - because removeSubtree compacts the array - it now sits at
         // index 1 instead of its old index 3.
         let after = FileTree()
         after.setRootPath("/vol")

@@ -5,7 +5,7 @@ import DirWizCore
 ///
 /// Hardlinks are multiple directory entries pointing to the same inode (file data).
 /// Unlike duplicates, removing a hardlink does NOT free disk space until the *last*
-/// link is removed — the data lives on as long as any directory entry references it.
+/// link is removed - the data lives on as long as any directory entry references it.
 /// This view is informational: it shows which files share inodes and how much space
 /// is held by the extra links, but does not offer a "trash" action to avoid confusion.
 public struct HardlinkView: View {
@@ -33,7 +33,7 @@ public struct HardlinkView: View {
 
     // MARK: - Toolbar
 
-    /// No run button — groups populate automatically from scan-time link counts
+    /// No run button - groups populate automatically from scan-time link counts
     /// (always-on-hardlinks); the toolbar is a summary strip.
     private var toolbar: some View {
         HStack(spacing: 12) {
@@ -106,7 +106,7 @@ public struct HardlinkView: View {
             if appState.fileTree == nil {
                 Text("Scan a volume to detect hardlinked files.")
             } else {
-                Text("No files on this volume share an inode.\n\nHardlinks are multiple directory entries pointing to identical file data. Removing a hardlink only unlinks one directory entry — the data is freed only when the last link is removed.")
+                Text("No files on this volume share an inode.\n\nHardlinks are multiple directory entries pointing to identical file data. Removing a hardlink only unlinks one directory entry - the data is freed only when the last link is removed.")
             }
         }
     }

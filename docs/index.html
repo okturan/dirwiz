@@ -3,25 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DirWiz — See every byte on your Mac</title>
-<meta name="description" content="DirWiz is a fast disk space analyzer for macOS. Live Metal treemap, byte-verified duplicates, snapshot diffs, hardlink analysis, and a scriptable CLI — native Swift, zero dependencies.">
+<title>DirWiz - See every byte on your Mac</title>
+<meta name="description" content="DirWiz is a fast disk space analyzer for macOS. Live Metal treemap, byte-verified duplicates, snapshot diffs, hardlink analysis, and a scriptable CLI - native Swift, zero dependencies.">
 <link rel="canonical" href="https://dirwiz.app/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="DirWiz">
 <meta property="og:url" content="https://dirwiz.app/">
-<meta property="og:title" content="DirWiz — See every byte on your Mac">
+<meta property="og:title" content="DirWiz - See every byte on your Mac">
 <meta property="og:description" content="Every byte on your Mac, mapped. Live Metal treemap, byte-verified duplicates, snapshot diffs, and a scriptable CLI.">
 <meta property="og:image" content="https://dirwiz.app/assets/dirwiz-social-preview.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="DirWiz — See every byte on your Mac">
+<meta name="twitter:title" content="DirWiz - See every byte on your Mac">
 <meta name="twitter:description" content="Every byte on your Mac, mapped. Live Metal treemap, byte-verified duplicates, snapshot diffs, and a scriptable CLI.">
 <meta name="twitter:image" content="https://dirwiz.app/assets/dirwiz-social-preview.png">
 <meta name="theme-color" content="#fdfdfb">
 <link rel="icon" type="image/png" href="assets/dirwiz-logo.png">
 <style>
-/* ————— tokens: warm paper ground, navy ink, one blue accent ————— */
+/* ----- tokens: warm paper ground, navy ink, one blue accent ----- */
 :root{
   color-scheme: light;
   --paper:#fdfdfb;
@@ -55,7 +55,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 [id]{scroll-margin-top:76px}
 
-/* ————— nav ————— */
+/* ----- nav ----- */
 .nav{position:fixed;top:0;left:0;right:0;z-index:50;height:56px;
   display:flex;align-items:center;gap:18px;
   padding:0 clamp(18px,4vw,36px);
@@ -86,10 +86,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .btn-gh:hover{border-color:var(--line2);color:var(--ink);transform:translateY(-1px);
   box-shadow:0 3px 10px -4px rgba(22,48,94,.15)}
 
-/* ————— layout & shared ————— */
+/* ----- layout & shared ----- */
 .wrap{max-width:1120px;margin:0 auto;padding:0 clamp(20px,4.5vw,36px)}
 section{padding:clamp(76px,10vw,120px) 0}
-/* section.wrap carries both roles — restate vertical padding at higher
+/* section.wrap carries both roles - restate vertical padding at higher
    specificity so .wrap's `padding:0 …` can't zero it out */
 section.wrap{padding:clamp(76px,10vw,120px) clamp(20px,4.5vw,36px)}
 .band{background:var(--band);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
@@ -104,7 +104,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
   transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);
   transition-delay:var(--d,0s)}
 
-/* ————— hero ————— */
+/* ----- hero ----- */
 .hero{padding:clamp(116px,15vh,160px) 0 0;text-align:center}
 .hero-icon{width:120px;height:120px;margin:0 auto 20px;
   filter:drop-shadow(0 10px 22px rgba(22,48,94,.18))}
@@ -122,7 +122,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .hero-shot figcaption .mono{font-size:12px}
 .hero-bleed{padding-bottom:clamp(76px,10vw,120px)}
 
-/* ————— stats strip ————— */
+/* ----- stats strip ----- */
 .stats{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:0;background:var(--card)}
 .stats .wrap{display:grid;grid-template-columns:repeat(4,1fr)}
 .stat{padding:30px 26px;border-left:1px solid var(--line)}
@@ -130,7 +130,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .stat .k{font-family:var(--mono);font-size:15.5px;font-weight:600;color:var(--ink)}
 .stat .v{font-size:13.5px;color:var(--mut);margin-top:5px;line-height:1.55}
 
-/* ————— feature cards ————— */
+/* ----- feature cards ----- */
 .bento{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:48px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:24px;
   transition:border-color .25s,transform .25s,box-shadow .25s}
@@ -146,7 +146,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
   padding:3.5px 10px 3.5px 7px;background:#fafbfd}
 .cat-chips .chip i{width:8px;height:8px;border-radius:2.5px}
 
-/* ————— live demo panel ————— */
+/* ----- live demo panel ----- */
 .demo-grid{display:grid;grid-template-columns:1fr;gap:34px;margin-top:44px}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;
   box-shadow:0 1px 2px rgba(22,48,94,.05),0 16px 40px -24px rgba(22,48,94,.18)}
@@ -178,7 +178,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .demo-note{margin-top:20px;font-size:13.5px;color:var(--mut);text-align:center}
 .demo-note b{color:var(--body);font-weight:600}
 
-/* ————— split deep-dives ————— */
+/* ----- split deep-dives ----- */
 .split{display:grid;grid-template-columns:1fr 1.1fr;gap:clamp(36px,6vw,72px);align-items:center}
 .split.flip .copy{order:2}
 .split .copy .lede{font-size:16.5px}
@@ -230,7 +230,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .snap-legend s{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
 .snap-legend i{width:8px;height:8px;border-radius:2.5px}
 
-/* terminal — the one dark block on the page */
+/* terminal - the one dark block on the page */
 .term{background:#101623;border:1px solid #1e2839;border-radius:12px;overflow:hidden;
   box-shadow:0 1px 2px rgba(22,48,94,.1),0 24px 60px -28px rgba(22,48,94,.4)}
 .term-bar{display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;
@@ -247,7 +247,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
   vertical-align:-2px;animation:blink 1.05s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
 
-/* ————— safety ————— */
+/* ----- safety ----- */
 .safety .inner{max-width:860px;margin:0 auto;text-align:center}
 .safety h2{font-size:clamp(25px,3.4vw,34px);font-weight:700;letter-spacing:-.02em;
   line-height:1.2;margin-bottom:46px}
@@ -257,7 +257,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .safety-grid h3 i{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
 .safety-grid p{font-size:13.5px;color:var(--mut);line-height:1.6}
 
-/* ————— download ————— */
+/* ----- download ----- */
 .dl{text-align:center}
 .dl .dl-icon{width:96px;height:96px;margin:0 auto 24px;
   filter:drop-shadow(0 10px 22px rgba(22,48,94,.16))}
@@ -279,7 +279,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .buildline code{font-family:var(--mono);font-size:11.5px;background:var(--card);
   border:1px solid var(--line);border-radius:5px;padding:2px 7px;color:var(--accent-deep)}
 
-/* ————— footer ————— */
+/* ----- footer ----- */
 footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--paper)}
 .foot{display:flex;align-items:center;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--faint)}
 .foot .brand{display:flex;align-items:center;gap:8px;color:var(--body);font-weight:600}
@@ -288,7 +288,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
 .foot nav a:hover{color:var(--ink)}
 .foot .egg{width:100%;font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:4px}
 
-/* ————— responsive ————— */
+/* ----- responsive ----- */
 @media (max-width:960px){
   .bento{grid-template-columns:1fr 1fr}
   .split{grid-template-columns:1fr}
@@ -346,7 +346,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
 
 <header class="hero" id="top">
   <div class="wrap">
-    <img class="hero-icon rv" src="assets/dirwiz-logo.png" alt="DirWiz app icon — a folder containing a blue treemap" width="120" height="120">
+    <img class="hero-icon rv" src="assets/dirwiz-logo.png" alt="DirWiz app icon - a folder containing a blue treemap" width="120" height="120">
     <h1 class="rv" style="--d:.1s">Every byte on your Mac, <em>mapped</em>.</h1>
     <p class="sub rv" style="--d:.15s">DirWiz scans millions of files in seconds and draws each one as a
     rectangle, sized by the space it actually takes on disk. Find what’s eating
@@ -355,13 +355,13 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <a class="btn btn-primary btn-lg" href="https://github.com/okturan/dirwiz/releases/latest">Download for macOS</a>
       <a class="btn btn-quiet" href="#demo">Try the live demo&ensp;↓</a>
     </div>
-    <p class="hero-fine rv" style="--d:.25s">v1.1.1 · macOS 15+ · universal binary · zero dependencies · free &amp; open source</p>
+    <p class="hero-fine rv" style="--d:.25s">v1.1.1 · macOS 15+ · universal binary · zero dependencies · free · source on GitHub</p>
   </div>
   <figure class="hero-shot hero-bleed rv" style="--d:.3s">
     <img src="assets/dirwiz-showcase.webp"
          alt="DirWiz after scanning a Mac boot volume: a sortable file tree above a colorful cushion treemap, with a file type legend on the right"
          width="2200" height="1580">
-    <figcaption>An actual scan of this Mac’s boot volume — 4,454,141 files in 23 seconds.
+    <figcaption>An actual scan of this Mac’s boot volume - 4,454,141 files in 23 seconds.
     Every rectangle is sized by the blocks it occupies on disk, not its logical length.</figcaption>
   </figure>
 </header>
@@ -378,7 +378,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
 <section class="wrap" id="features">
   <h2 class="sec rv" style="--d:.05s">Built for the “what is eating my disk?” moment</h2>
   <p class="lede rv" style="--d:.1s">One window: a treemap you can steer, a sortable tree table, duplicate and
-  hardlink groups, and space insights — all fed by one very fast scanner.</p>
+  hardlink groups, and space insights - all fed by one very fast scanner.</p>
 
   <div class="bento">
     <div class="card rv">
@@ -419,7 +419,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 20V10m7 10V4m7 16v-7"/></svg></div>
       <h3>Space insights</h3>
       <p>Categories, file ages, size distributions, iCloud placeholders, APFS
-      clones, local snapshots — including the purgeable space Finder won’t explain.</p>
+      clones, local snapshots - including the purgeable space Finder won’t explain.</p>
       <div class="cat-chips" aria-hidden="true">
         <span class="chip"><i style="background:#3366d9"></i>Documents</span>
         <span class="chip"><i style="background:#d95999"></i>Images</span>
@@ -438,7 +438,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <p class="lede rv" style="--d:.1s">Not a mockup. Real
       <span class="mono">dirwiz-cli</span> scans of a Mac’s <span class="mono">/Applications</span>,
       <span class="mono">/Library</span>, <span class="mono">/System/Library</span> and
-      <span class="mono">/opt/homebrew</span> — real names, real byte counts — drawn by the same
+      <span class="mono">/opt/homebrew</span> - real names, real byte counts - drawn by the same
       squarified layout and Oklab-equalized palette the app itself uses.</p>
     </div>
     <div class="demo-grid rv" style="--d:.15s">
@@ -461,13 +461,13 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
     <div class="copy">
       <h2 class="sec rv" style="--d:.05s">Delete the copy. Keep the original.</h2>
       <p class="lede rv" style="--d:.1s">DirWiz groups files by content, not by name. Before anything moves,
-      each file is re-read byte for byte — and cleanup only proceeds while an
+      each file is re-read byte for byte - and cleanup only proceeds while an
       unselected, identical copy survives. Trashing your last copy isn’t an
       accident that can happen; the action refuses to run.</p>
       <ul class="ticks">
         <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Byte-for-byte verification</b> right before the move, not just hashes from ten minutes ago.</span></li>
-        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Hardlink-aware</b> — linked bytes are reported separately, never sold to you as reclaimable space.</span></li>
-        <li class="rv" style="--d:.26s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Presets fail closed</b> — a selection that matches nothing does nothing.</span></li>
+        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Hardlink-aware</b> - linked bytes are reported separately, never sold to you as reclaimable space.</span></li>
+        <li class="rv" style="--d:.26s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Presets fail closed</b> - a selection that matches nothing does nothing.</span></li>
       </ul>
     </div>
     <div class="rv" style="--d:.12s">
@@ -491,7 +491,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
         </div>
         <div class="dup-foot">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg>
-          Re-read byte-for-byte at the moment of action — never trust a stale hash.
+          Re-read byte-for-byte at the moment of action - never trust a stale hash.
         </div>
       </div>
     </div>
@@ -504,11 +504,11 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <h2 class="sec rv" style="--d:.05s">Where did those 20 GB go?</h2>
       <p class="lede rv" style="--d:.1s">Snapshot your disk while it’s tidy. Three weeks later, when the
       “disk almost full” banner shows up, diff against the baseline. New files show
-      green, growth blue, shrinkage amber, deletions red — painted straight onto
+      green, growth blue, shrinkage amber, deletions red - painted straight onto
       the treemap, with a ranked list of the worst offenders.</p>
       <ul class="ticks">
-        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Compact binary snapshots</b> stored per scan root — take one whenever things feel right.</span></li>
-        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Shared with the CLI</b> — <span class="mono">dirwiz-cli snapshot</span> from a cron job, diff in the app on Friday.</span></li>
+        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Compact binary snapshots</b> stored per scan root - take one whenever things feel right.</span></li>
+        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Shared with the CLI</b> - <span class="mono">dirwiz-cli snapshot</span> from a cron job, diff in the app on Friday.</span></li>
       </ul>
     </div>
     <div class="rv" style="--d:.12s">
@@ -541,15 +541,15 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <h2 class="sec rv" style="--d:.05s">The same scanner, over SSH.</h2>
       <p class="lede rv" style="--d:.1s">The app and the CLI are two doors into one engine. Scan with JSON
       export, check duplicates, save and diff snapshots, or run the built-in
-      benchmark — on the Mac in front of you or the Mac mini in the closet.</p>
+      benchmark - on the Mac in front of you or the Mac mini in the closet.</p>
       <ul class="ticks">
-        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b><span class="mono">--json</span> everywhere</b> — pipe scans, duplicate groups, and diffs into jq or a dashboard.</span></li>
-        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Progress on stderr, data on stdout</b> — quiet with <span class="mono">-q</span>, script-safe by default.</span></li>
+        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b><span class="mono">--json</span> everywhere</b> - pipe scans, duplicate groups, and diffs into jq or a dashboard.</span></li>
+        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Progress on stderr, data on stdout</b> - quiet with <span class="mono">-q</span>, script-safe by default.</span></li>
       </ul>
     </div>
     <div class="rv" style="--d:.12s">
       <div class="term" aria-label="Terminal session with dirwiz-cli">
-        <div class="term-bar"><i></i><i></i><i></i><span>you@studio — zsh</span></div>
+        <div class="term-bar"><i></i><i></i><i></i><span>you@studio - zsh</span></div>
         <div class="term-body"><pre id="termOut" aria-live="polite"></pre></div>
       </div>
     </div>
@@ -588,7 +588,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
   <p class="hero-fine rv" style="--d:.15s">Version 1.1.1 · macOS 15 or later · universal (Apple silicon &amp; Intel) · 3 MB</p>
 
   <div class="checksum rv" style="--d:.2s">
-    <div class="checksum-head">SHA-256 — VERIFY YOUR DOWNLOAD</div>
+    <div class="checksum-head">SHA-256 - VERIFY YOUR DOWNLOAD</div>
     <div class="checksum-body">
       e8e04c446506d137b4f8b61e8daae94f47b91d22b33ceaa973eab0cda9cd07fd<br>
       <span class="c">$</span> shasum -a 256 DirWiz-1.1.1-macos.zip
@@ -596,10 +596,10 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
   </div>
 
   <div class="notes">
-    <p class="note rv" style="--d:.24s"><b>Signed and notarized by Apple.</b> Double-click to open —
+    <p class="note rv" style="--d:.24s"><b>Signed and notarized by Apple.</b> Double-click to open -
     no right-click trick, no Gatekeeper warning to talk your way past.</p>
     <p class="note rv" style="--d:.28s"><b>Full Disk Access.</b> Scanning system folders needs it.
-    DirWiz detects the permission at launch and walks you through System Settings —
+    DirWiz detects the permission at launch and walks you through System Settings -
     no guesswork about why a folder came back empty.</p>
   </div>
 
@@ -618,7 +618,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <a href="https://github.com/okturan/dirwiz/issues">Issues</a>
       <a href="https://github.com/okturan/dirwiz/blob/main/SECURITY.md">Security</a>
     </nav>
-    <span class="egg">zero dependencies — the app, and this page. Mac and macOS are trademarks of Apple Inc.</span>
+    <span class="egg">zero dependencies - the app, and this page. Mac and macOS are trademarks of Apple Inc.</span>
   </div>
 </footer>
 
@@ -629,7 +629,7 @@ const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const $ = s => document.querySelector(s);
 const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
 
-/* ————— the app's 17 Oklab-equalized WinDirStat hues (ExtensionPalette) ————— */
+/* ----- the app's 17 Oklab-equalized WinDirStat hues (ExtensionPalette) ----- */
 const EXT17 = ["#5588fc","#fd3a2c","#0bad09","#95950b","#13a3a3","#e607e6","#c08007","#5089fd","#ff2c5c","#36ab01","#b657fd","#08ad38","#f905a7","#0e98e2","#f25002","#11a971","#7b7cfe"];
 const FALLBACK = "#9aa3b5";
 
@@ -645,10 +645,10 @@ function fmtGB(gb){
   return Math.max(1, Math.round(gb*1024)) + " MB";
 }
 
-/* ————— demo tree data —————
+/* ----- demo tree data -----
    NOT hand-written: this is a real `dirwiz-cli scan /Library/Developer --json`
    run on a Mac, pruned to its 280 largest files. Real names, real byte sizes,
-   real extension mix — fed through the same squarified layout and Oklab
+   real extension mix - fed through the same squarified layout and Oklab
    palette the app itself uses. */
 const REAL_SCAN = {"n":"Macintosh HD","c":[{"n":"Applications","c":[{"n":"Asphalt8.app","s":4.4245,"e":"app"},{"n":"Xcode.app","s":4.2953,"e":"app"},{"n":"Xcode-beta.app","s":4.1603,"e":"app"},{"n":"iMovie.app","s":3.9568,"e":"app"},{"n":"Android Studio.app","s":3.4433,"e":"app"},{"n":"Microsoft Outlook.app","s":2.5015,"e":"app"},{"n":"Microsoft Word.app","s":2.4924,"e":"app"},{"n":"Microsoft Excel.app","s":2.2373,"e":"app"},{"n":"Microsoft PowerPoint.app","s":1.9883,"e":"app"},{"n":"Google Chrome.app","s":1.4732,"e":"app"},{"n":"ChatGPT.app","s":1.4536,"e":"app"},{"n":"LarkSuite.app","s":1.4061,"e":"app"}]},{"n":"Library","c":[{"n":"Developer","c":[{"n":"CoreSimulator","c":[{"n":"Volumes","c":[{"n":"iOS_24A5355p","c":[{"n":"Library","s":19.4366,"e":"none"}]},{"n":"iOS_23F77","c":[{"n":"Library","s":18.5524,"e":"none"}]},{"n":"iOS_23E244","c":[{"n":"Library","s":18.5283,"e":"none"}]},{"n":"iOS_23E254a","c":[{"n":"Library","s":18.5271,"e":"none"}]}]},{"n":"Caches/dyld","c":[{"n":"26A5378n","s":12.8519,"e":"none"}]},{"n":"Profiles","c":[{"n":"DeviceTypes","s":0.005,"e":"none"}]}]},{"n":"CommandLineTools","c":[{"n":"SDKs","c":[{"n":"MacOSX27.0.sdk","c":[{"n":"System","s":0.1781,"e":"none"},{"n":"usr","s":0.1639,"e":"none"}]},{"n":"MacOSX26.5.sdk","c":[{"n":"usr","s":0.1627,"e":"none"},{"n":"System","s":0.1553,"e":"none"}]}]},{"n":"usr","c":[{"n":"lib","c":[{"n":"swift","s":0.125,"e":"none"},{"n":"swift-5.0","s":0.073,"e":"0"},{"n":"sourcekitdInProc.framework","s":0.0682,"e":"framework"},{"n":"libclang.dylib","s":0.0484,"e":"dylib"},{"n":"libLTO.dylib","s":0.0264,"e":"dylib"}]},{"n":"bin","c":[{"n":"swift-frontend","s":0.069,"e":"none"},{"n":"clang","s":0.0475,"e":"none"},{"n":"clangd","s":0.0204,"e":"none"},{"n":"dsymutil","s":0.0164,"e":"none"},{"n":"sourcekit-lsp","s":0.0162,"e":"none"}]},{"n":"libexec","c":[{"n":"git-core","s":0.0103,"e":"none"}]},{"n":"share","c":[{"n":"man","s":0.0031,"e":"none"}]}]},{"n":"Library","c":[{"n":"PrivateFrameworks","c":[{"n":"LLDB.framework","s":0.0803,"e":"framework"}]},{"n":"Frameworks","c":[{"n":"Python3.framework","s":0.0217,"e":"framework"}]},{"n":"Developer","c":[{"n":"Frameworks","s":0.0036,"e":"none"}]}]}]},{"n":"DeveloperDiskImages","c":[{"n":"watchOS_DDI/Restore","c":[{"n":"022-22117-046.dmg","s":0.0201,"e":"dmg"},{"n":"022-22111-046.dmg","s":0.0199,"e":"dmg"}]},{"n":"iOS_DDI/Restore","c":[{"n":"022-22107-046.dmg","s":0.0156,"e":"dmg"},{"n":"022-22070-046.dmg","s":0.0154,"e":"dmg"}]},{"n":"tvOS_DDI/Restore","c":[{"n":"022-22060-046.dmg","s":0.0144,"e":"dmg"},{"n":"022-22106-046.dmg","s":0.0143,"e":"dmg"}]},{"n":"xrOS_DDI/Restore","c":[{"n":"022-22101-046.dmg","s":0.0124,"e":"dmg"},{"n":"022-22062-046.dmg","s":0.0123,"e":"dmg"}]}]},{"n":"CoreDevice/CandidateDDIs","c":[{"n":"watchOS_DDI.dmg","s":0.04,"e":"dmg"},{"n":"iOS_DDI.dmg","s":0.031,"e":"dmg"},{"n":"tvOS_DDI.dmg","s":0.0287,"e":"dmg"},{"n":"xrOS_DDI.dmg","s":0.0247,"e":"dmg"}]},{"n":"PrivateFrameworks","c":[{"n":"CoreSimulator.framework","s":0.0159,"e":"framework"},{"n":"CoreDevice.framework","s":0.0138,"e":"framework"},{"n":"CoreDeviceUtilities.framework","s":0.0039,"e":"framework"}]},{"n":"DeviceKit","c":[{"n":"Chrome","s":0.0051,"e":"none"}]}]},{"n":"Application Support","c":[{"n":"GarageBand","c":[{"n":"Learn to Play","c":[{"n":"Basic Lessons","c":[{"n":"Guitar Lesson 1.mwand","s":0.2931,"e":"mwand"},{"n":"Piano Lesson 1.mwand","s":0.2318,"e":"mwand"}]},{"n":".updates","s":0.0178,"e":"updates"}]},{"n":"Instrument Library/Sampler","c":[{"n":"Sampler Files","s":0.4094,"e":"none"}]}]},{"n":"Logic","c":[{"n":"EXS Factory Samples","c":[{"n":"Drum Kit Designer Consolidated","c":[{"n":"Drum Kit Designer","s":0.306,"e":"none"},{"n":"Drum Kit Designer Tambourine","s":0.0238,"e":"none"},{"n":"Drum Kit Designer Claps","s":0.02,"e":"none"},{"n":"Drum Kit Designer Shaker","s":0.0136,"e":"none"},{"n":"Drum Kit Designer Cowbell","s":0.0023,"e":"none"}]},{"n":"01 Acoustic Pianos","c":[{"n":"Steinway Piano_consolidated.caf","s":0.184,"e":"caf"}]},{"n":"07 Guitars","c":[{"n":"01 Electric Guitars","s":0.0364,"e":"none"},{"n":"02 Acoustic Guitars","s":0.0353,"e":"none"}]}]},{"n":"Alchemy Samples","c":[{"n":"Vocals","c":[{"n":"Solo Vocals","s":0.0493,"e":"none"},{"n":"Synth Vocals","s":0.014,"e":"none"},{"n":"Vocal FX And Noises","s":0.0027,"e":"none"}]},{"n":"Synth","c":[{"n":"Analog","s":0.0539,"e":"none"}]},{"n":"Bass","c":[{"n":"Digital Bass","s":0.0255,"e":"none"},{"n":"Analog Bass","s":0.016,"e":"none"},{"n":"Single Samples","s":0.0045,"e":"none"}]},{"n":"Pads","c":[{"n":"Digital","s":0.0274,"e":"none"},{"n":"Analog","s":0.0102,"e":"none"},{"n":"Custom","s":0.0039,"e":"none"}]},{"n":"Sound Effects","c":[{"n":"Ambience Nature","s":0.0055,"e":"none"},{"n":"Technology","s":0.0028,"e":"none"}]},{"n":"Organs","c":[{"n":"60s Transistor Organ","s":0.0084,"e":"none"}]}]},{"n":"Ultrabeat Samples","c":[{"n":"Drum Machine Designer","c":[{"n":"Big Room GB","s":0.0036,"e":"none"},{"n":"Pile Driver GB","s":0.0033,"e":"none"},{"n":"Trap Door GB","s":0.0031,"e":"none"},{"n":"Seismic GB","s":0.0028,"e":"none"},{"n":"Beat Machine GB","s":0.0024,"e":"none"}]},{"n":"Boutique 808","s":0.0043,"e":"none"},{"n":"Dub Smash","s":0.004,"e":"none"},{"n":"Boutique 78","c":[{"n":"GB_DX100_OrganChord.aif","s":0.0029,"e":"aif"}]},{"n":"Major Crush","s":0.0035,"e":"none"},{"n":"Electro Bump","s":0.0034,"e":"none"}]},{"n":"Plug-In Settings","c":[{"n":"Pedalboard","s":0.0046,"e":"none"}]}]},{"n":"Apple","c":[{"n":"Grapher/Examples","c":[{"n":"2D Examples","s":0.0025,"e":"none"}]},{"n":"BezelServices","s":0.0021,"e":"none"}]},{"n":"iLifeMediaBrowser","c":[{"n":"Plug-Ins","s":0.0034,"e":"none"}]}]},{"n":"Audio","c":[{"n":"Apple Loops/Apple","c":[{"n":"01 Hip Hop","s":0.171,"e":"none"},{"n":"13 Drummer","s":0.0492,"e":"none"},{"n":"02 Electro House","s":0.0477,"e":"none"},{"n":"07 Chillwave","s":0.0429,"e":"none"},{"n":"09 Disco Funk","s":0.041,"e":"none"},{"n":"10 Vintage Breaks","s":0.0377,"e":"none"}]},{"n":"Impulse Responses/Apple","c":[{"n":"01 Large Spaces","c":[{"n":"03 Plate Reverbs","s":0.0035,"e":"none"},{"n":"02 Halls","s":0.0032,"e":"none"}]},{"n":"03 Small Spaces","s":0.0026,"e":"none"}]}]},{"n":"Logs","c":[{"n":"DiagnosticReports","c":[{"n":"Retired","c":[{"n":"Analytics-2026-07-22-020005.0002.core_analytics","s":0.0153,"e":"core_analytics"},{"n":"Analytics-2026-07-21-020023.0002.core_analytics","s":0.014,"e":"core_analytics"},{"n":"Analytics-2026-07-20-020038.0002.core_analytics","s":0.0138,"e":"core_analytics"},{"n":"Analytics-2026-07-24-030008.000.core_analytics","s":0.0135,"e":"core_analytics"},{"n":"Analytics-2026-07-23-030028.000.core_analytics","s":0.0107,"e":"core_analytics"},{"n":"Analytics-2026-07-26-030001.0002.core_analytics","s":0.0095,"e":"core_analytics"}]},{"n":"TextEdit_2026-07-20-142353_munin.spin","s":0.0168,"e":"spin"},{"n":"QuickTime Player_2026-07-20-030720_munin.spin","s":0.0122,"e":"spin"},{"n":"ghostty_2026-07-21-043935_munin.spin","s":0.0111,"e":"spin"}]},{"n":"CrashReporter/CoreCapture","c":[{"n":"WiFi","s":0.0265,"e":"none"}]}]},{"n":"Updates/140-70284","c":[{"n":"SafariTechPreview.pkg","s":0.1355,"e":"pkg"}]},{"n":"SystemExtensions","c":[{"n":"325B6EA2-45C4-4DF9-85A4-60FE40EC7E90/com.surfshark.vpnclient.macos.direct.PacketTunnel-WireGuard.systemextension/Contents","c":[{"n":"MacOS","s":0.0523,"e":"none"},{"n":"Frameworks","s":0.0218,"e":"none"},{"n":"Resources","s":0.0046,"e":"none"}]},{"n":"C021DE32-B404-4DBD-9C7F-8375028CF6A7/io.tailscale.ipn.macsys.network-extension.systemextension/Contents","c":[{"n":"MacOS","s":0.0529,"e":"none"}]}]},{"n":"Apple","c":[{"n":"System/Library","c":[{"n":"CoreServices","c":[{"n":"XProtect.app","s":0.0131,"e":"app"},{"n":"MRT.app","s":0.0056,"e":"app"}]},{"n":"Receipts","c":[{"n":"com.apple.pkg.CLTools_SDK_macOS_NMOS.bom","s":0.0058,"e":"bom"},{"n":"com.apple.pkg.CLTools_SDK_macOS_LMOS.bom","s":0.0056,"e":"bom"}]},{"n":"PrivateFrameworks","c":[{"n":"MobileDevice.framework","s":0.009,"e":"framework"},{"n":"RemotePairing.framework","s":0.0028,"e":"framework"}]}]},{"n":"Library","c":[{"n":"Bundles","s":0.0021,"e":"none"}]}]},{"n":"Trial/v7/AssetStore/assets","c":[{"n":"d0","s":0.0256,"e":"none"},{"n":"6a","s":0.0091,"e":"none"},{"n":"65","s":0.0046,"e":"none"},{"n":"26","s":0.0037,"e":"none"},{"n":"a3","s":0.0025,"e":"none"}]},{"n":"Caches/com.apple.InferenceProviderService/TokenGenerationInference","c":[{"n":"vocab_cache_tokenizer_cf56e055df3908ec704d29685b3a6781.bin","s":0.0157,"e":"bin"},{"n":"vocab_cache_tokenizer_9bdb6fc77b453eab0f95169540338715.bin","s":0.0131,"e":"bin"},{"n":"vocab_cache_tokenizer_a0f392bdc3be25f48f2c3c83e2f3d145.bin","s":0.0075,"e":"bin"}]},{"n":"WebServer/share/httpd/manual","c":[{"n":"mod","s":0.0052,"e":"none"}]},{"n":"Documentation/License.lpdf/Contents","c":[{"n":"Resources","s":0.0038,"e":"none"}]},{"n":"Keychains","c":[{"n":"system-keychain-2.db-wal","s":0.0031,"e":"db-wal"}]}]},{"n":"System/Library","c":[{"n":"AssetsV2","c":[{"n":"com_apple_MobileAsset_iOSSimulatorRuntime","c":[{"n":"26c9174130fa5962f3e60f2a49963194dadbae4c.asset/AssetData","c":[{"n":"Restore","s":8.4943,"e":"none"}]},{"n":"7c5f8c6167dde76995389b472106f0fde204e050.asset/AssetData","c":[{"n":"Restore","s":8.4858,"e":"none"}]},{"n":"c060853b459625d7878fd533de79c966fb98d31b.asset/AssetData","c":[{"n":"Restore","s":8.485,"e":"none"}]},{"n":"4fd4a743c9e75a02f7e4588a26a0c4872914f9b6.asset/AssetData","c":[{"n":"Restore","s":8.3583,"e":"none"}]}]},{"n":"com_apple_MobileAsset_MacSoftwareUpdate/5e56884d593e1e643fdb94e6f8b593b4e4170fe4.asset/AssetData","c":[{"n":"boot","s":2.3296,"e":"none"},{"n":"payloadv2","s":0.3934,"e":"none"},{"n":"Restore","s":0.22,"e":"none"},{"n":"usr","s":0.2139,"e":"none"},{"n":"post.bom","s":0.0497,"e":"bom"}]},{"n":"com_apple_MobileAsset_UAF_Siri_Understanding/purpose_auto","c":[{"n":"e2a6ceeefbae981beaad59a8d625d80751a110bb.asset","c":[{"n":"AssetData","s":0.682,"e":"none"},{"n":".AssetData","s":0.6481,"e":"assetdata"}]},{"n":"c1ca8ee8c1a12fe62ea678495bb44e0763a4284b.asset","c":[{"n":"AssetData","s":0.5499,"e":"none"}]},{"n":"372b0ac0d516fb5a845e6e20fb5017b1397354e6.asset","c":[{"n":"AssetData","s":0.3493,"e":"none"}]},{"n":"dc180091b90fc5e70c67c43c3c4754f825175b6e.asset","c":[{"n":"AssetData","s":0.04,"e":"none"},{"n":".AssetData","s":0.035,"e":"assetdata"}]},{"n":"7a27218abf84adfa99c6f832ee88212e8269fcb8.asset","c":[{"n":"AssetData","s":0.0211,"e":"none"},{"n":".AssetData","s":0.0156,"e":"assetdata"}]},{"n":"8cc01814f6a2148f862e678fa4275c55c6581b2d.asset","c":[{"n":"AssetData","s":0.035,"e":"none"}]}]},{"n":"PreinstalledAssetsV2","c":[{"n":"InstallWithOs","c":[{"n":"com_apple_MobileAsset_DictionaryServices_dictionaryOSX","c":[{"n":"fad15f718fb0b4c75a5fd7dc0477bf7629816562.asset","s":0.0845,"e":"asset"},{"n":"5eced831f7ed623d7a623637768d077df1e15243.asset","s":0.0806,"e":"asset"},{"n":"68e6295da52ca80c86dd33f0241ba4b379a93196.asset","s":0.0801,"e":"asset"},{"n":"efae862c620a7b530de4ac764b6e39b75c7bca15.asset","s":0.0542,"e":"asset"},{"n":"289294c26636c6ec2b65564ac2091b036a52bbb3.asset","s":0.0416,"e":"asset"}]},{"n":"com_apple_MobileAsset_Font7","c":[{"n":"11a76f9d5fd800227415e64d90ddc450c8acac3e.asset","s":0.0827,"e":"asset"},{"n":"dad866cc4d34849677c7073ad9899f251bfcc1de.asset","s":0.0719,"e":"asset"},{"n":"ef9c121249635b32dd48da4e2e7030efd3e48327.asset","s":0.0696,"e":"asset"},{"n":"c8c242f5f5783386130f8a30fdf729841c9643e7.asset","s":0.0604,"e":"asset"},{"n":"fd6b9a537c66b232ac24998a04d8e977c6ceefe2.asset","s":0.0563,"e":"asset"}]}]},{"n":"RequiredByOs","c":[{"n":"com_apple_MobileAsset_VoiceTriggerAssetsASMac","c":[{"n":"520590da5e752be38a2f38b1b58786d9eaf28fb9.asset","s":0.0194,"e":"asset"},{"n":"e2a588fac7e024961dc85330c42befd86c6cf8c9.asset","s":0.0164,"e":"asset"},{"n":"f1b6a9afb1784e5927d50432ca13bb92fc9f22ee.asset","s":0.0116,"e":"asset"},{"n":"4116b18f28ed412cb0326fb3bbbfd2937a01559e.asset","s":0.0099,"e":"asset"},{"n":"352a0a966dfce018bf59e85d9dc24baacf1438a2.asset","s":0.0039,"e":"asset"}]},{"n":"com_apple_MobileAsset_VoiceTriggerAssets","c":[{"n":"fc8b5a5c25201d18370b9368e7a8c978ac2c065e.asset","s":0.0039,"e":"asset"},{"n":"eacc16db28746713dd0595e6b6e4c7ad19dc9779.asset","s":0.0039,"e":"asset"},{"n":"755c879dd044aaf24dec037e0d9621b4f961e9ed.asset","s":0.0039,"e":"asset"},{"n":"714b323e18b784804c3f28d3310ad672871a567c.asset","s":0.0039,"e":"asset"},{"n":"5ed62528dec4db1f285a865ec4d8c31014200f6d.asset","s":0.0039,"e":"asset"}]},{"n":"com_apple_MobileAsset_VoiceTriggerAssetsStudioDisplay","c":[{"n":"604acb022f2441e8fe0bec11b0f0d03c01a1f334.asset","s":0.0116,"e":"asset"},{"n":"38cffe926590d0761b9870d9321d36e08cc4fb2d.asset","s":0.0087,"e":"asset"},{"n":"5bdcdd33041f9c430aef147e2859213841b31133.asset","s":0.0038,"e":"asset"},{"n":"d5bebef0cd7d5e59b9ffd61c9e28e3a2a23ccf44.asset","s":0.0038,"e":"asset"},{"n":"4eea56458f200ed6da91e6e5bb9a4da157a76954.asset","s":0.0029,"e":"asset"}]},{"n":"com_apple_MobileAsset_SpeakerRecognitionASMacAssets","c":[{"n":"433fe43e42302f6e0d954cad6be6b76be45f3939.asset","s":0.0043,"e":"asset"}]}]}]},{"n":"com_apple_MobileAsset_AppleDeveloperDocumentation/b491df04554b92feb6371d6ab82f9b8ba60c2017.asset/AssetData","c":[{"n":"documentation-db","s":1.0805,"e":"none"},{"n":"documentation-cache","s":0.4153,"e":"none"}]},{"n":"com_apple_MobileAsset_UAF_Photos_SpatialPhotosRelive/purpose_auto","c":[{"n":"a5b613f423a7110b3feccf88e6a9e960445c3f93.asset","c":[{"n":"AssetData","s":0.4071,"e":"none"},{"n":".AssetData","s":0.3869,"e":"assetdata"}]},{"n":"6a09030bc0cc90be08d587cad0cc40a38930b970.asset","c":[{"n":"AssetData","s":0.0295,"e":"none"},{"n":".AssetData","s":0.0244,"e":"assetdata"}]}]},{"n":"com_apple_MobileAsset_UAF_LinguisticData/purpose_auto","c":[{"n":"0e5f7f192ac494a066fb04855c7935318b8b2459.asset","c":[{"n":"AssetData","s":0.1478,"e":"none"}]},{"n":"4ab3e517e0becf413a97155a0bc36ee3ed0707a3.asset","c":[{"n":"AssetData","s":0.1304,"e":"none"}]},{"n":"35edf2cc1dab31e650a6bb62c6f41885cb1a7ea7.asset","c":[{"n":"AssetData","s":0.1159,"e":"none"}]},{"n":"efa43c03cc87afd2ad382b374916a4770b7dfa1b.asset","c":[{"n":"AssetData","s":0.107,"e":"none"}]},{"n":"59540db50fc17fc664515285bc7a145d59e313ee.asset","c":[{"n":"AssetData","s":0.0918,"e":"none"}]},{"n":"5b28ee94e69a2bac9c42c0c56d56860c738698d8.asset","c":[{"n":"AssetData","s":0.0762,"e":"none"}]}]},{"n":"com_apple_MobileAsset_UAF_Photos_MagicCleanup/purpose_auto","c":[{"n":"3fa5d4697596355783dddec002dad9c041c812e6.asset","c":[{"n":"AssetData","s":0.2582,"e":"none"}]},{"n":"09e34ea4bc470de82859b1670496d95117cecf6e.asset","c":[{"n":"AssetData","s":0.2582,"e":"none"}]}]},{"n":"com_apple_MobileAsset_UAF_Siri_TextToSpeech/purpose_auto","c":[{"n":"9c640bc6207cdb1c0ad5fc7641866141b60236ab.asset","c":[{"n":"AssetData","s":0.2976,"e":"none"}]},{"n":"4ed397904f029b6eb01f1dbd4a661f0026525d70.asset","c":[{"n":"AssetData","s":0.0927,"e":"none"}]},{"n":"f06564b027302d03bf75db2370493909677cee55.asset","c":[{"n":"AssetData","s":0.0887,"e":"none"}]},{"n":"5639fcbefa2012a9785137e76c54ac90f9183b32.asset","c":[{"n":"AssetData","s":0.0047,"e":"none"}]},{"n":"844dbba0c35b50b346442fcd493096af9e07d7fb.asset","c":[{"n":"AssetData","s":0.0021,"e":"none"}]}]},{"n":"com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto","c":[{"n":"971265b62793d7941762a4aed871a2aa6310c020.asset","c":[{"n":"AssetData","s":0.1889,"e":"none"},{"n":".AssetData","s":0.1764,"e":"assetdata"}]},{"n":"a5575916762c87673fb9c7f08ac38813a70e77c3.asset","c":[{"n":"AssetData","s":0.0166,"e":"none"}]}]}]},{"n":"PrivateFrameworks","c":[{"n":"MediaAnalysis.framework","s":0.2591,"e":"framework"},{"n":"GPUCompiler.framework","s":0.2119,"e":"framework"},{"n":"EmbeddingCore.framework","s":0.181,"e":"framework"},{"n":"VisualLookUp.framework","s":0.1463,"e":"framework"},{"n":"CoreEmoji.framework","s":0.14,"e":"framework"},{"n":"CVNLP.framework","s":0.1104,"e":"framework"},{"n":"CoreSceneUnderstanding.framework","s":0.1038,"e":"framework"},{"n":"VoiceServices.framework","s":0.093,"e":"framework"},{"n":"TextToSpeechMauiSupport.framework","s":0.088,"e":"framework"},{"n":"VisionCore.framework","s":0.0782,"e":"framework"}]},{"n":"Frameworks","c":[{"n":"Vision.framework","s":0.1617,"e":"framework"},{"n":"Ruby.framework","s":0.0884,"e":"framework"},{"n":"MetalPerformanceShaders.framework","s":0.0779,"e":"framework"},{"n":"MetalPerformancePrimitives.framework","s":0.0562,"e":"framework"},{"n":"CreateML.framework","s":0.0529,"e":"framework"},{"n":"CoreImage.framework","s":0.0502,"e":"framework"},{"n":"QuartzCore.framework","s":0.0488,"e":"framework"},{"n":"PHASE.framework","s":0.0324,"e":"framework"},{"n":"CreateMLComponents.framework","s":0.0313,"e":"framework"},{"n":"SoundAnalysis.framework","s":0.0271,"e":"framework"}]},{"n":"LinguisticData","c":[{"n":"RequiredAssets_zh-Hans.bundle","s":0.0894,"e":"bundle"},{"n":"RequiredAssets_en.bundle","s":0.0887,"e":"bundle"},{"n":"RequiredAssets_zh-Hant.bundle","s":0.0878,"e":"bundle"},{"n":"RequiredAssets_yue-Hant.bundle","s":0.059,"e":"bundle"},{"n":"RequiredAssets_ja.bundle","s":0.0543,"e":"bundle"},{"n":"RequiredAssets_ar.bundle","s":0.0295,"e":"bundle"},{"n":"RequiredAssets_gu.bundle","s":0.0273,"e":"bundle"},{"n":"RequiredAssets_pl.bundle","s":0.0232,"e":"bundle"},{"n":"RequiredAssets_cs.bundle","s":0.0223,"e":"bundle"},{"n":"RequiredAssets_th.bundle","s":0.02,"e":"bundle"}]},{"n":"Templates/Data","c":[{"n":"System/Library","c":[{"n":"AssetsV2","s":0.3248,"e":"none"},{"n":"CoreServices","s":0.3079,"e":"none"}]},{"n":"Library","c":[{"n":"Application Support","c":[{"n":"Apple","s":0.0981,"e":"none"},{"n":"iLifeMediaBrowser","s":0.0034,"e":"none"}]},{"n":"Apple","c":[{"n":"System","s":0.0328,"e":"none"},{"n":"Library","s":0.0021,"e":"none"}]},{"n":"WebServer","c":[{"n":"share","s":0.0109,"e":"none"}]},{"n":"Documentation","c":[{"n":"License.lpdf","s":0.0038,"e":"lpdf"}]},{"n":"User Pictures","s":0.0045,"e":"none"}]},{"n":"private/var","c":[{"n":"db","s":0.0119,"e":"none"}]},{"n":"usr/libexec","c":[{"n":"cups","s":0.0022,"e":"none"}]}]},{"n":"CoreServices","c":[{"n":"CoreTypes.bundle","s":0.2031,"e":"bundle"},{"n":"RawCamera.bundle","s":0.0976,"e":"bundle"},{"n":"IconsetResources.bundle","s":0.0508,"e":"bundle"},{"n":"BluetoothUIService.app","s":0.0446,"e":"app"},{"n":"Finder.app","s":0.0312,"e":"app"},{"n":"SystemAppearance.bundle","s":0.0263,"e":"bundle"},{"n":"Applications","c":[{"n":"Feedback Assistant.app","s":0.0038,"e":"app"},{"n":"Desk View.app","s":0.0021,"e":"app"}]},{"n":"RawCameraSupport.bundle","s":0.0116,"e":"bundle"},{"n":"Setup Assistant.app","s":0.0098,"e":"app"},{"n":"ControlCenter.app","s":0.0088,"e":"app"}]},{"n":"Desktop Pictures","c":[{"n":".wallpapers","c":[{"n":"Sonoma","c":[{"n":"Sonoma Graphic Light Landscape.mov","s":0.0824,"e":"mov"},{"n":"Sonoma Graphic Dark Landscape.mov","s":0.0719,"e":"mov"},{"n":"Sonoma Graphic Light Portrait.mov","s":0.0689,"e":"mov"},{"n":"Sonoma Graphic Dark Portrait.mov","s":0.056,"e":"mov"}]},{"n":"macOS Beta","c":[{"n":"macOS Beta.mov","s":0.0895,"e":"mov"}]},{"n":"Sonoma Horizon","c":[{"n":"Sonoma Horizon.heic","s":0.0051,"e":"heic"}]}]},{"n":"iMac Blue.heic","s":0.0263,"e":"heic"},{"n":"iMac Purple.heic","s":0.0255,"e":"heic"},{"n":"iMac Pink.heic","s":0.0251,"e":"heic"},{"n":"iMac Orange.heic","s":0.0247,"e":"heic"},{"n":"iMac Green.heic","s":0.0241,"e":"heic"},{"n":"iMac Silver.heic","s":0.0227,"e":"heic"},{"n":"Radial Sky Blue.heic","s":0.0217,"e":"heic"},{"n":"iMac Yellow.heic","s":0.0208,"e":"heic"},{"n":"Sonoma.heic","s":0.0204,"e":"heic"}]},{"n":"Fonts","c":[{"n":"Apple Color Emoji.ttc","s":0.1921,"e":"ttc"},{"n":"Supplemental","c":[{"n":"Songti.ttc","s":0.0526,"e":"ttc"},{"n":"Arial Unicode.ttf","s":0.0175,"e":"ttf"},{"n":"AppleMyungjo.ttf","s":0.0089,"e":"ttf"},{"n":"AppleGothic.ttf","s":0.0075,"e":"ttf"},{"n":"Seravek.ttc","s":0.0026,"e":"ttc"}]},{"n":"AppleSDGothicNeo.ttc","s":0.0349,"e":"ttc"},{"n":"STHeiti Light.ttc","s":0.0343,"e":"ttc"},{"n":"STHeiti Medium.ttc","s":0.0335,"e":"ttc"},{"n":"Hiragino Sans GB.ttc","s":0.0235,"e":"ttc"},{"n":"\u30d2\u30e9\u30ad\u3099\u30ce\u660e\u671d ProN.ttc","s":0.0173,"e":"ttc"},{"n":"DecoTypeNastaleeqUrdu.ttc","s":0.0154,"e":"ttc"},{"n":"AquaKana.ttc","s":0.0134,"e":"ttc"},{"n":"\u30d2\u30e9\u30ad\u3099\u30ce\u4e38\u30b3\u3099 ProN W4.ttc","s":0.0075,"e":"ttc"}]},{"n":"Extensions","c":[{"n":"AppleAfterburner.kext","s":0.09,"e":"kext"},{"n":"AGXMetalG15X_M1.bundle","s":0.038,"e":"bundle"},{"n":"IOSCSIArchitectureModelFamily.kext","s":0.0201,"e":"kext"},{"n":"AGXMetalG15X_M2.bundle","s":0.0182,"e":"bundle"},{"n":"AGXMetalG17X.bundle","s":0.0179,"e":"bundle"},{"n":"AGXMetalG17G.bundle","s":0.0178,"e":"bundle"},{"n":"AGXMetalG16X.bundle","s":0.0174,"e":"bundle"},{"n":"AGXMetalG16G_B0.bundle","s":0.0174,"e":"bundle"},{"n":"AGXMetalG17P.bundle","s":0.0174,"e":"bundle"},{"n":"AGXMetalG15G_C0.bundle","s":0.014,"e":"bundle"}]},{"n":"ExtensionKit/Extensions","c":[{"n":"TrackpadExtension.appex/Contents","c":[{"n":"Resources","s":0.0566,"e":"none"}]},{"n":"NeptuneOneWallpaper.appex/Contents","c":[{"n":"Resources","s":0.0486,"e":"none"}]},{"n":"Ventura.appex/Contents","c":[{"n":"Resources","s":0.0227,"e":"none"}]},{"n":"MouseExtension.appex/Contents","c":[{"n":"Resources","s":0.0211,"e":"none"}]},{"n":"AccessibilitySettingsExtension.appex/Contents","c":[{"n":"Resources","s":0.0051,"e":"none"},{"n":"MacOS","s":0.0042,"e":"none"}]},{"n":"WallpaperAerialsExtension.appex/Contents","c":[{"n":"Resources","s":0.0087,"e":"none"}]},{"n":"Monterey.appex/Contents","c":[{"n":"Resources","s":0.0075,"e":"none"}]},{"n":"Network.appex/Contents","c":[{"n":"Resources","s":0.0037,"e":"none"}]}]},{"n":"Isp/afpp","c":[{"n":"j415","c":[{"n":"ispane.afpp","s":0.0118,"e":"afpp"}]},{"n":"j413","c":[{"n":"ispane.afpp","s":0.0118,"e":"afpp"}]},{"n":"j493","c":[{"n":"ispane.afpp","s":0.0118,"e":"afpp"}]},{"n":"j714c","c":[{"n":"ispane.afpp","s":0.0091,"e":"afpp"}]},{"n":"j716s","c":[{"n":"ispane.afpp","s":0.0091,"e":"afpp"}]},{"n":"j714s","c":[{"n":"ispane.afpp","s":0.0091,"e":"afpp"}]},{"n":"j704","c":[{"n":"ispane.afpp","s":0.0091,"e":"afpp"}]},{"n":"j716c","c":[{"n":"ispane.afpp","s":0.0091,"e":"afpp"}]}]},{"n":"Assistant","c":[{"n":"FlowDelegatePlugins","c":[{"n":"SocialConversationFlowDelegatePlugin.bundle","s":0.0804,"e":"bundle"},{"n":"PhoneCallFlowDelegatePlugin.bundle","s":0.0331,"e":"bundle"},{"n":"AudioFlowDelegatePlugin.bundle","s":0.031,"e":"bundle"},{"n":"TimerFlowDelegatePlugin.bundle","s":0.019,"e":"bundle"},{"n":"WellnessFlowPlugin.bundle","s":0.0151,"e":"bundle"},{"n":"SiriLinkFlowPlugin.bundle","s":0.0147,"e":"bundle"},{"n":"EmergencyFlowPlugin.bundle","s":0.0115,"e":"bundle"},{"n":"AlarmFlowPlugin.bundle","s":0.0113,"e":"bundle"}]},{"n":"UIPlugins","s":0.006,"e":"none"}]}]},{"n":"opt/homebrew","c":[{"n":"Cellar","c":[{"n":"llvm/22.1.8","c":[{"n":"lib","c":[{"n":"libLLVM.dylib","s":0.1636,"e":"dylib"},{"n":"libMLIR.dylib","s":0.1558,"e":"dylib"},{"n":"clang","s":0.1133,"e":"none"},{"n":"libclang-cpp.dylib","s":0.0688,"e":"dylib"},{"n":"libclang.dylib","s":0.0403,"e":"dylib"}]},{"n":"bin","c":[{"n":"mlir-transform-opt","s":0.101,"e":"none"},{"n":"llvm-exegesis","s":0.0669,"e":"none"},{"n":"clangd","s":0.0182,"e":"none"},{"n":"clang-tidy","s":0.0124,"e":"none"},{"n":"obj2yaml","s":0.0082,"e":"none"}]},{"n":"include","c":[{"n":"mlir","s":0.1131,"e":"none"},{"n":"llvm","s":0.0405,"e":"none"},{"n":"clang","s":0.0333,"e":"none"},{"n":"c++","s":0.0163,"e":"none"},{"n":"lldb","s":0.0049,"e":"none"}]}]},{"n":"gcc/16.1.0","c":[{"n":"libexec","c":[{"n":"gcc","s":0.3081,"e":"none"}]},{"n":"lib","c":[{"n":"gcc","s":0.1063,"e":"none"}]},{"n":"bin","c":[{"n":"lto-dump-16","s":0.0476,"e":"none"},{"n":"gfortran-16","s":0.003,"e":"none"},{"n":"aarch64-apple-darwin25-gfortran-16","s":0.003,"e":"none"},{"n":"aarch64-apple-darwin25-c++-16","s":0.003,"e":"none"},{"n":"c++-16","s":0.003,"e":"none"}]},{"n":"include","c":[{"n":"c++","s":0.0161,"e":"none"}]},{"n":"share","c":[{"n":"man","s":0.0036,"e":"none"}]}]},{"n":"rust/1.97.1","c":[{"n":"lib","c":[{"n":"rustlib","s":0.2743,"e":"none"},{"n":"librustc_driver-1aebdb596416d2c8.dylib","s":0.107,"e":"dylib"}]},{"n":"bin","c":[{"n":"cargo","s":0.0313,"e":"none"},{"n":"clippy-driver","s":0.0192,"e":"none"},{"n":"rustdoc","s":0.0145,"e":"none"},{"n":"rustfmt","s":0.0059,"e":"none"}]}]},{"n":"openjdk/26.0.1/libexec","c":[{"n":"openjdk.jdk","s":0.3992,"e":"jdk"}]},{"n":"opencode/1.18.0/libexec","c":[{"n":"lib","s":0.275,"e":"none"}]},{"n":"go/1.26.5/libexec","c":[{"n":"src","s":0.1573,"e":"none"},{"n":"pkg","s":0.0646,"e":"none"},{"n":"test","s":0.0196,"e":"none"},{"n":"bin","s":0.0174,"e":"none"},{"n":"api","s":0.009,"e":"none"}]},{"n":"deno/2.9.4/bin","c":[{"n":"deno","s":0.1558,"e":"none"}]},{"n":"scipy/1.18.0/lib","c":[{"n":"python3.14","s":0.0705,"e":"14"},{"n":"python3.13","s":0.0674,"e":"13"}]},{"n":"omp/17.1.3/bin","c":[{"n":"omp","s":0.1256,"e":"none"}]},{"n":"trufflehog/3.96.0/bin","c":[{"n":"trufflehog","s":0.1163,"e":"none"}]}]},{"n":"lib","c":[{"n":"node_modules","c":[{"n":"hyperframes","c":[{"n":"node_modules","c":[{"n":"onnxruntime-node","s":0.2664,"e":"none"},{"n":"@img","s":0.0165,"e":"none"},{"n":"chromium-bidi","s":0.0148,"e":"none"},{"n":"@google","s":0.0145,"e":"none"},{"n":"puppeteer-core","s":0.0132,"e":"none"}]},{"n":"dist","c":[{"n":"cli.js","s":0.0065,"e":"js"},{"n":"studio","s":0.0022,"e":"none"}]}]},{"n":"@openai/codex","c":[{"n":"node_modules","s":0.3223,"e":"none"}]},{"n":"wrangler","c":[{"n":"node_modules","c":[{"n":"workerd","s":0.1167,"e":"none"},{"n":"@cloudflare","s":0.1121,"e":"none"},{"n":"miniflare","s":0.0199,"e":"none"},{"n":"@img","s":0.0165,"e":"none"},{"n":"esbuild","s":0.0105,"e":"none"}]},{"n":"wrangler-dist","c":[{"n":"cli.js","s":0.0129,"e":"js"},{"n":"metafile-cjs.json","s":0.0034,"e":"json"}]}]},{"n":"pnpm/dist","c":[{"n":"node_modules","s":0.0118,"e":"none"},{"n":"pnpm.cjs","s":0.0086,"e":"cjs"}]},{"n":"@fission-ai/openspec","c":[{"n":"node_modules","s":0.0161,"e":"none"},{"n":"dist","s":0.0022,"e":"none"}]},{"n":"npm","c":[{"n":"node_modules","c":[{"n":"node-gyp","s":0.0029,"e":"none"}]},{"n":"docs","s":0.0023,"e":"none"}]}]},{"n":"python3.14/site-packages","c":[{"n":"pip","c":[{"n":"_vendor","s":0.0034,"e":"none"}]},{"n":"numpy","s":0.0022,"e":"none"}]}]},{"n":"share","c":[{"n":"google-cloud-sdk","c":[{"n":"lib","c":[{"n":"googlecloudsdk","c":[{"n":"generated_clients","s":0.2412,"e":"none"},{"n":"command_lib","s":0.0384,"e":"none"},{"n":"api_lib","s":0.0235,"e":"none"},{"n":"core","s":0.0053,"e":"none"},{"n":"schemas","s":0.005,"e":"none"}]},{"n":"third_party","c":[{"n":"botocore","s":0.0951,"e":"none"},{"n":"kubernetes","s":0.0245,"e":"none"},{"n":"google","s":0.0115,"e":"none"},{"n":"pygments","s":0.0091,"e":"none"},{"n":"pytz","s":0.0028,"e":"none"}]},{"n":"surface","c":[{"n":"compute","s":0.0143,"e":"none"},{"n":"container","s":0.0055,"e":"none"},{"n":"network_security","s":0.0022,"e":"none"}]}]},{"n":"platform","c":[{"n":"gsutil","c":[{"n":"third_party","s":0.0549,"e":"none"},{"n":"gslib","s":0.0261,"e":"none"}]},{"n":"bq","c":[{"n":"third_party","s":0.0135,"e":"none"}]}]},{"n":"data/cli","c":[{"n":"gcloud_completions.py","s":0.007,"e":"py"}]},{"n":"bin","c":[{"n":"gcloud-crc32c","s":0.0027,"e":"none"}]}]},{"n":"android-commandlinetools/cmdline-tools/latest","c":[{"n":"lib","s":0.1735,"e":"none"}]}]},{"n":".git/objects","c":[{"n":"pack","c":[{"n":"pack-9d37e82d422acf9df5d1dd94fb856263dcc103dd.pack","s":0.1126,"e":"pack"},{"n":"multi-pack-index","s":0.0098,"e":"none"},{"n":"pack-9d37e82d422acf9df5d1dd94fb856263dcc103dd.idx","s":0.0092,"e":"idx"},{"n":"pack-fe1fce46a51a55c88ba8a2c11124644c873bff40.pack","s":0.0077,"e":"pack"}]},{"n":"info/commit-graphs","c":[{"n":"graph-32fc5d230f7494c7879577fdd67047f11aa27d92.graph","s":0.003,"e":"graph"}]}]},{"n":"Library/Homebrew","c":[{"n":"vendor","c":[{"n":"portable-ruby","c":[{"n":"4.0.5_1","s":0.0388,"e":"5_1"},{"n":"4.0.6","s":0.0387,"e":"6"}]},{"n":"bundle","c":[{"n":"ruby","s":0.0033,"e":"none"}]}]},{"n":"test","s":0.0068,"e":"none"},{"n":"sorbet/rbi","c":[{"n":"gems","s":0.0022,"e":"none"}]}]},{"n":"Caskroom","c":[{"n":"mitmproxy/12.2.3","c":[{"n":"mitmproxy.app","s":0.0913,"e":"app"}]},{"n":"iina/1.4.4","c":[{"n":".background.tiff","s":0.0039,"e":"tiff"}]}]},{"n":"var/cache/fontconfig","c":[{"n":"b0a71e6bf6a8a1a908413a823d76e21f-le64.cache-12","s":0.005,"e":"cache-12"},{"n":"b0a71e6bf6a8a1a908413a823d76e21f-le64.cache-11","s":0.005,"e":"cache-11"},{"n":"b0a71e6bf6a8a1a908413a823d76e21f-le64.cache-9","s":0.0049,"e":"cache-9"}]},{"n":"bin","c":[{"n":"things","s":0.0112,"e":"none"}]}]}]};
 
@@ -683,7 +683,7 @@ function dirColor(n, extMap){
   return best ? mix(base, hexRgb(extMap.get(best)||FALLBACK), .55) : base;
 }
 
-/* ————— squarified treemap (Bruls et al.) ————— */
+/* ----- squarified treemap (Bruls et al.) ----- */
 function squarify(items, x, y, w, h, out){
   if (!items.length || w<=1 || h<=1) return;
   const total = items.reduce((s,i)=>s+i._sz,0);
@@ -720,7 +720,7 @@ function worstRatio(row,rowArea,side){
   return worst;
 }
 
-/* ————— treemap widget (light chrome) ————— */
+/* ----- treemap widget (light chrome) ----- */
 function makeTreemap(cfg){
   const canvas = cfg.canvas, ctx = canvas.getContext("2d");
   const tip = cfg.tip;
@@ -850,7 +850,7 @@ function makeTreemap(cfg){
     return s+"…";
   }
 
-  /* ————— interaction ————— */
+  /* ----- interaction ----- */
   function hitLeaf(px,py){
     let best=null, bestA=Infinity;
     for (const e of entries){
@@ -998,7 +998,7 @@ function makeTreemap(cfg){
   requestAnimationFrame(frame);
 }
 
-/* ————— terminal typing ————— */
+/* ----- terminal typing ----- */
 function terminal(){
   const el = $("#termOut");
   const cmd = "dirwiz-cli scan /Applications";
@@ -1060,7 +1060,7 @@ function terminal(){
   } else run();
 }
 
-/* ————— scroll reveals ————— */
+/* ----- scroll reveals ----- */
 function reveals(){
   const els = document.querySelectorAll(".rv");
   if (RM || !("IntersectionObserver" in window)){ els.forEach(e=>e.classList.add("in")); return }
@@ -1070,14 +1070,14 @@ function reveals(){
   els.forEach(e=>io.observe(e));
 }
 
-/* ————— nav scroll state ————— */
+/* ----- nav scroll state ----- */
 function navState(){
   const nav = $("#nav");
   const upd = ()=> nav.classList.toggle("scrolled", scrollY > 12);
   addEventListener("scroll", upd, {passive:true}); upd();
 }
 
-/* ————— boot ————— */
+/* ----- boot ----- */
 const boot = [
   ["reveals", reveals],
   ["nav", navState],

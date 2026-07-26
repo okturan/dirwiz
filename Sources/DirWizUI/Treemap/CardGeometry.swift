@@ -2,7 +2,7 @@ import Foundation
 
 /// How the treemap paints its rectangles.
 ///
-/// Both styles consume the SAME `SquarifyLayout` output — this only changes painting, never
+/// Both styles consume the SAME `SquarifyLayout` output - this only changes painting, never
 /// geometry, so zoom, breadcrumbs and the spatial index keep working off one set of rects.
 public enum TreemapRenderStyle: String, CaseIterable, Sendable {
     /// Wijk/van de Wetering cushions: hierarchy is conveyed by *lighting* (ridges baked
@@ -24,7 +24,7 @@ public enum TreemapRenderStyle: String, CaseIterable, Sendable {
 ///
 /// The point is progressive degradation. A rect can't show rounded corners and a gap below
 /// roughly `2 × (radius + gap)`, so instead of a hard cutoff where small rects vanish into
-/// padding, both values scale down and reach zero — a shrinking rect loses its rounding,
+/// padding, both values scale down and reach zero - a shrinking rect loses its rounding,
 /// then its gap, then renders as plain fill. It never becomes pure padding.
 public enum CardGeometry {
     public static let maxRadius: Float = 6
@@ -72,7 +72,7 @@ public enum CardGeometry {
     /// The region a container's children are remapped into: its own rect, minus the
     /// padding on every side, minus a header strip on top when one is legible.
     ///
-    /// Returns nil when the container is too small to give up anything — the children then
+    /// Returns nil when the container is too small to give up anything - the children then
     /// fill it edge to edge exactly as they do in cushion style. That is the degradation
     /// floor: nesting decoration is the first thing sacrificed, never the child itself.
     public static func innerRect(
@@ -93,7 +93,7 @@ public enum CardGeometry {
 ///
 /// Card style spends pixels per nesting level, so past some node count it can only produce
 /// sub-pixel slivers. Rather than draw a lie, it either aggregates the tail or hands the
-/// view back to cushion rendering — and the UI says which, matching the repo's existing
+/// view back to cushion rendering - and the UI says which, matching the repo's existing
 /// habit of surfacing the reason instead of silently degrading.
 public enum CardBudget {
     /// Above this, card style cannot draw individual nodes legibly at typical viewport sizes.
@@ -106,7 +106,7 @@ public enum CardBudget {
         case drawAll
         /// Draw the largest `limit` nodes; aggregate the rest per parent, and say so.
         case aggregate(limit: Int)
-        /// Too dense for cards to be honest — render this view as cushions instead.
+        /// Too dense for cards to be honest - render this view as cushions instead.
         case fallbackToCushion
     }
 
@@ -125,7 +125,7 @@ public enum CardBudget {
 /// layout always emits a parent before its children, so one forward pass suffices.
 ///
 /// This is a DRAWING transform. It must never be fed back into `SquarifyLayout` or into
-/// `SpatialGrid` — hit testing stays on untransformed layout rects, or clicks near a card's
+/// `SpatialGrid` - hit testing stays on untransformed layout rects, or clicks near a card's
 /// edge would land on the wrong node.
 public enum CardNesting {
     public struct Item: Sendable, Equatable {

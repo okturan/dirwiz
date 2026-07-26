@@ -81,7 +81,7 @@ public struct TreeActions: Sendable {
 
     /// Move a single filesystem item to Trash. Uses compiler-managed writeback
     /// for the `resultingItemURL` out-param rather than a hand-built
-    /// AutoreleasingUnsafeMutablePointer — the manual pointer construction
+    /// AutoreleasingUnsafeMutablePointer - the manual pointer construction
     /// over-released at autorelease-pool pop when called from an async context.
     private func performTrash(path: String) throws -> URL? {
         var trashedURL: NSURL?
@@ -134,8 +134,8 @@ public struct TreeActions: Sendable {
     /// when no unambiguous keep-file can be determined; callers must treat `[]` as
     /// "do nothing". This function fails closed: it never guesses a keep-file to
     /// nominate the rest for deletion. Fail-closed cases are (1) any group member
-    /// that no longer resolves to a node in the current tree — stale paths mean the
-    /// scan no longer reflects reality — (2) `.keepOldest` when no member has a known
+    /// that no longer resolves to a node in the current tree - stale paths mean the
+    /// scan no longer reflects reality - (2) `.keepOldest` when no member has a known
     /// (non-zero) modified date, and (3) `.keepInDirectory` when `preferredDirectory`
     /// is nil or no member's path has that prefix.
     public func applyPreset(
@@ -172,7 +172,7 @@ public struct TreeActions: Sendable {
             return PathInfo(path: path, nodeIndex: idx, modifiedDate: date, allocatedSize: size)
         }
 
-        // A path that no longer resolves means the scan is stale — fail closed rather
+        // A path that no longer resolves means the scan is stale - fail closed rather
         // than nominate anything for deletion from an out-of-date view of the tree.
         guard infos.allSatisfy({ $0.nodeIndex != nil }) else { return [] }
 

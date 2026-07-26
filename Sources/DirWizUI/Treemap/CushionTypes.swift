@@ -31,9 +31,9 @@ struct CushionUniforms {
 /// CushionUniforms: SIMD2 + float + pad + SIMD4 + 2×int32 + 2×float pad = 48 bytes.
 func verifyCushionLayouts() {
     assert(MemoryLayout<CushionInstance>.stride == 48,
-           "CushionInstance stride is \(MemoryLayout<CushionInstance>.stride), expected 48 — update Metal shader struct")
+           "CushionInstance stride is \(MemoryLayout<CushionInstance>.stride), expected 48 - update Metal shader struct")
     assert(MemoryLayout<CushionUniforms>.stride == 48,
-           "CushionUniforms stride is \(MemoryLayout<CushionUniforms>.stride), expected 48 — update Metal shader struct")
+           "CushionUniforms stride is \(MemoryLayout<CushionUniforms>.stride), expected 48 - update Metal shader struct")
 }
 
 // MARK: - Cushion Coefficient Calculation

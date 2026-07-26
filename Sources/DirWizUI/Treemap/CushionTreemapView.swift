@@ -102,7 +102,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         let temporalChanged = coordinator.temporalDiffGeneration != temporalDiffGeneration ||
                               coordinator.isTemporalDiffEnabled != isTemporalDiffEnabled
         // Style is a pure repaint: same layout, same instances, different fragment shader
-        // branch — so it never invalidates the layout or the instance buffer.
+        // branch - so it never invalidates the layout or the instance buffer.
         let styleChanged = coordinator.renderStyle != renderStyle
 
         coordinator.currentFileTree = fileTree
@@ -139,7 +139,7 @@ public struct CushionTreemapView: NSViewRepresentable {
             coordinator.invalidateLayout()
         } else if revisionChanged {
             // Plan 044: while a scan is in progress, a periodic revision bump is sparsely
-            // gated — only allowed once enough time AND tree growth have passed since the
+            // gated - only allowed once enough time AND tree growth have passed since the
             // previous scan-time layout (ScanTimeLayoutBudget.shouldRunScanTimeLayout).
             // Never skipped once scanning ends, so the completion layout (the forced
             // revision bump) always runs.

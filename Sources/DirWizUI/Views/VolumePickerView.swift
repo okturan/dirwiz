@@ -91,8 +91,8 @@ public struct VolumePickerView: View {
 
     /// Primary "Scan Volume" + subordinate "Full Rescan" affordances. While a scan runs,
     /// the primary button swaps its label for a live running state (a small `ProgressView`
-    /// plus text distinguishing "Checking changes…" — the FSEvents replay-wait,
-    /// `appState.isPreparingScan` — from generic "Scanning…" once real enumeration has
+    /// plus text distinguishing "Checking changes…" - the FSEvents replay-wait,
+    /// `appState.isPreparingScan` - from generic "Scanning…" once real enumeration has
     /// begun) instead of just going gray: a disabled-with-no-explanation button is exactly
     /// what read as "does nothing" to the user this plan exists for.
     private var scanButton: some View {
@@ -129,7 +129,7 @@ public struct VolumePickerView: View {
         .padding(.vertical, 10)
     }
 
-    /// Only offer the escape hatch when there's actually a cache to bypass — a warm
+    /// Only offer the escape hatch when there's actually a cache to bypass - a warm
     /// start wouldn't be attempted otherwise, so "Full Rescan" would be a no-op button.
     private var fullRescanAvailable: Bool {
         guard let url = appState.selectedVolume else { return false }

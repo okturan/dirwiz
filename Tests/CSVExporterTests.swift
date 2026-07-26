@@ -5,7 +5,7 @@ import Foundation
 /// Contract tests for `CSVExporter`, extracted from `ContentView.buildCSV`/`csvQuote`
 /// in plan 018. These pin the header text, the largest-first walk order, the row-cap
 /// off-by-one (the cap check counts the header row that's already in `lines`), the
-/// formula-injection/quoting guard, and extension parsing — so the extraction can't
+/// formula-injection/quoting guard, and extension parsing - so the extraction can't
 /// silently change exported output.
 @Suite("CSVExporter Tests")
 struct CSVExporterTests {
@@ -30,7 +30,7 @@ struct CSVExporterTests {
 
     /// The Path column up to (but not including) the first comma. Only valid for
     /// fixtures whose paths contain no comma/quote/newline, i.e. where the field is
-    /// never quoted — fixtures with special characters are checked via full-substring
+    /// never quoted - fixtures with special characters are checked via full-substring
     /// matches instead (see `pathQuotingContract`).
     private func pathColumn(_ row: String) -> String {
         String(row.prefix { $0 != "," })

@@ -34,7 +34,7 @@ public struct HardlinkGroup: Identifiable, Sendable {
 /// Files sharing the same (device, inode) pair are hardlinks to the same data.
 /// Trees produced by the scanner carry per-file link-count flags
 /// (`FileTree.linkCountsCaptured`), so grouping only has to touch the few flagged
-/// nodes — a pure in-memory pass over a tiny subset. For trees without that
+/// nodes - a pure in-memory pass over a tiny subset. For trees without that
 /// guarantee (manually assembled trees in tests), the finder falls back to full
 /// per-file grouping, using `lstat` for nodes missing identity metadata.
 public struct HardlinkFinder {
@@ -89,7 +89,7 @@ public struct HardlinkFinder {
         }
 
         // Fast path: the scanner recorded link counts, so only flagged files can be
-        // hardlinks — group just those, no per-file batching or filesystem fallback.
+        // hardlinks - group just those, no per-file batching or filesystem fallback.
         // Progress keeps the same contract as the full path (total = all files); the
         // pass is effectively instant, so it reports start and completion only.
         if useLinkCountFastPath {
@@ -116,7 +116,7 @@ public struct HardlinkFinder {
             let members: [(DevIno, UInt32, UInt64)]
         }
 
-        // GCD timer for progress — immune to cooperative pool starvation.
+        // GCD timer for progress - immune to cooperative pool starvation.
         let hardlinkCounter = ProgressCounter()
         let hardlinkTimer = DeterminateProgressTimer(
             total: fileIndices.count,

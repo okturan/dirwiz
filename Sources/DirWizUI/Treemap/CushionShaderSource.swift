@@ -87,7 +87,7 @@ enum CushionShaderSource {
 
             // Rounded-box SDF in pixel space. Radius and inset scale with the rect's
             // smaller side and reach zero for small rects, so a shrinking card loses its
-            // rounding, then its gap, then draws as plain fill — it never becomes pure
+            // rounding, then its gap, then draws as plain fill - it never becomes pure
             // padding (mirrors CardGeometry on the Swift side).
             float2 halfSize = in.rectSize * 0.5;
             float  minSide  = min(in.rectSize.x, in.rectSize.y);

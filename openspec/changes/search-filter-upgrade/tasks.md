@@ -1,4 +1,4 @@
-# Tasks — Search Filter Upgrade
+# Tasks - Search Filter Upgrade
 
 ## 1. Engine and filters (DirWizCore)
 
@@ -16,7 +16,7 @@
 
 ## 3. Verification
 
-- [x] 3.1 Latency sanity on a large tree (all filters active) — confirm no content I/O and instant-range timings; note numbers in PR
+- [x] 3.1 Latency sanity on a large tree (all filters active) - confirm no content I/O and instant-range timings; note numbers in PR
 - [x] 3.2 Full suite green; screenshot pass of the filter bar at narrow window widths
 
 ## Implementation notes (as built)
@@ -26,7 +26,7 @@
   query returns nothing regardless of filters. That test was right to fail: a size filter
   sits at a non-zero default, so the change would make an empty search box suddenly
   enumerate the volume. The gate now admits only filters that are themselves an explicit
-  "show me this set" gesture — extension pick, folder scope, date window. Category and size
+  "show me this set" gesture - extension pick, folder scope, date window. Category and size
   keep the contract they shipped with.
 - Extension multi-select is OR within the set, AND against every other filter kind. The set
   OVERRIDES the single-hash drill-down rather than ANDing with it; ANDing would make any
@@ -37,11 +37,11 @@
 - Scope is stored as a PATH, not a node index, and re-resolved before each query.
   `removeSubtree` renumbers every index, so a stored index silently comes to mean a
   different folder after any trash action. When the path stops resolving the scope clears
-  itself WITH a visible notice — silently widening to the whole volume would look like the
+  itself WITH a visible notice - silently widening to the whole volume would look like the
   filter was honored.
 - `SearchFilters.isUnsatisfiable` short-circuits inverted bands (min > max, after > before)
   so an impossible filter reads as "no results" instantly instead of as a slow search.
-- New public `FileTree.nodeIndex(forPath:)` — `FileScanner.relativeComponents` is internal,
+- New public `FileTree.nodeIndex(forPath:)` - `FileScanner.relativeComponents` is internal,
   and widening it would have leaked a scanner detail to the UI layer.
 - 3.1 measured: 200k nodes with scope + 2 extensions + size band + date window active,
   best-of-5 **22.8 ms**; scope bitset construction over 100k nodes **7.5 ms**. Both are
@@ -51,6 +51,6 @@
 
 - Captured at 1000×700 and it CONFIRMED the defect I had only suspected: with six
   fixed-width controls the bar clipped at the pane edge, leaving Modified and the File
-  Types picker unreachable — not merely cramped, but impossible to use.
+  Types picker unreachable - not merely cramped, but impossible to use.
 - Fixed by making the control row a horizontal `ScrollView` with explicit `.clipped()`, so
   the overflow scrolls instead of drawing over the sidebar. Re-captured and verified.

@@ -86,7 +86,7 @@ struct SubtreeRescanTests {
         let tree = FileTree()
         await scanner.scan(path: root, progress: progress, tree: tree)
 
-        // Overwrite readme.txt with a much larger payload — grown; then shrink notes.md.
+        // Overwrite readme.txt with a much larger payload - grown; then shrink notes.md.
         try Data(count: 5000).write(to: URL(fileURLWithPath: root).appendingPathComponent("docs/readme.txt"))
         try Data(count: 10).write(to: URL(fileURLWithPath: root).appendingPathComponent("docs/notes.md"))
 
@@ -97,7 +97,7 @@ struct SubtreeRescanTests {
         assertTreesEquivalent(tree, coldTree, "fileResized")
     }
 
-    @Test("New nested dir subtree created — ancestor rule hits its parent")
+    @Test("New nested dir subtree created - ancestor rule hits its parent")
     func newNestedDirSubtree() async throws {
         let (root, cleanup) = try createTempTree([
             "src/existing.txt": 50,
@@ -109,13 +109,13 @@ struct SubtreeRescanTests {
         let tree = FileTree()
         await scanner.scan(path: root, progress: progress, tree: tree)
 
-        // Brand-new nested directory tree — not in `tree` yet.
+        // Brand-new nested directory tree - not in `tree` yet.
         let newModule = URL(fileURLWithPath: root).appendingPathComponent("src/newmodule/sub")
         try FileManager.default.createDirectory(at: newModule, withIntermediateDirectories: true)
         try Data(count: 42).write(to: newModule.appendingPathComponent("deep.txt"))
         try Data(count: 7).write(to: newModule.deletingLastPathComponent().appendingPathComponent("shallow.txt"))
 
-        // The changed path reported is the new directory itself — it can't resolve in the
+        // The changed path reported is the new directory itself - it can't resolve in the
         // tree, so the ancestor rule must fall back to its parent, "src".
         let report = await scanner.rescanSubtrees([root + "/src/newmodule"], tree: tree, progress: progress)
         #expect(report.unresolvedPaths.isEmpty)
@@ -126,7 +126,7 @@ struct SubtreeRescanTests {
         assertTreesEquivalent(tree, coldTree, "newNestedDirSubtree")
     }
 
-    @Test("Dir deleted entirely — ancestor rule")
+    @Test("Dir deleted entirely - ancestor rule")
     func dirDeletedEntirely() async throws {
         let (root, cleanup) = try createTempTree([
             "src/oldmodule/sub/deep.txt": 42,
@@ -153,7 +153,7 @@ struct SubtreeRescanTests {
         #expect(summarize(tree)[root + "/src/oldmodule"] == nil, "deleted subtree must be gone")
     }
 
-    @Test("Two changed dirs where one contains the other — outermost-dedupe")
+    @Test("Two changed dirs where one contains the other - outermost-dedupe")
     func outermostDedupe() async throws {
         let (root, cleanup) = try createTempTree([
             "src/sub/file.txt": 10,
@@ -303,7 +303,7 @@ struct SubtreeRescanTests {
 
     // MARK: - Large changed root (plan 042: parallel Phase A/B at scale)
 
-    @Test("Equivalence holds for a large (50k-file) changed root — the incident's shape at scale",
+    @Test("Equivalence holds for a large (50k-file) changed root - the incident's shape at scale",
           .timeLimit(.minutes(3)))
     func largeChangedRootStaysEquivalent() async throws {
         let (root, cleanup) = try createTempTree([
@@ -317,7 +317,7 @@ struct SubtreeRescanTests {
         let tree = FileTree()
         await scanner.scan(path: root, progress: progress, tree: tree)
 
-        // Populate "big" with 50k files after the baseline scan — big enough that Phase
+        // Populate "big" with 50k files after the baseline scan - big enough that Phase
         // A's parallel enumeration and Phase B's splice actually exercise real
         // concurrency and a real `installSubtree` merge at scale, not just the small
         // batches every other test in this suite covers.
@@ -345,7 +345,7 @@ struct SubtreeRescanTests {
 @Suite("Subtree Rescan Cancellation Tests")
 struct SubtreeRescanCancellationTests {
 
-    /// Cancels a specific `FileScanner` the very first time `listDirectory` is called —
+    /// Cancels a specific `FileScanner` the very first time `listDirectory` is called -
     /// deterministic (no wall-clock race), used to prove cancellation mid-Phase-A/B halts
     /// promptly and is reported honestly via `SubtreeRescanReport.wasCancelled`.
     private final class CancelOnFirstListFilesystemProvider: @unchecked Sendable, FilesystemProvider {
@@ -428,12 +428,12 @@ struct SubtreeRescanCancellationTests {
 struct SubtreeRescanProgressTests {
 
     /// Blocks `listDirectory` for one specific path until the test signals it to
-    /// proceed — lets other roots in the same batch complete freely while one is held,
+    /// proceed - lets other roots in the same batch complete freely while one is held,
     /// giving a fully deterministic window to observe an in-flight progress update
     /// (rather than racing a wall-clock poll against real work that might already be
     /// done by the time the poll starts). `listDirectory` itself always runs on a
     /// background scanning thread (a plain synchronous call stack), so blocking it on a
-    /// `DispatchSemaphore` is fine — only the ASYNC test function must never call
+    /// `DispatchSemaphore` is fine - only the ASYNC test function must never call
     /// `.wait()` directly (blocking a cooperative-pool thread is disallowed), so the test
     /// observes readiness by polling `didReachGate` instead.
     private final class GatedFilesystemProvider: @unchecked Sendable, FilesystemProvider {
@@ -505,7 +505,7 @@ struct SubtreeRescanProgressTests {
         mock.directories["/vol/b"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 21))
         mock.directories["/vol/c"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 22))
 
-        // Hold "/vol/a" open — "/vol/b" and "/vol/c" run concurrently (the default
+        // Hold "/vol/a" open - "/vol/b" and "/vol/c" run concurrently (the default
         // worker count comfortably covers all 3 of these tiny plans) and WILL both
         // finish while "/vol/a" is blocked, since nothing gates them.
         let gated = GatedFilesystemProvider(inner: mock, gatedPath: "/vol/a")

@@ -5,7 +5,7 @@ import Foundation
 public struct JournalReplay: Sendable {
     public enum Outcome: Sendable, Equatable {
         case changes([String])   // changed directory paths (deduped, verbatim from events)
-        case poisoned(String)    // MustScanSubDirs/IdsWrapped/RootChanged/(Un)Mount/timeout — reason for logs
+        case poisoned(String)    // MustScanSubDirs/IdsWrapped/RootChanged/(Un)Mount/timeout - reason for logs
     }
     public let outcome: Outcome
     public let newEventId: UInt64   // FSEventsGetCurrentEventId() captured BEFORE the stream started
@@ -16,7 +16,7 @@ public struct JournalReplay: Sendable {
     }
 }
 
-/// Flags that invalidate a replay outright — FSEvents itself is telling us the change
+/// Flags that invalidate a replay outright - FSEvents itself is telling us the change
 /// set can't be trusted, so the honest move is a cold fallback rather than acting on a
 /// possibly-incomplete or misleading path list. Per the plan-029 feasibility spike.
 private let poisonFlags: FSEventStreamEventFlags = UInt32(
@@ -29,14 +29,14 @@ private let poisonFlags: FSEventStreamEventFlags = UInt32(
 
 public enum FSEventsJournal {
     /// The current FSEvents journal position. Callers capture this before a mutation
-    /// window they'll want to replay later — e.g. right before a cold scan begins, so
+    /// window they'll want to replay later - e.g. right before a cold scan begins, so
     /// the next warm start knows where to resume from.
     public static func currentEventId() -> UInt64 {
         FSEventsGetCurrentEventId()
     }
 
     /// Replays history for `root` since `eventId`. Completes at `HistoryDone` or
-    /// `timeout` (timeout ⇒ `.poisoned` — never hand a possibly-incomplete change set
+    /// `timeout` (timeout ⇒ `.poisoned` - never hand a possibly-incomplete change set
     /// to the patcher).
     public static func replay(
         root: String,
@@ -45,7 +45,7 @@ public enum FSEventsJournal {
     ) async -> JournalReplay {
         // Captured FIRST, before the stream even exists: changes landing during this
         // replay (and whatever patch follows it) are then covered by the *next* warm
-        // start's replay window — a small overlap re-scan, which 028's subtree rescan
+        // start's replay window - a small overlap re-scan, which 028's subtree rescan
         // proves is idempotent.
         let newEventId = FSEventsGetCurrentEventId()
         let collector = JournalCollector()
@@ -66,8 +66,8 @@ public enum FSEventsJournal {
 
 /// Drives one FSEventStream created with `sinceWhen:` from creation through
 /// `HistoryDone` (or poison, or timeout) and resolves its completion exactly once.
-/// Same C-callback + unmanaged-self + lock convention as `FSEventsMonitor` — the
-/// stream callback can't capture Swift closures across the C boundary — but this
+/// Same C-callback + unmanaged-self + lock convention as `FSEventsMonitor` - the
+/// stream callback can't capture Swift closures across the C boundary - but this
 /// collector is a one-shot, unowned-by-anyone object, so it retains itself for the
 /// duration of the stream and releases on completion instead of relying on an
 /// external owner the way `FSEventsMonitor` does.
@@ -97,13 +97,13 @@ private final class JournalCollector: @unchecked Sendable {
             copyDescription: nil
         )
 
-        // FileEvents gives per-file granularity instead of per-directory — without it,
+        // FileEvents gives per-file granularity instead of per-directory - without it,
         // ANY file changing directly inside a huge directory (e.g. a shell writing
         // ~/.zsh_history) is reported as "the whole directory changed", which for a
         // root-volume scan can mean "the whole home folder" (a large fraction of the
         // entire tree). `handleEvents` below reduces file-level events back to their
-        // parent directory — same pattern `FSEventsMonitor` already uses for the live
-        // watcher — so this doesn't change what `rescanSubtrees` receives in shape, only
+        // parent directory - same pattern `FSEventsMonitor` already uses for the live
+        // watcher - so this doesn't change what `rescanSubtrees` receives in shape, only
         // how precisely huge coalesced directories get narrowed down first.
         let flags: FSEventStreamCreateFlags = UInt32(
             kFSEventStreamCreateFlagFileEvents |
@@ -141,7 +141,7 @@ private final class JournalCollector: @unchecked Sendable {
     }
 
     /// Cooperative cancellation from the async caller's side (e.g. the enclosing Task
-    /// was cancelled) — tears the stream down instead of leaking it.
+    /// was cancelled) - tears the stream down instead of leaking it.
     func cancel() {
         finish(.poisoned("replay cancelled"))
     }
@@ -160,7 +160,7 @@ private final class JournalCollector: @unchecked Sendable {
                 continue
             }
             // With FileEvents on, a file-level event's finest reportable unit is the
-            // file itself — reduce it to its parent directory so `rescanSubtrees`
+            // file itself - reduce it to its parent directory so `rescanSubtrees`
             // keeps receiving directory targets, and so a scattered file touched deep
             // in a huge directory doesn't get treated as "that whole directory" the
             // way a directory-level event's path already, correctly, would be.
@@ -215,7 +215,7 @@ private final class JournalCollector: @unchecked Sendable {
 }
 
 /// Top-level C function used as the FSEventStream callback. Must not capture any
-/// context — the collector reference comes via `clientCallBackInfo`.
+/// context - the collector reference comes via `clientCallBackInfo`.
 private let journalCollectorCallback: FSEventStreamCallback = {
     _, clientCallBackInfo, numEvents, eventPaths, eventFlags, _ in
 
@@ -240,14 +240,14 @@ private let journalCollectorCallback: FSEventStreamCallback = {
     collector.handleEvents(paths: paths, flags: flagsCopy)
 }
 
-/// Collapses a set of changed-directory paths down to their outermost roots — drops any
+/// Collapses a set of changed-directory paths down to their outermost roots - drops any
 /// path nested inside another path in the set (including exact duplicates), keeping only
 /// the outermost survivors in first-seen order. Shared between `WarmStartPlanner` (which
-/// needs a true folder count for the threshold decision — thousands of raw FSEvents paths
+/// needs a true folder count for the threshold decision - thousands of raw FSEvents paths
 /// under a handful of real folders should count as a handful) and
 /// `FileScanner.rescanSubtrees` (which needs to avoid re-enumerating a directory it's
 /// about to re-enumerate anyway because a child was also reported changed). String-prefix
-/// based since this runs before any index-invalidating mutation — same shallowest-first
+/// based since this runs before any index-invalidating mutation - same shallowest-first
 /// claim discipline as `SpaceAnalyzer.isDescendantOfClaimed`.
 enum PathCollapse {
     static func outermostRoots(_ paths: [String]) -> [String] {
@@ -279,7 +279,7 @@ enum PathCollapse {
     }
 }
 
-/// Pure decision logic for whether to attempt a warm start — unit-testable without
+/// Pure decision logic for whether to attempt a warm start - unit-testable without
 /// touching FSEvents at all.
 public enum WarmStartPlanner {
     public enum Decision: Equatable {
@@ -296,38 +296,38 @@ public enum WarmStartPlanner {
     /// `maxChangedFraction` default 0.20: warm iff the collapsed changed-root count is at
     /// most this fraction of the cached tree's known directory count. Replaces an earlier
     /// absolute cap on raw (pre-collapse) FSEvents paths, which over-triggered cold
-    /// fallback — whole-volume roots accumulate thousands of raw events from background
+    /// fallback - whole-volume roots accumulate thousands of raw events from background
     /// churn within hours even when only a handful of real folders changed.
     ///
     /// A percentage threshold means a tiny cached tree (few known directories) can fall
-    /// back to cold from a small absolute number of changed roots — e.g. 2 of 4 directories
+    /// back to cold from a small absolute number of changed roots - e.g. 2 of 4 directories
     /// reads as 50% churn. That's by design, not a bug to work around: cold scans are
     /// cheapest exactly when the tree is small, so there's nothing to protect by warming.
-    /// The `max(1, …)` floor below is deliberate for the same reason — it guarantees at
+    /// The `max(1, …)` floor below is deliberate for the same reason - it guarantees at
     /// least one changed root is always tolerated, so an empty or near-empty tree isn't
     /// permanently locked out of ever warming.
     ///
     /// `cachedTotalItemCount`/`estimatedPatchItems` (plan 042) add a cost-based rule that
     /// runs BEFORE the root-count rule, when the caller can supply both: root COUNT alone
     /// can't see that a single collapsed root is a subtree of 100k+ files (the reported
-    /// incident — days of churn collapsed to a handful of roots sitting high in the tree)
+    /// incident - days of churn collapsed to a handful of roots sitting high in the tree)
     /// while the root-count rule alone happily warms a handful of roots. Judging by
     /// estimated WORK instead catches that shape. The root-count rule is kept as a
-    /// secondary sanity cap regardless — many small, scattered changed roots could pass
+    /// secondary sanity cap regardless - many small, scattered changed roots could pass
     /// the item fraction trivially while still making per-root splice bookkeeping
     /// dominate. Both new parameters default to `nil`, so a caller that doesn't supply
     /// them (every existing call site) gets exactly today's root-count-only behavior.
     ///
     /// `maxPatchRoots` (default 48) is a THIRD, always-on gate, independent of the two
     /// above: 042's benchmark found `FileTree.removeChildren` recompacts and renumbers the
-    /// ENTIRE tree on every call — a cost proportional to total tree size, not to the
+    /// ENTIRE tree on every call - a cost proportional to total tree size, not to the
     /// root being spliced (~6ms per call measured at ~200k items). Phase B calls it once
     /// per changed root, so patch cost scales with ROOT COUNT regardless of how small
-    /// each root's own item fraction is — a shape neither the item-fraction rule nor the
+    /// each root's own item fraction is - a shape neither the item-fraction rule nor the
     /// percentage-of-directories rule catches (both can pass comfortably at, say, 50
     /// scattered one-file-each roots). Until a batched single-pass splice lands (043),
     /// many-root patches are structurally slower than a parallel cold scan even though
-    /// each root individually looks cheap, so this cap always applies — it is not gated
+    /// each root individually looks cheap, so this cap always applies - it is not gated
     /// behind any optional parameter the way the item-fraction rule is.
     public static func decide(
         cacheAvailable: Bool,
@@ -352,7 +352,7 @@ public enum WarmStartPlanner {
             let roots = PathCollapse.outermostRoots(targets)
 
             guard roots.count <= maxPatchRoots else {
-                return .coldFallback(reason: "\(roots.count) changed locations — full scan is faster")
+                return .coldFallback(reason: "\(roots.count) changed locations - full scan is faster")
             }
 
             if let estimatedPatchItems, let cachedTotalItemCount, cachedTotalItemCount > 0 {
@@ -385,14 +385,14 @@ public enum WarmStartPlanner {
         return Int((Double(count) / Double(total) * 100).rounded())
     }
 
-    /// Sum of the CACHED tree's subtree item counts for each collapsed changed root — the
+    /// Sum of the CACHED tree's subtree item counts for each collapsed changed root - the
     /// cost-based decision's numerator (plan 042). Caller-computed (like
     /// `cachedDirectoryCount`) rather than done inside `decide` itself, keeping that
     /// function pure logic with no `FileTree` dependency of its own.
     ///
     /// A root that doesn't resolve in the cached tree (a brand-new top-level directory
     /// FSEvents reported, or one already deleted) contributes a small constant instead of
-    /// zero — the estimate only needs to bound a decision, not be exact, and treating an
+    /// zero - the estimate only needs to bound a decision, not be exact, and treating an
     /// unresolvable root as "free" would silently undercount exactly the case (new
     /// content) most likely to be large.
     public static func estimatedPatchItemCount(forChangedPaths targets: [String], cachedTree: FileTree) -> Int {
@@ -413,7 +413,7 @@ public enum WarmStartPlanner {
     }
 
     /// Fallback contribution (plan 042) for a changed root that doesn't resolve against
-    /// the cached tree at all — see `estimatedPatchItemCount`'s doc comment.
+    /// the cached tree at all - see `estimatedPatchItemCount`'s doc comment.
     private static let unresolvedRootItemEstimate = 32
 
     /// Poison reasons from `JournalCollector` (e.g. "MustScanSubDirs,RootChanged",

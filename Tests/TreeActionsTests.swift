@@ -101,7 +101,7 @@ struct TreeActionsTests {
         rootNode.isDirectory = true
         _ = tree.addNode(rootNode, name: "fake-root")
 
-        // modifiedDate defaults to 0 (unknown) for both children — the case this guards.
+        // modifiedDate defaults to 0 (unknown) for both children - the case this guards.
         let fileA = FileNode(fileSize: 100, allocatedSize: 100)
         let fileB = FileNode(fileSize: 100, allocatedSize: 100)
         let firstChild = tree.addChildren([
@@ -114,7 +114,7 @@ struct TreeActionsTests {
         let group = DuplicateGroup(fileSize: 100, hash: 0, paths: [pathA, pathB])
 
         let result = actions.applyPreset(.keepOldest, to: group, preferredDirectory: nil, tree: tree)
-        #expect(result.isEmpty, "No known modified date means no unambiguous keep-file — must return []")
+        #expect(result.isEmpty, "No known modified date means no unambiguous keep-file - must return []")
     }
 
     // MARK: - applyPreset: keepLargest
@@ -168,7 +168,7 @@ struct TreeActionsTests {
         let group = DuplicateGroup(fileSize: 100, hash: 0, paths: [pathA, pathB])
 
         let result = actions.applyPreset(.keepInDirectory, to: group, preferredDirectory: nonMatchingDir, tree: tree)
-        #expect(result.isEmpty, "No matching directory means no unambiguous keep-file — must return []")
+        #expect(result.isEmpty, "No matching directory means no unambiguous keep-file - must return []")
     }
 
     @Test("keepInDirectory fails closed when no preferred directory is given")
@@ -183,7 +183,7 @@ struct TreeActionsTests {
         let group = DuplicateGroup(fileSize: 100, hash: 0, paths: [pathA, pathB])
 
         let result = actions.applyPreset(.keepInDirectory, to: group, preferredDirectory: nil, tree: tree)
-        #expect(result.isEmpty, "Nil preferred directory means no unambiguous keep-file — must return []")
+        #expect(result.isEmpty, "Nil preferred directory means no unambiguous keep-file - must return []")
     }
 
     // MARK: - applyPreset: stale / degenerate groups
@@ -200,7 +200,7 @@ struct TreeActionsTests {
         let group = DuplicateGroup(fileSize: 100, hash: 0, paths: [validPath, stalePath])
 
         let result = actions.applyPreset(.keepNewest, to: group, preferredDirectory: nil, tree: tree)
-        #expect(result.isEmpty, "A path that no longer resolves to a tree node means the scan is stale — must return []")
+        #expect(result.isEmpty, "A path that no longer resolves to a tree node means the scan is stale - must return []")
     }
 
     @Test("A group with fewer than two paths returns no trash candidates")
@@ -240,7 +240,7 @@ struct TreeActionsTests {
         // The bug this test pins: the old code subtracted a single `displaySize` value
         // from *both* ancestor aggregates. That's only invisible when fileSize ==
         // allocatedSize, so require they actually diverge here (sub-block file, rounded
-        // up on allocation) — otherwise this test would pass whether or not the fix
+        // up on allocation) - otherwise this test would pass whether or not the fix
         // is present.
         try #require(leafFileSize != leafAllocatedSize, "Fixture must have divergent logical/allocated sizes to exercise the bug")
 
@@ -336,7 +336,7 @@ struct TreeActionsTests {
         let tree = await scanDirectory(root)
 
         // Delete AFTER scanning: it still resolves inside the tree, but the filesystem
-        // trash call itself fails — distinct from a path that never resolves at all.
+        // trash call itself fails - distinct from a path that never resolves at all.
         try FileManager.default.removeItem(atPath: goneFromDiskPath)
 
         let batch = await actions.batchTrash(paths: [goodPath, goneFromDiskPath, neverInTreePath], tree: tree)

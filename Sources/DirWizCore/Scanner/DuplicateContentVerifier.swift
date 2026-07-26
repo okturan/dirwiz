@@ -53,8 +53,8 @@ public enum DuplicateContentVerifier {
     /// representative from the start once per additional member.
     ///
     /// Falls back to `exactGroups` (unchanged) the instant anything doesn't go
-    /// perfectly — an open/stat/read failure, a size mismatch, or a byte
-    /// mismatch — so this never weakens byte-exactness or duplicates
+    /// perfectly - an open/stat/read failure, a size mismatch, or a byte
+    /// mismatch - so this never weakens byte-exactness or duplicates
     /// `exactGroups`'s subgroup-splitting logic; it only changes how bytes are
     /// read for the common case where every member truly does match.
     static func exactGroupsLockStep(paths: [String], expectedSize: UInt64) -> [[String]] {

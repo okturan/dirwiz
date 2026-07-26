@@ -8,7 +8,7 @@ import Foundation
 /// Deliberately NOT held to `TreeCache`'s fail-closed binary discipline: losing this
 /// history costs nothing functionally (unlike losing a multi-hundred-MB tree cache, which
 /// forces a full cold rescan), so a missing or malformed file just reads as "no history
-/// yet" rather than a rejection with a reason to explain. Plain JSON — human-inspectable
+/// yet" rather than a rejection with a reason to explain. Plain JSON - human-inspectable
 /// with `cat`, which is itself a nice diagnostic property for exactly the kind of
 /// after-the-fact investigation this feature exists to shorten.
 public enum WarmStartHistory {
@@ -34,7 +34,7 @@ public enum WarmStartHistory {
     private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
 
     /// Append `entry` to `rootPath`'s history, capping at `maxEntries` (oldest evicted
-    /// first). Best-effort: a write failure is silently swallowed — this is diagnostic
+    /// first). Best-effort: a write failure is silently swallowed - this is diagnostic
     /// data, not something a user's scan should ever fail over.
     public static func record(_ entry: Entry, for rootPath: String) {
         var entries = load(for: rootPath)
@@ -50,7 +50,7 @@ public enum WarmStartHistory {
         try? data.write(to: url, options: .atomic)
     }
 
-    /// The persisted history for `rootPath`, oldest first. Empty on any doubt — a missing
+    /// The persisted history for `rootPath`, oldest first. Empty on any doubt - a missing
     /// file, a malformed one, or a decode failure all read the same as "no history yet"
     /// rather than surfacing an error (see the type's doc comment: this is low-stakes,
     /// diagnostic-only data, not `TreeCache`'s fail-closed territory).
@@ -60,7 +60,7 @@ public enum WarmStartHistory {
         return (try? JSONDecoder.warmStartHistory.decode([Entry].self, from: data)) ?? []
     }
 
-    /// Test-only escape hatch, mirroring `TreeCache.invalidate` — removes a volume's
+    /// Test-only escape hatch, mirroring `TreeCache.invalidate` - removes a volume's
     /// history file entirely.
     public static func clear(for rootPath: String) {
         try? FileManager.default.removeItem(at: historyURL(for: rootPath))
@@ -85,7 +85,7 @@ public enum WarmStartHistory {
     }
 
     private static func historyFilename(for rootPath: String) -> String {
-        // Readable prefix + FNV-1a hash suffix to guarantee uniqueness — mirrors
+        // Readable prefix + FNV-1a hash suffix to guarantee uniqueness - mirrors
         // TreeCache/TemporalSnapshot's naming scheme.
         let safe = rootPath
             .replacingOccurrences(of: "/", with: "_")

@@ -163,7 +163,7 @@ public struct ExtensionListView: View {
                 Circle()
                     .fill(paletteColor)
                     .frame(width: 8, height: 8)
-                // Same spelling as the sidebar legend — one source of truth for naming.
+                // Same spelling as the sidebar legend - one source of truth for naming.
                 Text(ExtensionRowModel(id: stat.extensionHash, rawName: stat.extensionName,
                                        color: .zero, totalSize: 0, fileCount: 0).displayName)
                     .font(.system(size: 12, design: .monospaced))
@@ -207,7 +207,7 @@ public struct ExtensionListView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .frame(width: 65, alignment: .trailing)
 
-            // Drill-down affordance — always Spacer so the row fills full width.
+            // Drill-down affordance - always Spacer so the row fills full width.
             Spacer(minLength: 0)
             if isDrillable {
                 Image(systemName: "arrow.right.circle")

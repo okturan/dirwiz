@@ -48,7 +48,7 @@ private func appendPathComponent(_ parent: String, _ child: String) -> String {
 
 // MARK: - Inode Key
 
-/// Proper composite key for (dev, inode) pairs — avoids XOR hash collisions.
+/// Proper composite key for (dev, inode) pairs - avoids XOR hash collisions.
 private struct InodeKey: Hashable, Sendable {
     let dev: Int32
     let inode: UInt64
@@ -144,7 +144,7 @@ private final class DirectoryWorkQueue: @unchecked Sendable {
 /// collapsed changed root it belongs to and which detached staging `FileTree` its
 /// results go into. Distinct from `DirectoryWorkItem`/`DirectoryWorkQueue` (used by cold
 /// scan) rather than generalizing those: `rescanSubtrees`'s Phase A shares ONE queue
-/// across every changed root instead of one queue per root — a single worker pool that
+/// across every changed root instead of one queue per root - a single worker pool that
 /// drains whatever directory is next regardless of which root it came from, so a
 /// worker isn't idle just because its own root ran out of work while another root (in
 /// the incident's shape, ONE dominant root) still has plenty.
@@ -198,10 +198,10 @@ private final class RescanWorkQueue: @unchecked Sendable {
 
 /// Tracks how many enumeration items are still outstanding for each collapsed changed
 /// root sharing the same `RescanWorkQueue`, so Phase A can report honest "k of N roots"
-/// progress even though the queue itself has no notion of "root" — many workers may be
+/// progress even though the queue itself has no notion of "root" - many workers may be
 /// draining items that all belong to the SAME root, or to different ones, in any order.
 /// Seeded with one pending item per root (its own root path); each discovered
-/// subdirectory bumps its root's count, each finished item decrements it — the root is
+/// subdirectory bumps its root's count, each finished item decrements it - the root is
 /// fully enumerated the moment its count returns to zero.
 private final class RootCompletionTracker: @unchecked Sendable {
     private let lock = NSLock()
@@ -336,18 +336,18 @@ public struct SubtreeRescanReport: Sendable {
     public let requestedPaths: [String]
     /// Targets actually spliced, after ancestor-resolution + outermost-dedupe. A
     /// root-level entry here means some requested path couldn't resolve to anything
-    /// narrower than the scan root — recorded honestly rather than silently absorbed;
+    /// narrower than the scan root - recorded honestly rather than silently absorbed;
     /// callers with a cold-fallback threshold (e.g. warm start) should treat it as a
     /// signal to prefer a full rescan.
     public let rescannedRoots: [String]
     /// Requested paths that weren't under the tree's root at all.
     public let unresolvedPaths: [String]
     /// True if cancellation (`FileScanner.cancel()`, or the enclosing `Task` itself being
-    /// cancelled) was observed at any point during the rescan (plan 042) — some of
+    /// cancelled) was observed at any point during the rescan (plan 042) - some of
     /// `rescannedRoots` may not actually have been applied to the tree yet. The tree is
     /// left structurally valid either way (whatever finished applying stays applied, the
     /// rest is untouched), but callers should treat a cancelled rescan as incomplete
-    /// rather than a normal completion — no cache write-back under the new event id, no
+    /// rather than a normal completion - no cache write-back under the new event id, no
     /// "success" summary.
     public let wasCancelled: Bool
 
@@ -513,30 +513,30 @@ public final class FileScanner: @unchecked Sendable {
     /// - **Phase A** (`stageChangedRoots`, parallel, I/O-bound): every collapsed root is
     ///   resolved once against the tree's shape at the START of this call, then enumerated
     ///   CONCURRENTLY (bounded to the same worker count cold scan uses) into its own small,
-    ///   detached staging `FileTree` — nothing here touches the shared `tree` yet. This is
+    ///   detached staging `FileTree` - nothing here touches the shared `tree` yet. This is
     ///   the fix for the reported incident: a serial per-root loop re-walking a large
     ///   fraction of the disk single-threaded took minutes where cold (fully parallel)
     ///   took ~20s.
     /// - **Phase B** (`applyStagedRoots`, serial, memory-bound): each staged result is
     ///   spliced in one at a time, re-resolving its path against `tree` FRESH immediately
-    ///   before splicing — an earlier splice in this same loop may have compacted and
+    ///   before splicing - an earlier splice in this same loop may have compacted and
     ///   renumbered every index (`removeChildren`'s contract). Safe to resolve every root
     ///   ONCE up front in Phase A because `rescannedRoots` are outermost/disjoint
     ///   (`PathCollapse.outermostRoots`): applying one root's splice can never change
     ///   whether an unrelated, non-nested root's path still resolves the same way.
     ///
-    /// Resolution runs entirely against path strings before any mutation begins — never
+    /// Resolution runs entirely against path strings before any mutation begins - never
     /// holds a tree index across a splice, since indices are garbage after any mutation
     /// that compacts the array (same discipline as `TreeActions.batchTrash(paths:tree:)`).
     ///
     /// Cancellation: `isCancelled` (this scanner's own flag, flipped by `cancel()`) is the
-    /// primary, coherent signal checked in both phases — NOT `Task.isCancelled`, which
+    /// primary, coherent signal checked in both phases - NOT `Task.isCancelled`, which
     /// stays false unless the surrounding `Task` itself is structurally cancelled (a stale
     /// check 040 flagged: `cancel()` alone never trips it). `Task.isCancelled` is still
     /// honored inside Phase A's child tasks as a secondary signal, since those are real
     /// `Task`s structured cancellation can reach directly. Either way a cancelled rescan
-    /// leaves `tree` valid — whatever finished applying stays applied, the rest is
-    /// untouched — and `SubtreeRescanReport.wasCancelled` says so honestly.
+    /// leaves `tree` valid - whatever finished applying stays applied, the rest is
+    /// untouched - and `SubtreeRescanReport.wasCancelled` says so honestly.
     public func rescanSubtrees(
         _ changedDirectories: [String],
         tree: FileTree,
@@ -558,7 +558,7 @@ public final class FileScanner: @unchecked Sendable {
 
         let rescannedRoots = PathCollapse.outermostRoots(resolvedPaths)
 
-        // One instance shared across every target in this batch — matches cold scan's
+        // One instance shared across every target in this batch - matches cold scan's
         // single firmlink/hardlink guard for the whole operation, not one per target. Its
         // internal Mutex makes sharing it across Phase A's concurrent tasks safe.
         //
@@ -592,7 +592,7 @@ public final class FileScanner: @unchecked Sendable {
         let isBundle: Bool
     }
 
-    /// What Phase A produced for one root, keyed by path in `stageChangedRoots`'s result —
+    /// What Phase A produced for one root, keyed by path in `stageChangedRoots`'s result -
     /// never keyed by index, since indices from the batch-start snapshot are meaningless
     /// once Phase B starts splicing.
     private enum StageResult: Sendable {
@@ -601,7 +601,7 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Resolves every collapsed root's current shape ONCE, against the tree as it stands
-    /// at the very start of this batch — before any splicing happens. See
+    /// at the very start of this batch - before any splicing happens. See
     /// `rescanSubtrees`'s doc comment for why this one-time-up-front resolution is safe.
     private func planRescanTargets(_ rescannedRoots: [String], tree: FileTree) -> [RootPlan] {
         let snapshot = tree.pathBuildingSnapshot()
@@ -621,14 +621,14 @@ public final class FileScanner: @unchecked Sendable {
 
     /// Phase A: enumerate every plan's on-disk subtree (or compute its bundle size)
     /// concurrently, bounded to the same worker-count knob cold scan uses
-    /// (`DIRWIZ_SCAN_WORKERS`). Every directory plan's enumeration work — its root path
-    /// AND every subdirectory discovered under it — feeds into ONE shared
+    /// (`DIRWIZ_SCAN_WORKERS`). Every directory plan's enumeration work - its root path
+    /// AND every subdirectory discovered under it - feeds into ONE shared
     /// `RescanWorkQueue` drained by that many workers, rather than giving each root its
     /// own fixed slice of the pool: a single directory's own entries can't be split
     /// across workers (`getattrlistbulk` reads one handle's entries as one sequential
     /// operation), so across-roots-only parallelism helps when there are many
     /// small-to-medium roots but does nothing extra for the reported incident's actual
-    /// shape — ONE dominant root sitting high in the tree. Sharing one queue means idle
+    /// shape - ONE dominant root sitting high in the tree. Sharing one queue means idle
     /// workers (roots with nothing left) naturally flow into whichever root still has
     /// work, with no size estimate needed up front. Nothing here touches the shared
     /// `tree`: each directory plan enumerates into its OWN small, detached staging
@@ -648,7 +648,7 @@ public final class FileScanner: @unchecked Sendable {
         let sharedQueue = RescanWorkQueue()
         for plan in directoryPlans {
             // Mark each root itself visited before seeding the queue, same as the cold
-            // scan marks its root and the old single-consumer drain did — so a firmlink
+            // scan marks its root and the old single-consumer drain did - so a firmlink
             // loop can't immediately re-enter a subtree that's already being enumerated.
             if let di = filesystem.deviceAndInode(forPath: plan.targetPath) {
                 _ = visited.insert(dev: di.device, inode: di.inode)
@@ -672,12 +672,12 @@ public final class FileScanner: @unchecked Sendable {
         let totalRoots = plans.count
         // Which directory roots actually got AT LEAST one item processed (as opposed to
         // cancelled before their own queue entry was ever dequeued). An untouched root's
-        // staging tree is just the placeholder with no children — installing that would
+        // staging tree is just the placeholder with no children - installing that would
         // wrongly wipe out the target's real, pre-existing children rather than leaving
         // them alone, so `applyStagedRoots` must see `nil` (not `.directory`) for it.
         let touchedRoots = Mutex(Set<String>())
 
-        // Reports one more root done, whichever kind it was — thread-safe from any
+        // Reports one more root done, whichever kind it was - thread-safe from any
         // context, matching cold scan's own `maybeUpdateProgress` (`updateCurrentPath`
         // is the thread-safe hot-counter write; `publishCounters()` must run on
         // MainActor, so it's dispatched fire-and-forget rather than awaited here).
@@ -695,7 +695,7 @@ public final class FileScanner: @unchecked Sendable {
         results.reserveCapacity(plans.count)
 
         await withTaskGroup(of: (String, StageResult)?.self) { group in
-            // Bundle plans: one Task each, no further internal parallelism possible —
+            // Bundle plans: one Task each, no further internal parallelism possible -
             // computing a bundle's size is a single recursive walk, not splittable.
             for plan in bundlePlans {
                 group.addTask {
@@ -710,7 +710,7 @@ public final class FileScanner: @unchecked Sendable {
             }
 
             // Directory plans: bridge to a GCD-backed multi-worker drain of the shared
-            // queue — plain OS threads (like cold scan's own worker pool), not Swift
+            // queue - plain OS threads (like cold scan's own worker pool), not Swift
             // Tasks, since these loops legitimately block on `RescanWorkQueue.next()`
             // while other workers still have work; blocking a Swift Task body that way
             // risks starving the cooperative thread pool cold scan and everything else
@@ -780,12 +780,12 @@ public final class FileScanner: @unchecked Sendable {
             }
         }
 
-        // Every directory plan's staging tree gets installed here — none of them flow
+        // Every directory plan's staging tree gets installed here - none of them flow
         // through the task group's return value (only bundle plans do, above), since
         // `stagingByPath` already has a live reference to each one that workers wrote
         // into directly. Skip any root that never got touched (cancelled before its own
         // queue entry was ever dequeued): its staging tree is just the untouched
-        // placeholder, and installing that would wipe out the target's real children —
+        // placeholder, and installing that would wipe out the target's real children -
         // leaving it out of `results` entirely makes `applyStagedRoots` see `nil` and
         // correctly leave that root untouched instead.
         let touched = touchedRoots.withLock { $0 }
@@ -797,7 +797,7 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Phase B: apply each staged result in `rescannedRoots` order, re-resolving its path
-    /// against `tree` fresh immediately before splicing — see `rescanSubtrees`'s doc
+    /// against `tree` fresh immediately before splicing - see `rescanSubtrees`'s doc
     /// comment for why an earlier splice in this same loop can invalidate a later target's
     /// index but never its path.
     private func applyStagedRoots(
@@ -814,7 +814,7 @@ public final class FileScanner: @unchecked Sendable {
 
             // Resolved in its own function so the snapshot's `nodes`/`stringPool`
             // references (a full-tree COW handle) are provably released before this
-            // iteration mutates the tree — holding them any longer would force
+            // iteration mutates the tree - holding them any longer would force
             // `removeChildren`/`installSubtree` to copy the entire array on every single
             // root instead of appending in place (measured: this was Phase B's actual
             // bottleneck on a large batch, not the per-node splice work itself).
@@ -836,7 +836,7 @@ public final class FileScanner: @unchecked Sendable {
                 tree.removeChildren(of: targetIndex)
                 tree.installSubtree(staging, at: targetIndex)
             case nil:
-                // Cancelled before Phase A ever got to this root — nothing staged, so
+                // Cancelled before Phase A ever got to this root - nothing staged, so
                 // there's nothing trustworthy to apply. Leave it untouched rather than
                 // guessing; the next rescan will pick it up again.
                 continue
@@ -847,7 +847,7 @@ public final class FileScanner: @unchecked Sendable {
                 tree.updateNode(at: targetIndex) { $0.modifiedDate = mtime }
             }
 
-            // Thread-safe hot-counter write (see `stageChangedRoots`'s matching comment) —
+            // Thread-safe hot-counter write (see `stageChangedRoots`'s matching comment) -
             // setting `progress.currentPath` directly here would just get clobbered by
             // `publishCounters()`'s own `currentPath = snapshot.path` line.
             progress.updateCurrentPath("Refreshing changed folders (\(completed) of \(total))…")
@@ -864,7 +864,7 @@ public final class FileScanner: @unchecked Sendable {
     /// this immediately before each splice; if the snapshot outlived the splice, the
     /// splice's own mutation (`removeChildren`/`installSubtree`) would see a
     /// reference count > 1 and copy the ENTIRE array before appending instead of growing
-    /// it in place — on a large batch this dwarfed the actual per-node splice cost.
+    /// it in place - on a large batch this dwarfed the actual per-node splice cost.
     private static func resolveCurrentIndex(of targetPath: String, tree: FileTree) -> UInt32? {
         let snapshot = tree.pathBuildingSnapshot()
         guard let components = Self.relativeComponents(of: targetPath, rootPath: snapshot.rootPath) else {
@@ -874,7 +874,7 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Same worker-count sizing cold scan uses for its `DirectoryWorkQueue` pool
-    /// (`DIRWIZ_SCAN_WORKERS`, defaulting to 4–6 based on core count) — reused here so
+    /// (`DIRWIZ_SCAN_WORKERS`, defaulting to 4–6 based on core count) - reused here so
     /// Phase A's across-roots concurrency is governed by the one existing tunable knob
     /// rather than a second, uncoordinated one.
     private static func defaultRescanWorkerCount() -> Int {
@@ -886,7 +886,7 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Resolve one changed-directory path to the deepest ancestor that both still exists
-    /// on disk and already resolves inside `tree` — handles deleted dirs, brand-new dirs
+    /// on disk and already resolves inside `tree` - handles deleted dirs, brand-new dirs
     /// (whose parent resolves instead), and renames with a single rule. Root is always a
     /// valid last resort. Returns nil only when `changedPath` isn't under the tree's root.
     private func resolveRescanTarget(_ changedPath: String, tree: FileTree) -> String? {
@@ -937,7 +937,7 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// One-off `lstat` for the mtime refresh after a splice. Bypasses `FilesystemProvider`
-    /// (which has no modification-time accessor and is out of scope to extend here) — this
+    /// (which has no modification-time accessor and is out of scope to extend here) - this
     /// only degrades gracefully on a mocked provider in tests, since real subtree rescans
     /// always run against `RealFilesystemProvider`.
     private static func modifiedDate(atPath path: String) -> UInt32? {
@@ -947,12 +947,12 @@ public final class FileScanner: @unchecked Sendable {
     }
 
     /// Scan the filesystem at `path`, returning the tree.
-    /// The tree is populated incrementally — assign it to your UI state before awaiting
+    /// The tree is populated incrementally - assign it to your UI state before awaiting
     /// this method if you want live updates.
     /// Pass the returned FileTree to the UI immediately; it's populated in-place during scan.
     ///
     /// `estimatedItemsHint`: when the caller already knows a trustworthy item-count
-    /// estimate — e.g. the previous scan's count, for a refresh behind a stale view —
+    /// estimate - e.g. the previous scan's count, for a refresh behind a stale view -
     /// pass it here to skip the statfs-based inode estimate entirely. That estimate is
     /// only loosely correlated with the true count on APFS (see `ScanProgress.
     /// fractionCompleted`'s doc comment); a prior scan's real count is a far better
@@ -961,7 +961,7 @@ public final class FileScanner: @unchecked Sendable {
         // Reset cancellation so a scanner instance can be reused after cancel().
         cancelState.withLock { $0 = false }
 
-        // Estimate total items using inode counts (blocking I/O, done off main thread) —
+        // Estimate total items using inode counts (blocking I/O, done off main thread) -
         // skipped entirely when the caller supplied a trustworthy hint.
         var estimatedItems = max(0, estimatedItemsHint)
         if estimatedItems == 0, let sf = filesystem.volumeStats(forPath: path) {
@@ -1033,7 +1033,7 @@ public final class FileScanner: @unchecked Sendable {
         let displayRootName = rootName.isEmpty ? path : rootName
 
         // Visited directory tracker (prevents hardlink/mount double-counting), seeded with
-        // the firmlink duplicates that (dev, inode) provably can't catch — but only when
+        // the firmlink duplicates that (dev, inode) provably can't catch - but only when
         // this scan actually covers both sides. A scan rooted at or below the Data volume
         // must enumerate everything (see `FirmlinkTable.isActive`).
         let firmlinkDuplicates = resolveFirmlinkDuplicates(forScanRoot: path)
@@ -1067,7 +1067,7 @@ public final class FileScanner: @unchecked Sendable {
         directoryWorkQueue.withLock { $0 = workQueue }
         defer { directoryWorkQueue.withLock { $0 = nil } }
         // 8 measured ~7% faster than 6 on a 10-core machine (~/code fixture: 5.51s → 5.12s);
-        // 10/12 workers showed no further gain — syscall latency, not core count, is the
+        // 10/12 workers showed no further gain - syscall latency, not core count, is the
         // limiting factor beyond this point.
         let defaultWorkerCount = isNetworkFS
             ? 4
@@ -1180,7 +1180,7 @@ public final class FileScanner: @unchecked Sendable {
         // under lock, causing heavy contention with 32 concurrent threads.
         tree.propagateSizes()
 
-        // Finalize progress — publish final counters before marking complete
+        // Finalize progress - publish final counters before marking complete
         let totalElapsed = CFAbsoluteTimeGetCurrent() - startTime
         let wasCancelled = isCancelled
         await MainActor.run {
@@ -1256,14 +1256,14 @@ public final class FileScanner: @unchecked Sendable {
         var fileCount = 0
         var dirCount = 0
 
-        // false means open() failed (permission denied, etc.) — matches original behaviour.
+        // false means open() failed (permission denied, etc.) - matches original behaviour.
         let opened = filesystem.forEachDirectoryEntry(path: dirPath) { rawEntry in
             guard !isCancelled else { return false }
 
             let entryName = rawEntry.name
             guard !entryName.isEmpty, entryName != ".", entryName != ".." else { return true }
 
-            // Skip symlinks entirely — following them causes double-counting and potential
+            // Skip symlinks entirely - following them causes double-counting and potential
             // infinite loops. See original FileScanner for detailed rationale.
             guard !rawEntry.isSymlink else { return true }
 
@@ -1353,7 +1353,7 @@ public final class FileScanner: @unchecked Sendable {
             }
         }
 
-        // Enqueue subdirectories — skips already-visited (dev, inode) pairs (hardlinks,
+        // Enqueue subdirectories - skips already-visited (dev, inode) pairs (hardlinks,
         // repeat mounts) and firmlink duplicates, which (dev, inode) cannot catch.
         for subdir in subdirs {
             guard !isCancelled else { break }
@@ -1380,7 +1380,7 @@ public final class FileScanner: @unchecked Sendable {
     /// Shared core for both raw-buffer scan strategies (immediate and deferred
     /// materialization): reads one directory's entries via `forEachRawDirectoryEntry`,
     /// classifies each into file/dir/bundle with size + counter accounting, then hands
-    /// the populated scratch buffer to `materialize` — the only variation point.
+    /// the populated scratch buffer to `materialize` - the only variation point.
     ///
     /// `materialize` performs bundle-size computation and writes the children into
     /// their destination (tree or deferred arena) in whichever order that destination
@@ -1388,7 +1388,7 @@ public final class FileScanner: @unchecked Sendable {
     /// sooner, then patches bundle sizes in place; deferred mode has no tree node to
     /// patch later, so it must bake bundle sizes into the scratch children before they
     /// are copied into the arena). It returns the first child index, which this shared
-    /// core then uses to enqueue subdirectories — identical in both strategies.
+    /// core then uses to enqueue subdirectories - identical in both strategies.
     private func processRawDirectory(
         filesystem: RealFilesystemProvider,
         dirPath: String,
@@ -1582,7 +1582,7 @@ public final class FileScanner: @unchecked Sendable {
             rawBuffer: rawBuffer,
             scratch: &scratch
         ) { scratch, parentIndex in
-            // No tree node exists yet to patch after the fact — bundle sizes must be
+            // No tree node exists yet to patch after the fact - bundle sizes must be
             // baked into the scratch children before they are copied into the arena.
             if self.computeBundleSizes {
                 for bundle in scratch.bundleDirs {

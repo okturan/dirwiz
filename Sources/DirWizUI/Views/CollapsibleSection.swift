@@ -9,7 +9,7 @@ import SwiftUI
 @MainActor
 public final class SectionCollapseStore {
     /// The app's store. Tests must construct their own with an isolated `UserDefaults`
-    /// rather than touching this one — writing to `.standard` from a test leaks
+    /// rather than touching this one - writing to `.standard` from a test leaks
     /// preferences into the user's real app.
     public static let shared = SectionCollapseStore()
 
@@ -35,7 +35,7 @@ public final class SectionCollapseStore {
         setCollapsed(!isCollapsed(id), for: id)
     }
 
-    /// Test seam — also used if a future release needs to reset the layout.
+    /// Test seam - also used if a future release needs to reset the layout.
     public func removeAll() {
         collapsed.removeAll()
         defaults.removeObject(forKey: key)
@@ -49,7 +49,7 @@ public struct CollapsibleSection<Content: View>: View {
     let id: String
     let title: String
     let icon: String
-    /// Optional trailing control in the header (e.g. an Analyze button) — placed so it
+    /// Optional trailing control in the header (e.g. an Analyze button) - placed so it
     /// stays reachable while the section is collapsed.
     let accessory: AnyView?
     @ViewBuilder let content: () -> Content

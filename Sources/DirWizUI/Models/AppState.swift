@@ -3,7 +3,7 @@ import DirWizCore
 import Quartz
 
 /// Central observable state for the application.
-/// All properties are MainActor-isolated — the compiler enforces that mutations
+/// All properties are MainActor-isolated - the compiler enforces that mutations
 /// only happen on the main thread. Background work uses `Task.detached` +
 /// `MainActor.run` to funnel results back.
 @MainActor
@@ -17,7 +17,7 @@ public final class AppState {
 
     /// Currently selected node in tree view / treemap. `didSet` persists the current
     /// selection + treemap root into the per-volume session (plan 038, `AppState+Scan.swift`)
-    /// so the next launch can restore "where you were" — every call site across the app
+    /// so the next launch can restore "where you were" - every call site across the app
     /// (tree clicks, keyboard nav, search, treemap, trash-restore) assigns this property
     /// directly rather than through a single function, so `didSet` is the one choke point
     /// that sees them all.
@@ -25,7 +25,7 @@ public final class AppState {
         didSet { saveSelectionAndRootSession() }
     }
 
-    /// Coordinator for Quick Look panel — holds data source / controller conformance.
+    /// Coordinator for Quick Look panel - holds data source / controller conformance.
     public let quickLookCoordinator = QLPreviewCoordinator()
 
     /// Navigation state (treemap root, breadcrumb path, back/forward stacks).
@@ -81,7 +81,7 @@ public final class AppState {
     /// Whether a Spotlight recency query is in progress.
     public var isRecencyQueryRunning: Bool = false
 
-    /// How the treemap paints its rectangles. A user preference, not scan state — it is
+    /// How the treemap paints its rectangles. A user preference, not scan state - it is
     /// deliberately NOT reset by `resetForNewScan()`, and persists across launches.
     public var treemapRenderStyle: TreemapRenderStyle = .cushion {
         didSet {
@@ -143,7 +143,7 @@ public final class AppState {
     public var isFSMonitoringActive: Bool = false
 
     /// True while `applyAccumulatedChanges()` (AppState+Analysis.swift) is splicing the
-    /// accumulated `fsChanges` into the displayed tree — drives the change badge's spinner
+    /// accumulated `fsChanges` into the displayed tree - drives the change badge's spinner
     /// and slots into `HeavyTaskKind.applyChanges` for the shared exclusivity matrix.
     /// Deliberately NOT `scanProgress.isScanning`: that flag also blanks the detail pane
     /// (`ContentView`'s `isScanning && staleViewAsOf == nil` gate), which would defeat the
@@ -198,16 +198,16 @@ public final class AppState {
     }
 
     /// One-line human-readable summary of the most recently completed scan (warm
-    /// or cold) — e.g. "Refreshed 3 folders from last scan in 0.4s" or "Scanned
+    /// or cold) - e.g. "Refreshed 3 folders from last scan in 0.4s" or "Scanned
     /// 12,345 items in 2.1s". Rendered in the sidebar's completed-scan block. Nil
     /// until a scan completes; cleared by `resetForNewScan()`.
     public var lastScanSummary: String?
 
     /// Non-nil while the displayed tree is a restored cache not yet freshened by a
-    /// warm patch or cold rescan — drives the "Showing last scan · X ago" badge
+    /// warm patch or cold rescan - drives the "Showing last scan · X ago" badge
     /// (`staleBadgeText`) and tells the scan flow to keep the displayed tree browsable
     /// instead of blanking it while a refresh runs behind it. Set by `restoreOnLaunch()`;
-    /// cleared once any refresh (warm or cold) completes. NOT cleared on cancellation —
+    /// cleared once any refresh (warm or cold) completes. NOT cleared on cancellation -
     /// the stale view and its badge stay put since nothing newer replaced them.
     public var staleViewAsOf: Date?
 
@@ -265,7 +265,7 @@ public final class AppState {
     @ObservationIgnored let defaults: UserDefaults
 
     /// Per-volume, path-keyed exploration session (selection, treemap root, expansion)
-    /// persisted across launches — plan 038. Restored by `restoreOnLaunch()`; saved by
+    /// persisted across launches - plan 038. Restored by `restoreOnLaunch()`; saved by
     /// `saveSelectionAndRootSession()`/`saveExpandedPathsSession(_:)` (`AppState+Scan.swift`)
     /// and read/written directly by `TreeTableView` for its view-local expansion state.
     /// Shares `defaults` with `lastScannedVolumePath` so injecting one isolated suite in
@@ -357,9 +357,9 @@ public final class AppState {
         lastScanSummary = nil
     }
 
-    /// Clears every piece of state derived from the PREVIOUS tree's contents — index-keyed
+    /// Clears every piece of state derived from the PREVIOUS tree's contents - index-keyed
     /// overlays (search, recency, temporal diff), per-run analysis results, extension
-    /// stats — so a freshly assigned `fileTree` starts from a clean slate. Deliberately
+    /// stats - so a freshly assigned `fileTree` starts from a clean slate. Deliberately
     /// does NOT touch `scanSession`/`scanProgress`/`lastScanSummary`: those track the scan
     /// itself rather than the tree's content, and the cold-refresh-behind-stale completion
     /// swap (`AppState+Scan.swift`) needs to keep tracking its already-in-flight scan across
@@ -424,7 +424,7 @@ extension AppState {
     /// The single drill-down seam shared by the Extensions tab and the sidebar legend.
     ///
     /// It lived as a closure inside ContentView, which put it in the app executable where
-    /// the test target cannot reach it — and meant the legend could not reuse it without
+    /// the test target cannot reach it - and meant the legend could not reuse it without
     /// copying. Both surfaces now call this, so "clicking a file type" means one thing.
     public func drillDownToExtension(hash: UInt32, displayName: String) {
         // "Other" aggregates many extensions, so there is no single filter to apply.
@@ -444,7 +444,7 @@ extension AppState {
 extension AppState {
     /// "Search in this folder": scope search to a subtree and go there.
     ///
-    /// Stores the PATH, not the node index — `removeSubtree` renumbers every index, so a
+    /// Stores the PATH, not the node index - `removeSubtree` renumbers every index, so a
     /// stored index would silently come to mean a different folder after any trash action.
     /// `SearchView` re-resolves the path before each query.
     public func scopeSearch(toPath path: String, name: String) {

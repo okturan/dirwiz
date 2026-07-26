@@ -102,7 +102,7 @@ if [[ "$SIGN_IDENTITY" != "-" && -n "$NOTARY_KEY" && -n "$NOTARY_KEY_ID" && -n "
   xcrun notarytool submit "$ZIP" \
     --key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait
 
-  # Staple the ticket onto the .app (not the zip — stapler can't staple an archive),
+  # Staple the ticket onto the .app (not the zip - stapler can't staple an archive),
   # then rebuild the zip from the stapled app so the ticket travels with the download
   # and the app passes Gatekeeper offline on other Macs.
   xcrun stapler staple "$APP"

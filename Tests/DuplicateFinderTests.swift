@@ -134,7 +134,7 @@ struct DuplicateFinderTests {
     func finalizeSplitsGroupDifferingInLastByte() async throws {
         // A true 128-bit hash collision can't be forced in a test, so this pins the
         // byte-verification step (DuplicateContentVerifier.exactGroupsLockStep) that
-        // DuplicateFinder's parallel finalize pass now calls per confirmed group — it
+        // DuplicateFinder's parallel finalize pass now calls per confirmed group - it
         // must still split out a file that differs by a single trailing byte instead
         // of treating the lock-step fast path's divergence as a match.
         let size = 8192
@@ -345,7 +345,7 @@ struct DuplicateFinderTests {
 
     @Test("Large files that differ only in middle bytes are not duplicates")
     func largeFilesNearDuplicate() async throws {
-        // Same head (4KB) and tail (4KB) — only middle byte differs.
+        // Same head (4KB) and tail (4KB) - only middle byte differs.
         // The partial hash (head+tail) would call these duplicates,
         // but the full-file hash must correctly distinguish them.
         let a = Data(repeating: 0xAA, count: 65_536)
@@ -540,7 +540,7 @@ struct DuplicateFinderTests {
         // Enough real groups to spread work across grouping, hashing, and the
         // parallel finalize pass, so a prompt cancel has a chance to land in any
         // of them. Exactly which phase observes Task.isCancelled first isn't
-        // pinned — only that the scan always returns instead of hanging or crashing.
+        // pinned - only that the scan always returns instead of hanging or crashing.
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("DupFinderCancelMidRun-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -637,14 +637,14 @@ struct DuplicateFinderTests {
 
     @Test("All-hardlink group is removed entirely")
     func allHardlinksNoGroup() async throws {
-        // Two files that are hardlinks of each other — same inode, so no real duplication.
+        // Two files that are hardlinks of each other - same inode, so no real duplication.
         let content = Data(repeating: 0xAF, count: 4096)
         let (url, cleanup) = try createTempFiles([
             "file.bin": content,
         ])
         defer { cleanup() }
 
-        // Hardlink file.bin to another name — both point to the same inode.
+        // Hardlink file.bin to another name - both point to the same inode.
         let filePath = url.appendingPathComponent("file.bin").path
         let linkPath = url.appendingPathComponent("hardlink.bin").path
         let rc = Darwin.link(filePath, linkPath)

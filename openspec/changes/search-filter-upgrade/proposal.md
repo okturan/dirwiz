@@ -10,7 +10,7 @@ Search is instant but its filters are minimal (files/dirs, category, fixed min-s
 - Size filter gains a maximum bound (range, not just minimum).
 - New modified-date filter with presets (any / 24h / 7d / 30d / 1y / older than 1y / older than 2y).
 - Scope-to-folder: context-menu action ("Search in this folder") on tree rows sets a subtree scope, shown as a clearable chip; search matches only nodes under that folder.
-- All filters compose (AND across filter kinds, OR within the extension set) as O(1) per-node predicates — no content I/O, preserving the instant architecture.
+- All filters compose (AND across filter kinds, OR within the extension set) as O(1) per-node predicates - no content I/O, preserving the instant architecture.
 - Out of scope (follow-up): typed query tokens (`ext:png size:>100mb`); saved searches.
 
 ## Capabilities
@@ -19,7 +19,7 @@ Search is instant but its filters are minimal (files/dirs, category, fixed min-s
 - `search-filters`: the extension multi-filter, size range, modified-date presets, subtree scoping, and their composition/UI rules.
 
 ### Modified Capabilities
-None — no baseline specs exist yet.
+None - no baseline specs exist yet.
 
 ## Impact
 

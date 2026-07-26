@@ -10,14 +10,14 @@ import Foundation
 /// Nested under `AppSupportEnvSuites` (TestHelpers.swift) and wrapped in
 /// `withTemporaryAppSupportDir` throughout: every test here either calls `TreeCache.load`
 /// directly or drives a real scan to completion, and a completed scan's deferred bundle
-/// sizing always ends with a `TreeCache.save` — both read `DIRWIZ_APP_SUPPORT_DIR`, so
+/// sizing always ends with a `TreeCache.save` - both read `DIRWIZ_APP_SUPPORT_DIR`, so
 /// leaving it unset would touch the real `~/Library/Application Support/DirWiz` directory.
 ///
 /// Each `@Test` is a plain (non-isolated) `async` function that just forwards into
 /// `withTemporaryAppSupportDir`; the actual `AppState`-touching body is a `@MainActor`
 /// method instead. `withTemporaryAppSupportDir` is an ordinary global `async` function
 /// (not `@MainActor`), so under Swift 6 strict concurrency a MainActor-isolated closure
-/// can't be handed to it directly — splitting "isolated body" from "env-var wrapper"
+/// can't be handed to it directly - splitting "isolated body" from "env-var wrapper"
 /// sidesteps that without weakening either.
 extension AppSupportEnvSuites {
 
@@ -40,7 +40,7 @@ struct LaunchRestoreTests {
         return (defaults, { defaults.removePersistentDomain(forName: suiteName) })
     }
 
-    /// Polls `condition` on the main actor until it's true or `timeout` elapses — the
+    /// Polls `condition` on the main actor until it's true or `timeout` elapses - the
     /// public scan entry points (`startSelectedVolumeScan`, `startFullRescan`,
     /// `restoreOnLaunch`'s auto-refresh) all dispatch an internal `Task` and return
     /// immediately, so tests need to wait for that background work to settle.
@@ -148,7 +148,7 @@ struct LaunchRestoreTests {
     /// earlier `startSelectedVolumeScan`-only coverage (ScanSupervisionTests) missed:
     /// `restoreOnLaunch` runs on EVERY cold app launch and is usually the FIRST code to
     /// ever touch a stored cache. Its own `TreeCache.loadResult` call invalidates
-    /// (deletes) a structurally-corrupt file as a side effect — so if `restoreOnLaunch`
+    /// (deletes) a structurally-corrupt file as a side effect - so if `restoreOnLaunch`
     /// itself doesn't capture the reason before bailing out, NOTHING later ever gets a
     /// second chance to see it; the file is already gone. A test that instead calls
     /// `startSelectedVolumeScan()` directly on a `defaults` with no remembered path
@@ -184,7 +184,7 @@ struct LaunchRestoreTests {
         )
         // ultrareview-caught (bug_001): without this, selectedVolume stays nil and
         // VolumePickerView.refreshVolumes silently auto-selects a DIFFERENT volume the
-        // next time the sidebar appears — the "Scan history" popover, the "Scan Volume"
+        // next time the sidebar appears - the "Scan history" popover, the "Scan Volume"
         // button, and everything else downstream of selectedVolume would then target
         // the wrong volume, defeating the whole point of naming `path` in the message
         // above.
@@ -252,7 +252,7 @@ struct LaunchRestoreTests {
         state.restoreOnLaunch()
 
         // Immediately after restoreOnLaunch: tree visible from cache, badge active,
-        // volume selected — all before any enumeration has happened.
+        // volume selected - all before any enumeration has happened.
         #expect(state.fileTree != nil)
         #expect(state.fileTree?.count == scannedCount)
         #expect(state.staleViewAsOf != nil)
@@ -335,13 +335,13 @@ struct LaunchRestoreTests {
         state.startFullRescan()
 
         // While the background cold scan runs, the stale view must remain untouched
-        // and browsable — same tree object, same selection, badge still up.
+        // and browsable - same tree object, same selection, badge still up.
         #expect(state.staleViewAsOf != nil)
         #expect(state.fileTree === tree)
         #expect(state.selectedNodeIndex == notesIndex)
 
-        // `!isScanning` alone is ambiguous here — it's equally true before the background
-        // Task has even started as it is once the scan completes — so wait on
+        // `!isScanning` alone is ambiguous here - it's equally true before the background
+        // Task has even started as it is once the scan completes - so wait on
         // `staleViewAsOf` clearing instead, which only happens once the real completion
         // swap runs.
         await waitUntil { state.staleViewAsOf == nil }
@@ -371,8 +371,8 @@ struct LaunchRestoreTests {
         // Several thousand real files/directories slow the (real, on-disk) rescan enough
         // that cancelling as soon as `isScanning` flips true has a comfortable window to
         // land mid-flight rather than after the scan has already finished. `cancel()`
-        // called any earlier would be a no-op — `scan()` resets its own cancel flag at
-        // its start (see FileScannerTests' `cancelledScanNoCrash`) — so this polls for
+        // called any earlier would be a no-op - `scan()` resets its own cancel flag at
+        // its start (see FileScannerTests' `cancelledScanNoCrash`) - so this polls for
         // the flip instead of guessing a fixed delay.
         var layout: [String: UInt64] = [:]
         for dir in 0..<150 {

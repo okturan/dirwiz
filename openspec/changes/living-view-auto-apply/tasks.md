@@ -1,4 +1,4 @@
-# Tasks — Living View Auto-Apply
+# Tasks - Living View Auto-Apply
 
 ## 1. Policy core
 
@@ -36,12 +36,12 @@
 - **Guards outrank the storm signal, deliberately.** Suggesting a full rescan *during* a
   scan is nonsense, and mid-scan the pending set is about to be discarded wholesale.
 - **Deferral never latches.** Each tick re-decides from current state, so whatever was
-  pending applies as soon as the guard lifts — pinned by tests for the overlay and the
+  pending applies as soon as the guard lifts - pinned by tests for the overlay and the
   heavy-task slot.
 - The storm threshold is deliberately the same 5,000 as warm start's
   `unknownDirectoryCountBackstop`, with a test asserting they match: two different answers
   to "too many changed directories to splice" would be a bug waiting to happen.
-- Pausing keeps WATCHING — it suppresses the automatic splice only, so the pending count
+- Pausing keeps WATCHING - it suppresses the automatic splice only, so the pending count
   still accumulates and manual Apply still works. Pausing is persisted; silently resuming
   next launch would be exactly the surprise pausing exists to prevent.
 - Every pill state names its reason. A view that quietly stops updating is worse than one
@@ -50,7 +50,7 @@
   indices, so cached result indices would otherwise describe a tree that no longer exists.
 - Two self-inflicted bugs worth recording. A `ScrollView`-in-`ScrollView` (from the earlier
   duplicates work) and, here, a search-and-replace that rewrote `AppState()` *inside* the
-  `stateWithTree()` helper itself, making it infinitely recursive — signal 11 on every test
+  `stateWithTree()` helper itself, making it infinitely recursive - signal 11 on every test
   in the suite, with no message. When a whole suite dies at once, suspect the shared helper.
 
 ## Cache continuity (4.3, added after the first pass)

@@ -115,7 +115,7 @@ struct AnalyzerWalkTests {
         let nodes = tree.nodesSnapshot()
 
         let task = Task {
-            // Cancel the currently-running task synchronously, before any work happens —
+            // Cancel the currently-running task synchronously, before any work happens -
             // deterministic, unlike racing a concurrent cancel() against a tight sync loop.
             withUnsafeCurrentTask { $0?.cancel() }
             var bodyRan = false
@@ -336,7 +336,7 @@ struct AnalyzerWalkTests {
 
     @Test("iCloudAnalyzer.relativeComponents handles root at /, exact-match ancestor, root-inside-container, and non-boundary false positives")
     func iCloudRelativeComponentsHandlesRootVariants() throws {
-        // Root "/" — every absolute path is "inside" it; components are the full path split.
+        // Root "/" - every absolute path is "inside" it; components are the full path split.
         #expect(
             iCloudAnalyzer.relativeComponents(of: "/Users/alice/Library/Mobile Documents/", from: "/")
                 == ["Users", "alice", "Library", "Mobile Documents"]
@@ -427,7 +427,7 @@ struct AnalyzerWalkTests {
         let result = await iCloudAnalyzer().analyze(tree: tree)
 
         // The synthetic path doesn't exist on disk, so queryStatus can't classify it as
-        // downloaded/cloud-only/downloading — but it must still be found and counted, which
+        // downloaded/cloud-only/downloading - but it must still be found and counted, which
         // is what this test is actually checking (the walk reaches the right subtree and
         // nowhere else). Plain Documents content must never be considered.
         let totalCount = result.groups.reduce(0) { $0 + $1.fileCount }
@@ -457,8 +457,8 @@ struct AnalyzerWalkTests {
 
     // MARK: - SpaceAnalyzer characterization (pins pre-refactor behavior)
     //
-    // SpaceAnalyzer's outer walk visits nodes in array-index order, which — for any tree a
-    // real scan produces — is always ancestor-before-descendant (a child's index is always
+    // SpaceAnalyzer's outer walk visits nodes in array-index order, which - for any tree a
+    // real scan produces - is always ancestor-before-descendant (a child's index is always
     // greater than its parent's; propagateSizes(), sortAllChildren(), etc. all depend on this
     // same invariant elsewhere in the codebase). Combined with "claim a matched directory's
     // full displaySize, then skip all its descendants", this means: whichever category's
@@ -530,7 +530,7 @@ struct AnalyzerWalkTests {
     @Test("SpaceAnalyzer sorts independent categories by size descending")
     func spaceAnalyzerOrdersCategoriesBySizeDescending() async throws {
         // Both subtrees share the "Library/Developer" prefix, so they're nested under one
-        // shared ancestor here — two independent nestedDir() calls with a shared prefix would
+        // shared ancestor here - two independent nestedDir() calls with a shared prefix would
         // each build their own "Library" wrapper, producing two sibling nodes with the same
         // name under root, a shape no real filesystem (or scan) can ever produce.
         let tree = makeTree(rootPath: "/Users/tester", [
@@ -551,7 +551,7 @@ struct AnalyzerWalkTests {
     /// This test deliberately builds a tree no real scan can produce: a child node whose
     /// array index is *lower* than its own parent's. `FileTree.propagateSizes()`,
     /// `sortAllChildren()`, and the removeSubtree rebuild all depend on parent-index <
-    /// child-index holding for every node — the real scanner guarantees it structurally
+    /// child-index holding for every node - the real scanner guarantees it structurally
     /// (a directory can't get a node until it's discovered, and children are only
     /// discovered after their parent). `replaceContents` is the one construction path that
     /// doesn't enforce it.
@@ -562,15 +562,15 @@ struct AnalyzerWalkTests {
     /// directory) is visited before any of its children and immediately claims itself
     /// exactly, so the branch was unreachable in practice. Here, ChildA (index 2) is
     /// visited before its own parent Caches (index 3), so it wasn't yet a "descendant of
-    /// a claimed node" and was claimed on its own — in addition to Caches's own later,
+    /// a claimed node" and was claimed on its own - in addition to Caches's own later,
     /// separate exact-match claim. Two claims, two paths, sizes NOT deduplicated
     /// (12,345 + 999).
     ///
     /// New world (node-anchoring): `application_caches` resolves straight to the
     /// "Library/Caches" node (index 3) via `FileTree.descendPath`, by name, without ever
-    /// walking the tree looking for matches. ChildA is never visited — its index relative
+    /// walking the tree looking for matches. ChildA is never visited - its index relative
     /// to its parent is irrelevant because nothing iterates node order anymore. Only
-    /// Caches's own `displaySize` (999 — this hand-built tree never calls
+    /// Caches's own `displaySize` (999 - this hand-built tree never calls
     /// `propagateSizes()`, unlike `makeTree`, so ChildA's size was never bubbled up into
     /// it) is claimed. This is the accepted divergence: the old branch is gone, not
     /// reproduced. Nodes: 0=root, 1=Library, 2=ChildA (parent=3, but index < 3), 3=Caches

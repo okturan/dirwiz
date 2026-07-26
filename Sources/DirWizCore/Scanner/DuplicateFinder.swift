@@ -10,7 +10,7 @@ import Synchronization
 /// in 8-byte (UInt64) word-sized chunks for speed, with a byte-at-a-time tail
 /// handler for the remaining bytes.
 ///
-/// This is intentionally NOT a cryptographic hash — it trades collision
+/// This is intentionally NOT a cryptographic hash - it trades collision
 /// resistance below 2^-64 for throughput, which is appropriate here because:
 ///  - Files are pre-grouped by exact byte-size before hashing.
 ///  - A partial-hash pass (FNV-1a on head+tail) eliminates most non-duplicates.
@@ -92,7 +92,7 @@ final class ProgressCounter: @unchecked Sendable {
 /// GCD-based timer bridge that reads a `ProgressCounter` every 250ms on a
 /// real OS thread and dispatches progress updates to the main actor.
 /// Unlike `Task.sleep`, GCD timers are not affected by cooperative pool
-/// starvation — they fire reliably even when all Swift Concurrency threads
+/// starvation - they fire reliably even when all Swift Concurrency threads
 /// are busy hashing files.
 private final class ProgressTimerBridge: @unchecked Sendable {
     private let timer: DispatchSourceTimer
@@ -284,7 +284,7 @@ public struct DuplicateScanReport: Sendable {
 public final class DuplicateFinder {
 
     /// Minimum file size to consider. Files under this threshold are skipped.
-    /// Set to 1 to exclude zero-byte files (e.g., .gitkeep, .DS_Store stubs) —
+    /// Set to 1 to exclude zero-byte files (e.g., .gitkeep, .DS_Store stubs) -
     /// they are technically "duplicates" of each other but not useful to report.
     private let minimumFileSize: UInt64
 
@@ -819,7 +819,7 @@ public final class DuplicateFinder {
                             return FinalizeGroupReport(index: index, groups: [])
                         }
 
-                        // Deduplicate by scan-time (device, inode) metadata — hardlinked files share both.
+                        // Deduplicate by scan-time (device, inode) metadata - hardlinked files share both.
                         // This avoids a path rebuild + lstat round-trip for every confirmed file.
                         var seenInodes: [DevIno: UInt32] = [:]
                         for nodeIndex in indices {

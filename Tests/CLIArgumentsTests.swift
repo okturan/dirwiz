@@ -71,7 +71,7 @@ struct SanitizeForTerminalTests {
 
     @Test("OSC injection sequence has its control bytes neutralized")
     func oscSequenceNeutralized() {
-        // ESC ] 0 ; pwned BEL — a terminal title-set OSC sequence.
+        // ESC ] 0 ; pwned BEL - a terminal title-set OSC sequence.
         let payload = "evil\u{1B}]0;pwned\u{07}name"
         #expect(sanitizeForTerminal(payload) == "evil\u{FFFD}]0;pwned\u{FFFD}name")
     }

@@ -1,4 +1,4 @@
-# Tasks — Snapshot History Store
+# Tasks - Snapshot History Store
 
 ## 1. Store core (DirWizCore/Diff)
 
@@ -29,7 +29,7 @@
 ## Implementation notes (as built)
 
 - **A stored-uncompressed mode was required, not optional.** LZFSE expands tiny and
-  high-entropy inputs, and `compression_encode_buffer` then returns 0 — so the first
+  high-entropy inputs, and `compression_encode_buffer` then returns 0 - so the first
   implementation could not write a small snapshot at all (every store test failed with
   `encodeFailed`). The container header now carries a mode byte, and encode falls back to
   storing the payload verbatim when compression does not actually help.
@@ -42,7 +42,7 @@
   checkpoints AFTER writing the new file. Because `list()` self-heals a missing index by
   adopting every `.dwcp` on disk, the very first checkpoint was adopted as a "Recovered"
   pin and then added again. Reading the timeline before the write fixes it.
-- Retention never evicts a pin — not even to get under budget. Where a pinned store exceeds
+- Retention never evicts a pin - not even to get under budget. Where a pinned store exceeds
   the budget the honest answer is to tell the user, not to delete the thing they named.
 - `--name` had to be added to `CLIArguments.valueFlags`. Without it,
   `snapshot /path --name foo` parses "foo" as a second positional; a subcommand reading
@@ -58,13 +58,13 @@
 
 - The diff banner's date is now a menu listing every checkpoint newest-first, each with its
   own delta and pin marker, with a footer giving the count and total bytes on disk.
-  Selecting one calls `selectDiffBaseline`, which RECOMPUTES the overlay — the diff arrays
+  Selecting one calls `selectDiffBaseline`, which RECOMPUTES the overlay - the diff arrays
   are index-keyed to the current tree, so leaving them in place would paint one
   checkpoint's diff using another's numbers.
 - A checkpoint that has since been thinned away drops the overlay rather than continuing to
   show the previous diff.
 - The camera action now opens a small sheet: naming a moment pins it, "Save Unnamed"
-  records an ordinary thinnable checkpoint. An all-whitespace name is treated as unnamed —
+  records an ordinary thinnable checkpoint. An all-whitespace name is treated as unnamed -
   pinning something the user cannot identify later is worse than not pinning.
 - Still Phase B per the proposal: the full timeline scrubber UI (cards, scrubbing) is not
   built; this is a picker, not a scrubber.

@@ -50,7 +50,7 @@ public struct iCloudAnalyzer: Sendable {
     /// Scoped to the known iCloud container subtrees instead of walking every node: on a
     /// typical scan (e.g. the whole home directory), iCloud files are a tiny fraction of the
     /// tree, so building a path and issuing a `resourceValues` syscall for every non-iCloud
-    /// file was almost entirely wasted work. Also checks `Task.isCancelled` per file — each
+    /// file was almost entirely wasted work. Also checks `Task.isCancelled` per file - each
     /// file already pays for a syscall, so per-file cancellation is cheap relative to that.
     public func analyze(tree: FileTree) async -> iCloudAnalysisResult {
         let snapshot = tree.pathBuildingSnapshot()
@@ -99,7 +99,7 @@ public struct iCloudAnalyzer: Sendable {
             }
 
             // Every file reached from a container subtree root is, by construction, under
-            // one of the two iCloud prefixes — no need to re-check the path.
+            // one of the two iCloud prefixes - no need to re-check the path.
             let path = FileTree.pathFromSnapshot(
                 at: index, nodes: nodes,
                 stringPool: snapshot.stringPool, rootPath: snapshot.rootPath
@@ -188,7 +188,7 @@ public struct iCloudAnalyzer: Sendable {
         nodes: [FileNode], stringPool: Data, rootPath: String
     ) -> [UInt32] {
         // If the scan root itself is inside (or equal to) a container, everything under it
-        // is in scope by transitivity — there's no narrower subtree to find.
+        // is in scope by transitivity - there's no narrower subtree to find.
         for prefix in iCloudPrefixes where relativeComponents(of: rootPath, from: prefix) != nil {
             return [0]
         }
@@ -205,7 +205,7 @@ public struct iCloudAnalyzer: Sendable {
 
     /// Path components of `child` relative to `ancestor`, when `ancestor` is `child` itself
     /// or a path-boundary-respecting prefix of it. Returns nil when `ancestor` is not an
-    /// ancestor of (or equal to) `child` — including a merely-textual prefix match with no
+    /// ancestor of (or equal to) `child` - including a merely-textual prefix match with no
     /// "/" boundary (e.g. ancestor "/Users/al" must not match child "/Users/alice/...").
     static func relativeComponents(of child: String, from ancestor: String) -> [String]? {
         guard child.hasPrefix(ancestor) else { return nil }

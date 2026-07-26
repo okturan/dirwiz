@@ -1,7 +1,7 @@
 import Foundation
 import DirWizCore
 
-/// DirWiz CLI — command-line disk analysis using DirWizCore.
+/// DirWiz CLI - command-line disk analysis using DirWizCore.
 ///
 /// Usage:
 ///   dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>]
@@ -251,7 +251,7 @@ struct DirWizCLI {
 
     // MARK: - Snapshot Command
 
-    /// Lists a volume's recorded checkpoints from the index — nothing is decompressed,
+    /// Lists a volume's recorded checkpoints from the index - nothing is decompressed,
     /// which is the reason the index carries names and summaries at all.
     static func handleSnapshotList(args: [String]) {
         let parsed = CLIArguments(args)
@@ -298,7 +298,7 @@ struct DirWizCLI {
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        print("Checkpoints for \(sanitizeForTerminal(path)) — \(checkpoints.count), "
+        print("Checkpoints for \(sanitizeForTerminal(path)) - \(checkpoints.count), "
               + "\(SizeFormatter.shared.format(store.totalStoredBytes())) on disk")
         for c in checkpoints {
             let pin = c.isPinned ? "*" : " "
@@ -553,7 +553,7 @@ struct DirWizCLI {
 
     static func printUsage() {
         errPrint("""
-        DirWiz CLI — Disk space analyzer
+        DirWiz CLI - Disk space analyzer
 
         Usage:
           dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>] [-q]
@@ -582,7 +582,7 @@ struct DirWizCLI {
           -h, --help   Show this help
 
         Notes:
-          snapshot/diff key the saved snapshot by the exact path string you pass —
+          snapshot/diff key the saved snapshot by the exact path string you pass -
           use the same spelling (e.g. always without a trailing slash) for both
           commands, or diff will report "no snapshot found" even though one exists.
         """)

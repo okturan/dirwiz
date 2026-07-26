@@ -58,7 +58,7 @@ public struct CheckpointChangeSummary: Codable, Sendable, Equatable {
 /// LZFSE container around the existing `.tdiff` payload.
 ///
 /// LZFSE comes from Apple's own Compression framework, so the zero-external-dependency
-/// rule holds. The header is checked on every read and ANY doubt returns nil — same
+/// rule holds. The header is checked on every read and ANY doubt returns nil - same
 /// fail-closed discipline as `TreeCache`: a snapshot that decodes to garbage would produce
 /// a confidently wrong diff, which is worse than no diff.
 enum SnapshotContainer {
@@ -68,7 +68,7 @@ enum SnapshotContainer {
     /// `version` is the low byte of the version field; the high byte flags storage mode.
     /// LZFSE can EXPAND small or already-dense inputs (and `compression_encode_buffer`
     /// simply returns 0 when the result would not fit), so a stored-uncompressed mode is
-    /// required, not an optimisation — without it a small snapshot could never be written.
+    /// required, not an optimisation - without it a small snapshot could never be written.
     static let modeCompressed: UInt8 = 0
     static let modeStored: UInt8 = 1
 
@@ -167,7 +167,7 @@ public enum SnapshotRetention {
     public static let defaultBudgetBytes: UInt64 = 500 * 1_024 * 1_024
 
     /// Returns the checkpoints to DELETE. Pinned checkpoints are never returned: a name is
-    /// the user saying "keep this", and retention must not overrule that — not even to stay
+    /// the user saying "keep this", and retention must not overrule that - not even to stay
     /// under budget, where the honest answer is to tell them rather than delete their pin.
     public static func evictions(
         from checkpoints: [SnapshotCheckpoint],

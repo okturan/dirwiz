@@ -9,7 +9,7 @@ public final class NavigationState {
     /// Root node for treemap display (navigation into subdirectories).
     public var treemapRootIndex: UInt32 = 0
 
-    /// Navigation path for treemap breadcrumb — always canonical (root -> current).
+    /// Navigation path for treemap breadcrumb - always canonical (root -> current).
     public var treemapPath: [UInt32] = [0]
 
     var backStack: [UInt32] = []

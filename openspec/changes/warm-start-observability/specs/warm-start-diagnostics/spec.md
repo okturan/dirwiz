@@ -11,10 +11,10 @@ When a cache file exists on disk for the target path but fails to load (structur
 
 #### Scenario: No cache ever existed
 - **WHEN** a volume has never been scanned before
-- **THEN** the resulting cold scan's summary does not claim a cache was rejected — it reads as a first scan, not a failure
+- **THEN** the resulting cold scan's summary does not claim a cache was rejected - it reads as a first scan, not a failure
 
 ### Requirement: A cache rejected at launch surfaces a reason without auto-scanning
-When the app's launch-time restore (`restoreOnLaunch`) discovers that the previously scanned volume's cache exists but fails to load, the system SHALL surface the rejection reason (via the summary shown at launch and the decision history) without automatically starting a scan — the existing empty-launch-state behavior for "nothing to restore" is unchanged; only the explanation is added.
+When the app's launch-time restore (`restoreOnLaunch`) discovers that the previously scanned volume's cache exists but fails to load, the system SHALL surface the rejection reason (via the summary shown at launch and the decision history) without automatically starting a scan - the existing empty-launch-state behavior for "nothing to restore" is unchanged; only the explanation is added.
 
 #### Scenario: Corrupted cache discovered at launch
 - **WHEN** the app launches, a prior scan's path is remembered, and that path's cache file exists but is structurally corrupted
@@ -22,7 +22,7 @@ When the app's launch-time restore (`restoreOnLaunch`) discovers that the previo
 
 #### Scenario: Behavior matches the no-cache-at-all case except for the message
 - **WHEN** comparing a launch where no cache was ever written against a launch where a cache existed but was rejected
-- **THEN** both leave the app in the same empty, no-scan-running state — only the rejected case's summary explains why
+- **THEN** both leave the app in the same empty, no-scan-running state - only the rejected case's summary explains why
 
 ### Requirement: Warm-patch abandonment surfaces a reason
 When a warm-start patch is attempted but abandoned mid-flight (unresolved changed paths, or a change resolving to the scan root with nothing narrower), the resulting cold fallback SHALL carry a specific reason through the same mechanism as a planner-declined warm start, not a silent, unexplained cold scan.

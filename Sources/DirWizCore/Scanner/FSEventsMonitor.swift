@@ -28,7 +28,7 @@ public struct DirectoryChangeSummary: Identifiable, Sendable {
 /// Monitors filesystem changes using FSEvents after initial scan.
 ///
 /// Uses the low-level C callback FSEvents API, which requires an unmanaged
-/// self pointer — hence `@unchecked Sendable`. All mutable state is guarded
+/// self pointer - hence `@unchecked Sendable`. All mutable state is guarded
 /// by `lock`.
 public final class FSEventsMonitor: @unchecked Sendable {
 
@@ -182,7 +182,7 @@ public final class FSEventsMonitor: @unchecked Sendable {
 // MARK: - C Callback
 
 /// Top-level C function used as the FSEventStream callback.
-/// Must not capture any context — the monitor reference comes via `clientCallBackInfo`.
+/// Must not capture any context - the monitor reference comes via `clientCallBackInfo`.
 private let fsEventsCallback: FSEventStreamCallback = {
     _, clientCallBackInfo, numEvents, eventPaths, eventFlags, _ in
 

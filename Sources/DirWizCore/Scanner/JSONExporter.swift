@@ -26,7 +26,7 @@ public struct JSONExporter: Sendable {
     ///
     /// Streams bytes directly from the flat node array via `JSONWriter` instead of
     /// materializing the whole tree as a `[String: Any]` graph and handing it to
-    /// Foundation's general-purpose JSON serializer — large scans no longer duplicate
+    /// Foundation's general-purpose JSON serializer - large scans no longer duplicate
     /// every node as boxed Foundation objects before serializing.
     public func export(
         tree: FileTree,
@@ -117,7 +117,7 @@ public struct JSONExporter: Sendable {
         }
 
         /// Writes a node's fixed fields (name/size/allocatedSize/modifiedDate/type/
-        /// extension) and leaves its object open — the caller decides whether to open
+        /// extension) and leaves its object open - the caller decides whether to open
         /// a "children" array next or close the object immediately.
         func writeHeader(_ index: Int) {
             let node = nodes[index]

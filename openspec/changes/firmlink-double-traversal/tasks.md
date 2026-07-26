@@ -1,4 +1,4 @@
-# Tasks — Firmlink-Aware Traversal
+# Tasks - Firmlink-Aware Traversal
 
 ## 1. Firmlink table (DirWizCore)
 
@@ -15,23 +15,23 @@
 
 ## 3. Tests
 
-- [x] 3.1 Fixture-based single-count test using an injected table over a synthetic tree with a simulated duplicate branch — must assert BOTH the total and the per-path attribution, since a total-only assertion passes intermittently against the racy unfixed code
+- [x] 3.1 Fixture-based single-count test using an injected table over a synthetic tree with a simulated duplicate branch - must assert BOTH the total and the per-path attribution, since a total-only assertion passes intermittently against the racy unfixed code
 - [x] 3.2 Determinism test: scan the same fixture repeatedly, assert identical per-path sizes every run
 - [x] 3.3 Non-firmlinked Data content survives (a path under the Data root that is not in the table keeps its bytes)
 - [x] 3.4 Subtree scan unaffected: scanning the Data root directly enumerates everything
 - [x] 3.5 Fail-open test: empty/absent table reproduces pre-change behavior exactly
-- [x] 3.6 Warm-start equivalence gates still pass (`SubtreeRescanTests`, `WarmStartTests`) — the patched tree must still equal a fresh cold scan under the new traversal
+- [x] 3.6 Warm-start equivalence gates still pass (`SubtreeRescanTests`, `WarmStartTests`) - the patched tree must still equal a fresh cold scan under the new traversal
 
 ## 4. Verification and docs
 
 - [x] 4.1 Before/after on a real `/` scan: record root total, `/Applications`, `/Library`, `/System/Library/AssetsV2`, and the `statfs` figure; confirm the duplicate is gone and previously-stranded directories report their real sizes
 - [x] 4.2 Confirm scan wall time is unchanged (the table is 19 rows read once)
 - [x] 4.3 Full suite green; CLAUDE.md scanner section records why `(dev, inode)` cannot catch firmlinks (synthetic id vs real inode, identical `dev`) so the mechanism isn't rediscovered
-- [x] 4.4 Release note: root-volume totals drop, and this is a correction — the previous total exceeded the volume's physical capacity
+- [x] 4.4 Release note: root-volume totals drop, and this is a correction - the previous total exceeded the volume's physical capacity
 
 ## Implementation notes (as built)
 
-- Deduplication is folded into `VisitedDirectories.shouldTraverse(path:dev:inode:)` rather than threaded as a new parameter through eight enumeration signatures. It deliberately does NOT mark the inode visited when skipping, so the `/`-side copy stays free to claim it — marking it would trade a double count for a silent omission.
+- Deduplication is folded into `VisitedDirectories.shouldTraverse(path:dev:inode:)` rather than threaded as a new parameter through eight enumeration signatures. It deliberately does NOT mark the inode visited when skipping, so the `/`-side copy stays free to claim it - marking it would trade a double count for a silent omission.
 - `FileScanner.resolveFirmlinkDuplicates(forScanRoot:)` is the single resolution point, used by both `scan` and `rescanSubtrees`; a test-only initializer injects the set because APFS has no directory hard links, so real firmlinks cannot be reproduced in a fixture.
 - Verified on the live volume: root total 1065.1 GB → 1019.3 GB, `/Library` 0.0 GB → 92.6 GB, `/System/Library/AssetsV2` 0.0 GB → 47.8 GB, all three Data-side duplicates skipped. Full suite 507 tests green including the warm-start equivalence gates.
 - A test caught a latent CRLF parsing bug: `split(separator: "\n")` never splits at `\r\n` because Swift treats it as one grapheme, so the second field silently absorbed the following line. Fixed with `whereSeparator: { $0.isNewline }`.

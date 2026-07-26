@@ -47,7 +47,7 @@ struct ContentView: View {
                         )) {
                             Image(systemName: "clock.arrow.circlepath")
                         }
-                        .help("Recency Heatmap — dim files unused for 2+ years (Cmd+Opt+R)")
+                        .help("Recency Heatmap - dim files unused for 2+ years (Cmd+Opt+R)")
                         .keyboardShortcut("r", modifiers: [.command, .option])
                         .disabled(!appState.scanProgress.scanComplete)
 
@@ -80,7 +80,7 @@ struct ContentView: View {
                         )) {
                             Image(systemName: "timelapse")
                         }
-                        .help("Temporal Diff — highlight changes since snapshot (Cmd+Opt+D)")
+                        .help("Temporal Diff - highlight changes since snapshot (Cmd+Opt+D)")
                         .keyboardShortcut("d", modifiers: [.command, .option])
                         .disabled(
                             !appState.scanProgress.scanComplete
@@ -148,7 +148,7 @@ struct ContentView: View {
                 // warm-start-observability: `restoreOnLaunch`'s cache-rejected-at-launch
                 // path sets `lastScanSummary` without ever running a scan (nothing
                 // completed, so `scanComplete` stays false and the branch above never
-                // fires) — without this branch, that summary would be set but literally
+                // fires) - without this branch, that summary would be set but literally
                 // never shown anywhere.
                 launchNoticeSummary(text: summary)
             }
@@ -171,7 +171,7 @@ struct ContentView: View {
                 Text("Full Disk Access not granted")
                     .font(.system(size: 11, weight: .medium))
                 // The skipped count folds in here rather than as a second warning line in
-                // the scan summary — one alarm, one action (skipped-dirs-honesty).
+                // the scan summary - one alarm, one action (skipped-dirs-honesty).
                 Text(fdaBannerDetail)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -192,7 +192,7 @@ struct ContentView: View {
     private var fdaBannerDetail: String {
         let skipped = appState.scanProgress.skippedDirectories
         guard skipped > 0 else { return "Results will be incomplete" }
-        return "Results will be incomplete — \(skipped) folder\(skipped == 1 ? "" : "s") couldn't be read"
+        return "Results will be incomplete - \(skipped) folder\(skipped == 1 ? "" : "s") couldn't be read"
     }
 
     private var scanSummary: some View {
@@ -236,8 +236,8 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             // Skipped-dirs line: only the quiet (FDA-granted) style renders here. The
-            // FDA-missing case folds into `fullDiskAccessBanner` above — one alarm, one
-            // action — instead of a second independent warning (skipped-dirs-honesty).
+            // FDA-missing case folds into `fullDiskAccessBanner` above - one alarm, one
+            // action - instead of a second independent warning (skipped-dirs-honesty).
             if SkippedDirsPresentation.style(
                 fdaGranted: appState.hasFullDiskAccess,
                 skippedCount: appState.scanProgress.skippedDirectories
@@ -251,7 +251,7 @@ struct ContentView: View {
     }
 
     /// warm-start-observability: shown in place of `scanSummary` when `restoreOnLaunch`
-    /// discovered a rejected cache without ever running a scan — `lastScanSummary` is set
+    /// discovered a rejected cache without ever running a scan - `lastScanSummary` is set
     /// but `scanProgress.scanComplete` never flips true (nothing completed), so the full
     /// `scanSummary` block (which assumes a finished scan: elapsed time, item counts)
     /// would be dishonest here. Deliberately minimal: just the explanation, plus the same
@@ -273,7 +273,7 @@ struct ContentView: View {
     }
 
     /// warm-start-observability: quiet, always-available affordance for "why has this
-    /// been cold-scanning lately" — reuses the skipped-dirs-honesty popover pattern.
+    /// been cold-scanning lately" - reuses the skipped-dirs-honesty popover pattern.
     /// Shown whenever a volume is selected; the popover itself handles the
     /// empty-history case.
     @ViewBuilder
@@ -423,7 +423,7 @@ struct ContentView: View {
     }
 
     /// Shown in place of `scanSummary` while a restored cache is on screen and not yet
-    /// freshened — the tree/treemap below stay fully interactive the whole time (see the
+    /// freshened - the tree/treemap below stay fully interactive the whole time (see the
     /// `isScanning && staleViewAsOf == nil` gate on `detailContent`).
     private func staleBadge(text: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -443,7 +443,7 @@ struct ContentView: View {
 
     /// Live "N folders changed · Refresh" row shown inside `scanSummary` once
     /// Living-view status. Monitoring auto-starts after every completed scan and
-    /// accumulated changes splice themselves in once `LiveRefreshPolicy` says so — this
+    /// accumulated changes splice themselves in once `LiveRefreshPolicy` says so - this
     /// pill exists to make that visible and reversible, not to be the trigger.
     ///
     /// This replaces the old "N folders changed · Refresh" badge and reverses plan 037's
@@ -516,7 +516,7 @@ struct ContentView: View {
         }
         switch appState.liveRefreshDecision {
         case .storm(let count):
-            return "\(SizeFormatter.shared.formatCount(count)) folders changed — too many to patch"
+            return "\(SizeFormatter.shared.formatCount(count)) folders changed - too many to patch"
         case .deferred(let reason):
             switch reason {
             case .temporalDiffActive: return "\(pending) pending · waiting for the diff overlay"
@@ -585,7 +585,7 @@ struct ContentView: View {
                         // Top: table or scanning placeholder.
                         Group {
                             // A restored stale view has real content to show even while
-                            // the background refresh runs — only the ordinary empty-start
+                            // the background refresh runs - only the ordinary empty-start
                             // scan (no `staleViewAsOf`) blanks the pane for the placeholder.
                             if appState.scanProgress.isScanning && appState.staleViewAsOf == nil {
                                 scanningPlaceholder
@@ -758,7 +758,7 @@ struct ContentView: View {
     /// Choose which recorded checkpoint the diff overlay compares against.
     ///
     /// Newest first, with each entry's own delta so the list reads as a timeline rather than
-    /// a pile of dates. The footer shows what the history costs on disk — keeping history
+    /// a pile of dates. The footer shows what the history costs on disk - keeping history
     /// silently consuming space is exactly the thing this app exists to expose.
     private func checkpointPicker(current: TemporalSnapshot, currentLabel: String) -> some View {
         let checkpoints = appState.temporalDiff.availableCheckpoints

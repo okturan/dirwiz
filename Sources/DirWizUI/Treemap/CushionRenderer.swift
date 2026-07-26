@@ -41,14 +41,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     var selectedNodeIndex: UInt32?
 
     /// Mirrors `AppState.scanProgress.isScanning` (Plan 044). Gates the scan-time layout
-    /// budget in `recomputeLayoutIfNeeded`/`shouldSkipScanTimeRelayout` — false for the
+    /// budget in `recomputeLayoutIfNeeded`/`shouldSkipScanTimeRelayout` - false for the
     /// completion layout and all post-scan interaction layouts, which always run
     /// full-depth and are never skipped.
     var isScanning: Bool = false
 
     var hoveredNodeIndex: UInt32?
 
-    /// Painting style only — both styles consume the same `SquarifyLayout` output, so hit
+    /// Painting style only - both styles consume the same `SquarifyLayout` output, so hit
     /// testing, zoom and the spatial index keep working off one set of rects regardless.
     var renderStyle: TreemapRenderStyle = .cushion
 
@@ -72,13 +72,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     /// Wall-clock completion time, duration, and node count of the most recent
     /// *scan-time* layout (only updated while `isScanning` was true when that layout was
-    /// computed) — feeds the sparsity gate in `shouldSkipScanTimeRelayout()`. Reset in
+    /// computed) - feeds the sparsity gate in `shouldSkipScanTimeRelayout()`. Reset in
     /// `invalidateLayout()` so a new scan doesn't inherit a previous scan's timing.
     private var lastScanTimeLayoutCompletedAt: CFAbsoluteTime?
     private var lastScanTimeLayoutDuration: TimeInterval = 0
     private var lastScanTimeLayoutNodeCount: Int = 0
 
-    /// Instance buffer dirty tracking — skip rebuild when nothing changed.
+    /// Instance buffer dirty tracking - skip rebuild when nothing changed.
     var instanceBufferDirty: Bool = true
 
     /// Maps nodeIndex -> visible instance index for O(1) hover lookup.
@@ -173,13 +173,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             return
         }
 
-        // freshStart: currentViewportSize == .zero means force/invalidate was called —
+        // freshStart: currentViewportSize == .zero means force/invalidate was called -
         // skip scale preview since the layout data or root has changed.
         let freshStart = currentViewportSize == .zero
         pendingLayoutTask?.cancel()
 
         // Fix 3: Immediately scale existing rects to fill the new viewport.
-        // Coefs remain valid — they're computed in normalized [0,1] space per rect,
+        // Coefs remain valid - they're computed in normalized [0,1] space per rect,
         // so uniform proportional scaling leaves them unchanged.
         if !cachedLayout.isEmpty && !freshStart && sizeChanged {
             let sx = Float(viewportSize.width / currentViewportSize.width)
@@ -197,7 +197,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         currentViewportSize = viewportSize
         pendingLayoutSize = viewportSize
 
-        // Snapshot nodes ONCE — single lock acquisition, then layout runs lock-free.
+        // Snapshot nodes ONCE - single lock acquisition, then layout runs lock-free.
         let snapshot = tree.nodesSnapshot()
         let rootIndex = currentRootIndex
         let bounds = CGRect(origin: .zero, size: viewportSize)
@@ -248,7 +248,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     /// Sparsity gate (Plan 044, PRIMARY control): during an active scan, skip a periodic
     /// relayout unless both enough time and enough tree growth have passed since the
-    /// previous scan-time layout — see `ScanTimeLayoutBudget.shouldRunScanTimeLayout`.
+    /// previous scan-time layout - see `ScanTimeLayoutBudget.shouldRunScanTimeLayout`.
     /// Always false once scanning ends, so the completion layout (the forced revision
     /// bump) is never skipped.
     func shouldSkipScanTimeRelayout() -> Bool {
@@ -313,7 +313,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
         // Card style nests children inside their parent's padded interior so the directory
         // container shows as a frame (and a header strip where a label fits). This is a
-        // DRAWING transform applied here at instance-build time — `cachedLayout` is left
+        // DRAWING transform applied here at instance-build time - `cachedLayout` is left
         // untouched, so `SpatialGrid` keeps hit-testing full layout rects and the gaps
         // between cards stay clickable. Cushion style does none of this.
         let nestCards = (renderStyle == .cards)
@@ -366,7 +366,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             let nodeIdx = Int(tmRect.nodeIndex)
             guard nodeIdx < nodes.count else { continue }
 
-            // Containers are always kept — dropping one would erase the backdrop that makes
+            // Containers are always kept - dropping one would erase the backdrop that makes
             // its aggregated children read as contents rather than as a hole.
             if areaFloor > 0, !tmRect.isBackground, tmRect.width * tmRect.height < areaFloor {
                 continue
@@ -489,7 +489,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         }
 
         // Card style spends pixels per nesting level, so past the budget it can only draw
-        // sub-pixel slivers — hand the view back to cushion rather than draw a lie.
+        // sub-pixel slivers - hand the view back to cushion rather than draw a lie.
         effectiveRenderStyle =
             (renderStyle == .cards && CardBudget.decide(nodeCount: instanceCount) == .fallbackToCushion)
             ? .cushion : renderStyle

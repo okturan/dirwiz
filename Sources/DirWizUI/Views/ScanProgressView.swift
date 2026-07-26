@@ -28,7 +28,7 @@ public struct ScanProgressView: View {
                 }
 
                 // Determinate progress bar while the estimate is trustworthy (see
-                // `ScanProgress.fractionCompleted`), indeterminate otherwise — including
+                // `ScanProgress.fractionCompleted`), indeterminate otherwise - including
                 // mid-scan, if the estimate-undershoot latch trips. The percentage line is
                 // always present (a space when indeterminate) so that transition doesn't
                 // shift the stats grid below it.

@@ -110,7 +110,7 @@ struct WarmStartPlannerTests {
 
     @Test("Unknown directory count still warms under the defensive backstop")
     func nilDirectoryCountWarmsUnderBackstop() {
-        // Kept under the plan-042 `maxPatchRoots` default (48) — that gate is always on
+        // Kept under the plan-042 `maxPatchRoots` default (48) - that gate is always on
         // and unrelated to what this test exercises (the unknownDirectoryCountBackstop,
         // 5,000, which only applies once `cachedDirectoryCount` is nil). 40 is still
         // comfortably "many roots" for that purpose.
@@ -137,10 +137,10 @@ struct WarmStartPlannerTests {
         }
     }
 
-    @Test("1000+ raw events collapsing to 3 real folders still warms — the bug this fixes")
+    @Test("1000+ raw events collapsing to 3 real folders still warms - the bug this fixes")
     func manyRawEventsCollapsingToFewRootsWarms() {
         // Deep churn under three real folders produces a raw FSEvents path per touched
-        // file, but they all nest under the same 3 outermost roots — the planner must
+        // file, but they all nest under the same 3 outermost roots - the planner must
         // judge the collapsed count against the threshold, not the raw one.
         var rawPaths: [String] = []
         for folder in ["/root/a", "/root/b", "/root/c"] {
@@ -161,11 +161,11 @@ struct WarmStartPlannerTests {
 
     // MARK: - Cost-based rule (plan 042: judge by estimated WORK, not root count alone)
 
-    @Test("Few roots but a huge share of cached items falls back to cold — the incident shape")
+    @Test("Few roots but a huge share of cached items falls back to cold - the incident shape")
     func fewRootsHugeItemFractionFallsBackToCold() {
         // Exactly the reported incident: a handful of collapsed roots easily clears the
         // root-count threshold (3 of 1,000 dirs), but those roots are a subtree of
-        // 100k+ files — three quarters of everything the cache knows about.
+        // 100k+ files - three quarters of everything the cache knows about.
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(["/root/a", "/root/b", "/root/c"]),
@@ -239,7 +239,7 @@ struct WarmStartPlannerTests {
     @Test("A passing item fraction still defers to the root-count rule as a secondary cap")
     func itemFractionPassingStillSubjectToRootCountCap() {
         // 500 tiny changed roots (1 item apiece) sail under the 25% item threshold but
-        // blow through the 20% root-count cap — the cost-based rule isn't a replacement,
+        // blow through the 20% root-count cap - the cost-based rule isn't a replacement,
         // it's an ADDITIONAL gate.
         let manyTinyRoots = (0..<500).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
@@ -257,10 +257,10 @@ struct WarmStartPlannerTests {
 
     // MARK: - maxPatchRoots (plan 042 revision: removeChildren is O(tree) PER CALL)
 
-    @Test("Exactly maxPatchRoots (48) changed roots still warms — the cap's boundary")
+    @Test("Exactly maxPatchRoots (48) changed roots still warms - the cap's boundary")
     func maxPatchRootsBoundaryStillWarms() {
         // cachedDirectoryCount/cachedTotalItemCount chosen so neither the percentage rule
-        // nor the item-fraction rule is anywhere near its own threshold — isolates the
+        // nor the item-fraction rule is anywhere near its own threshold - isolates the
         // NEW absolute root-count cap specifically.
         let paths = (0..<48).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
@@ -301,12 +301,12 @@ struct WarmStartPlannerTests {
         }
     }
 
-    @Test("50 scattered roots with a trivially small item fraction still falls back to cold — the root-count cap is necessary on its own")
+    @Test("50 scattered roots with a trivially small item fraction still falls back to cold - the root-count cap is necessary on its own")
     func fiftyScatteredRootsTinyFractionStillFallsBackToCold() {
         // Mirrors 042's benchmark fixture shape (many changed roots, most individually
         // tiny): the item-fraction rule alone would WARM this (0.05% changed), and the
         // OLD percentage-of-directories rule alone would also warm it (50 of 1,000 = 5%,
-        // under the 20% threshold) — only `maxPatchRoots` catches it, because
+        // under the 20% threshold) - only `maxPatchRoots` catches it, because
         // `removeChildren`'s cost scales with ROOT COUNT, not with how much each root
         // individually contributes.
         let paths = (0..<50).map { "/root/dir\($0)" }
@@ -388,7 +388,7 @@ struct WarmStartPlannerEstimatedPatchItemCountTests {
         let f1 = FileNode()
         tree.addChildren([(node: f1, name: "f1")], parentIndex: aIndex)
 
-        // "/root/a/f1" is nested inside "/root/a" — only the outer root should be counted.
+        // "/root/a/f1" is nested inside "/root/a" - only the outer root should be counted.
         let count = WarmStartPlanner.estimatedPatchItemCount(
             forChangedPaths: ["/root/a", "/root/a/f1"],
             cachedTree: tree
@@ -446,11 +446,11 @@ struct PathCollapseTests {
 /// FSEvents reports the fully resolved on-disk path for every changed directory,
 /// trailing slash included. `FileManager.default.temporaryDirectory` (what
 /// `createTempTree` builds fixtures under) lives under `/var`, which is itself a
-/// symlink to `/private/var` — one of the handful of legacy aliases that Foundation's
+/// symlink to `/private/var` - one of the handful of legacy aliases that Foundation's
 /// own `resolvingSymlinksInPath` deliberately leaves untouched. Real scan roots
 /// ("/", "/Volumes/Name") never hit this alias; only `/tmp`-based test fixtures do.
 /// Resolve through raw `realpath(3)` so the root we scan/watch and the root FSEvents
-/// reports changes under are the same string — otherwise every reported path silently
+/// reports changes under are the same string - otherwise every reported path silently
 /// fails the tree's root-prefix check.
 private func realDirectoryPath(_ path: String) -> String {
     var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
@@ -464,7 +464,7 @@ private func stripTrailingSlash(_ path: String) -> String {
     return String(path.dropLast())
 }
 
-/// The FSEvents daemon journals filesystem operations asynchronously — there's a real,
+/// The FSEvents daemon journals filesystem operations asynchronously - there's a real,
 /// if small, dispatch lag between an operation happening and it landing in the journal.
 /// In production this is a non-issue (there's always wall-clock time between "cache
 /// saved" and "replay requested"), but a test that mutates and immediately replays can
@@ -484,11 +484,11 @@ struct FSEventsJournalTests {
         let root = realDirectoryPath(rawRoot)
         try await settleFSEventsJournal()  // let the fixture's own creation land first
 
-        // Captured before any mutation — mirrors what a cold scan or a prior warm
+        // Captured before any mutation - mirrors what a cold scan or a prior warm
         // start would have saved alongside the cached tree.
         let savedId = FSEventsJournal.currentEventId()
 
-        // Mutate with nothing watching — simulates a process restart where no
+        // Mutate with nothing watching - simulates a process restart where no
         // FSEventsMonitor was live in between.
         try Data(count: 50).write(to: URL(fileURLWithPath: root).appendingPathComponent("docs/added.txt"))
         try FileManager.default.createDirectory(atPath: root + "/newdir", withIntermediateDirectories: true)
@@ -506,10 +506,10 @@ struct FSEventsJournalTests {
         // With FileEvents (the flag that fixes the root-volume-scan regression: a file
         // changing deep in a huge directory no longer gets blamed on that whole
         // directory), FSEvents reports a newly created directory's OWN path directly,
-        // flagged ItemIsDir — the collector keeps directory-flagged paths as-is (only
+        // flagged ItemIsDir - the collector keeps directory-flagged paths as-is (only
         // file-flagged paths get reduced to their parent). This is strictly more precise
         // than the pre-fix behavior (blaming the parent, `root`, because a
-        // directory-only stream couldn't see past "root's listing changed") — a
+        // directory-only stream couldn't see past "root's listing changed") - a
         // narrower, cheaper target to patch, not a broader one.
         #expect(paths.contains(root + "/newdir"), "the new directory's own path should be reported changed; got \(paths)")
     }
@@ -557,9 +557,9 @@ extension AppSupportEnvSuites {
 @Suite("WarmStart Composed Pipeline Tests")
 struct WarmStartComposedPipelineTests {
 
-    /// Drives the real warm-start pipeline end to end — cold scan, cache save,
+    /// Drives the real warm-start pipeline end to end - cold scan, cache save,
     /// on-disk mutation (including a changed bundle, 028's one unit-untested branch),
-    /// journal replay, planner decision, subtree rescan — and asserts the result is
+    /// journal replay, planner decision, subtree rescan - and asserts the result is
     /// indistinguishable from a fresh cold scan of the same mutated fixture. This is
     /// the only place the composed pipeline is exercised as a whole rather than in parts.
     @Test("Warm start reproduces a fresh cold scan after mixed on-disk changes")
@@ -574,11 +574,11 @@ struct WarmStartComposedPipelineTests {
             // Padding directories: the planner's threshold is a *percentage* of the cached
             // tree's directory count, so the denominator needs to look like a real tree.
             // Without this, the fixture has only 4 directories total, and the two areas
-            // this test mutates below (docs + the bundle) collapse to 2 changed roots —
+            // this test mutates below (docs + the bundle) collapse to 2 changed roots -
             // 50% "churn" that correctly (if misleadingly, for a test) falls back to cold.
             // ~30 cheap, untouched directories bring the denominator to ~34, so the same
-            // 2 changed roots read as ~6% and the warm path — including the bundle-recompute
-            // branch this test exists to cover — actually gets exercised.
+            // 2 changed roots read as ~6% and the warm path - including the bundle-recompute
+            // branch this test exists to cover - actually gets exercised.
             for i in 0..<30 {
                 layout[String(format: "pad%02d/file.txt", i)] = 10
             }
@@ -589,7 +589,7 @@ struct WarmStartComposedPipelineTests {
             let root = realDirectoryPath(rawRoot)
             try await settleFSEventsJournal()  // let the fixture's own creation land first
 
-            // Step 1: cold scan, capturing the event id BEFORE the scan starts — same
+            // Step 1: cold scan, capturing the event id BEFORE the scan starts - same
             // convention the real cold-scan cache write-back uses.
             let savedEventId = FSEventsJournal.currentEventId()
             let coldScanner = FileScanner()
@@ -598,10 +598,10 @@ struct WarmStartComposedPipelineTests {
             await coldScanner.scan(path: root, progress: progress, tree: bootstrapTree)
             try TreeCache.save(tree: bootstrapTree, lastEventId: savedEventId)
 
-            // Step 2: mutate the fixture — a plain addition, a brand-new nested dir
+            // Step 2: mutate the fixture - a plain addition, a brand-new nested dir
             // (exercises the ancestor-resolution rule), and a grown file *inside* the
             // bundle (exercises rescanSubtrees' bundle-target branch: recompute size via
-            // computeBundleSize, no enumeration — 028's only branch without a dedicated
+            // computeBundleSize, no enumeration - 028's only branch without a dedicated
             // unit test).
             try Data(count: 150).write(to: URL(fileURLWithPath: root).appendingPathComponent("docs/added.log"))
             let newSub = URL(fileURLWithPath: root).appendingPathComponent("docs/newsub")
@@ -613,8 +613,8 @@ struct WarmStartComposedPipelineTests {
             try await settleFSEventsJournal()
 
             // Step 3: replay the journal + decide, exactly as the UI orchestration would.
-            // `cachedDirectoryCount` comes from `bootstrapTree` — the same tree just saved
-            // to cache in step 1 — since the real caller computes it from the loaded
+            // `cachedDirectoryCount` comes from `bootstrapTree` - the same tree just saved
+            // to cache in step 1 - since the real caller computes it from the loaded
             // cache's tree before deciding (AppState+Scan.swift's `directoryCount(in:)`).
             let replay = await FSEventsJournal.replay(root: root, since: savedEventId, timeout: 10)
             let cachedDirectoryCount = bootstrapTree.nodesSnapshot().reduce(0) { $0 + ($1.isDirectory ? 1 : 0) }

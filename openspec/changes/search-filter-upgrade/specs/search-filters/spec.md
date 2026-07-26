@@ -39,7 +39,7 @@ The system SHALL provide a "Search in this folder" context-menu action on tree r
 - **THEN** only matches whose path is under `~/Projects` appear; clearing the chip restores whole-tree search
 
 ### Requirement: Filter composition without content I/O
-Filters SHALL compose as AND across filter kinds (type, category, extensions, size, date, scope) and SHALL be evaluated purely against in-memory node data — no filesystem reads — preserving instant search behavior and the existing result cap semantics.
+Filters SHALL compose as AND across filter kinds (type, category, extensions, size, date, scope) and SHALL be evaluated purely against in-memory node data - no filesystem reads - preserving instant search behavior and the existing result cap semantics.
 
 #### Scenario: Combined filters
 - **WHEN** query "report", extensions {pdf}, size > 10 MB, last 30 days, and a folder scope are all active

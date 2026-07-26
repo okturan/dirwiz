@@ -2,7 +2,7 @@ import SwiftUI
 import DirWizCore
 
 /// Default column widths for the tree table, and the resizable-column specs derived
-/// from them. The specs — consumed through a shared `ColumnWidthsStore` — are the
+/// from them. The specs - consumed through a shared `ColumnWidthsStore` - are the
 /// live source of truth for layout; these constants only seed the defaults. Header
 /// and rows must consume the same store or columns drift per row.
 enum TreeTableColumns {

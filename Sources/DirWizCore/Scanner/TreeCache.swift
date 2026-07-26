@@ -1,7 +1,7 @@
 import Foundation
 
 /// Persists a scanned `FileTree` so the next launch can warm-start instead of
-/// re-enumerating the volume. FAIL-CLOSED: `load` returns `nil` on ANY doubt —
+/// re-enumerating the volume. FAIL-CLOSED: `load` returns `nil` on ANY doubt -
 /// a nil cache simply means a cold scan, i.e. today's behavior.
 ///
 /// Binary format (little-endian), current version 2:
@@ -23,7 +23,7 @@ import Foundation
 /// | stringPool bytes | |
 /// | checksum | UInt64 FNV-1a 64 over everything before it |
 ///
-/// Any change to `FileNode`'s stored layout MUST bump `formatVersion` — the stride
+/// Any change to `FileNode`'s stored layout MUST bump `formatVersion` - the stride
 /// guard catches size changes but not same-size field reorders (or, as with v2's
 /// `hasMultipleHardlinks` flag bit, new meaning assigned to existing bytes).
 ///
@@ -65,10 +65,10 @@ public enum TreeCache {
         }
 
         /// Short human reason, style-matched to `WarmStartPlanner.userFacingPoisonReason`
-        /// — routed through `coldFallbackReason` (AppState+Scan.swift) so a rejected
+        /// - routed through `coldFallbackReason` (AppState+Scan.swift) so a rejected
         /// cache reads as an explained event in the scan summary, not a silent,
         /// unexplained cold scan. Only meaningful when `isStructuralCorruption` is
-        /// true — `loadResult` never surfaces the non-structural cases as a rejection at
+        /// true - `loadResult` never surfaces the non-structural cases as a rejection at
         /// all (see its doc comment), so their strings here are unreachable in practice.
         var structuralCorruptionReason: String {
             switch self {
@@ -135,7 +135,7 @@ public enum TreeCache {
     // MARK: - Load
 
     /// Richer sibling of `load(for:)` (warm-start-observability): distinguishes "no
-    /// cache exists yet" (first-ever scan — not an anomaly) from "a cache exists but was
+    /// cache exists yet" (first-ever scan - not an anomaly) from "a cache exists but was
     /// rejected" (worth explaining to the user), sharing one decode pass with `load` so
     /// a large cache is never parsed twice just to explain a failure.
     public enum LoadOutcome: Sendable {
@@ -153,7 +153,7 @@ public enum TreeCache {
         } catch let error as DecodeError {
             guard error.isStructuralCorruption else {
                 // rootPathMismatch/volumeMismatch: per the doc comment on DecodeError,
-                // this file may still be valid for its actual owner — not an anomaly for
+                // this file may still be valid for its actual owner - not an anomaly for
                 // THIS lookup, so it reads exactly like no cache existing at all.
                 return .noCacheFile
             }
@@ -165,7 +165,7 @@ public enum TreeCache {
     }
 
     /// Fail-closed convenience over `loadResult`: nil on ANY doubt, discarding why.
-    /// Unchanged behavior/signature for every existing caller — only `startScan`
+    /// Unchanged behavior/signature for every existing caller - only `startScan`
     /// (AppState+Scan.swift) needs the richer `loadResult` to explain a rejection.
     public static func load(for rootPath: String) -> Payload? {
         if case .success(let payload) = loadResult(for: rootPath) {
@@ -237,7 +237,7 @@ public enum TreeCache {
         let stringPoolLen: UInt64 = try data.readLE(at: &cursor)
 
         // Bounds-check declared sizes against what's actually left in the file BEFORE
-        // allocating anything — a hostile/corrupt header declaring millions of nodes
+        // allocating anything - a hostile/corrupt header declaring millions of nodes
         // must not force a huge pre-allocation (plan-016 clamp discipline).
         let checksumSize = 8
         let remaining = data.count - cursor - checksumSize
@@ -263,7 +263,7 @@ public enum TreeCache {
             throw DecodeError.truncated
         }
 
-        // Reconstruct nodes via unaligned loads — the slice's start offset within the
+        // Reconstruct nodes via unaligned loads - the slice's start offset within the
         // file isn't guaranteed to satisfy FileNode's alignment, so `bindMemory` would
         // be unsafe. No long-lived pointer aliasing: everything is copied into `nodes`.
         var nodes = [FileNode]()
@@ -289,7 +289,7 @@ public enum TreeCache {
     }
 
     /// A corrupt cache can otherwise become an out-of-bounds read later in treemap/search
-    /// hot paths — this O(n) pass is the last line of defense before that ever happens.
+    /// hot paths - this O(n) pass is the last line of defense before that ever happens.
     private static func validateStructure(nodes: [FileNode], stringPoolCount: Int) throws {
         let count = nodes.count
         for node in nodes {

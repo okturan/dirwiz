@@ -6,11 +6,11 @@ import Foundation
 /// Coverage for plan 038: per-volume session persistence (selection, treemap root,
 /// expansion) restored across launches.
 ///
-/// `SessionStateStoreTests` (Step 1) covers the store in isolation — round-trip, per-volume
-/// isolation, corrupt data, cap enforcement — against a plain isolated `UserDefaults`
+/// `SessionStateStoreTests` (Step 1) covers the store in isolation - round-trip, per-volume
+/// isolation, corrupt data, cap enforcement - against a plain isolated `UserDefaults`
 /// suite, no `DIRWIZ_APP_SUPPORT_DIR` involved.
 ///
-/// `SessionStateRestoreTests` (Step 2) drives `AppState.restoreOnLaunch()` end to end —
+/// `SessionStateRestoreTests` (Step 2) drives `AppState.restoreOnLaunch()` end to end -
 /// same `TreeCache`/`AppSupportEnvSuites` pattern as `LaunchRestoreTests` (plan 036), since
 /// `TreeCache.load`/`save` read `DIRWIZ_APP_SUPPORT_DIR`.
 @MainActor
@@ -54,7 +54,7 @@ struct SessionStateStoreTests {
         }
     }
 
-    @Test("save persists — a new store on the same suite reads it back")
+    @Test("save persists - a new store on the same suite reads it back")
     func persistsAcrossInstances() {
         withDefaults { defaults in
             let store1 = SessionStateStore(defaults: defaults)
@@ -116,7 +116,7 @@ struct SessionStateStoreTests {
     @Test("JSON missing required fields returns nil rather than crashing")
     func corruptStorageMissingFieldsReturnsNil() {
         withDefaults { defaults in
-            // `expandedPaths` is non-optional — omitting it should fail to decode.
+            // `expandedPaths` is non-optional - omitting it should fail to decode.
             let raw = Data(#"{"selectedPath": "/a/b"}"#.utf8)
             defaults.set(raw, forKey: SessionStateStore.storageKey(forVolume: "/Volumes/Test"))
             let store = SessionStateStore(defaults: defaults)
@@ -285,7 +285,7 @@ struct SessionStateRestoreTests {
         }
         let docsPath = tree.path(at: docsIndex)
         let subPath = tree.path(at: subIndex)
-        // Neither of these existed in the fixture layout — simulates a folder/file
+        // Neither of these existed in the fixture layout - simulates a folder/file
         // deleted between the session being saved and this launch.
         let goneFilePath = subPath + "/gone-file.txt"
         let goneDirPath = subPath + "/gone-dir"

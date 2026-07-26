@@ -6,10 +6,10 @@ import Foundation
 ///
 /// `addChildren` is called once per directory during an immediate-mode scan. Before the fix
 /// it ran `nodes.reserveCapacity(nodes.count + children.count)` on every call, collapsing
-/// `Array`'s spare capacity to exactly the current count — so the next append reallocated and
+/// `Array`'s spare capacity to exactly the current count - so the next append reallocated and
 /// copied the entire node array. That is O(n) per directory and O(n²) across a scan.
 /// Reviewer's isolated measurement at 800k nodes over 160k small batches: 0.096s WITH the
-/// exact-reserve pattern vs 0.001s WITHOUT — ~100×, quadratic in tree size. The fix reserves
+/// exact-reserve pattern vs 0.001s WITHOUT - ~100×, quadratic in tree size. The fix reserves
 /// geometrically (double when growth is needed), restoring amortized O(1) appends.
 ///
 /// This test pins the *property*, not an absolute time: doubling the directory count must
@@ -19,12 +19,12 @@ import Foundation
 @Suite("FileNode Growth Tests", .serialized)
 struct FileNodeGrowthTests {
 
-    /// Files added per directory — a deliberately *small* per-call batch, the exact shape that
+    /// Files added per directory - a deliberately *small* per-call batch, the exact shape that
     /// defeats amortized growth under the old exact-reserve pattern.
     private static let filesPerDir = 3
 
     /// Build a tree with `directoryCount` sibling directories under the root, each populated by
-    /// its own `addChildren` call carrying `filesPerDir` files — one per-directory batch per
+    /// its own `addChildren` call carrying `filesPerDir` files - one per-directory batch per
     /// directory, matching how the immediate-mode scanner drives `addChildren`.
     ///
     /// Starts from a small-capacity tree (`stagingCapacityHint`) so the node array grows
@@ -47,7 +47,7 @@ struct FileNodeGrowthTests {
         tree.addChildren(dirs, parentIndex: 0)
 
         // The measured loop: one small addChildren per directory. Under the old pattern each
-        // call reallocated and copied the whole (growing) array — the O(n²) this guards against.
+        // call reallocated and copied the whole (growing) array - the O(n²) this guards against.
         var files: [(node: FileNode, name: String)] = []
         files.reserveCapacity(Self.filesPerDir)
         for _ in 0..<Self.filesPerDir {

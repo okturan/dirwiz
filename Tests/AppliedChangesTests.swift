@@ -6,14 +6,14 @@ import Foundation
 /// Coverage for plan 037: `AppState.applyAccumulatedChanges()`, the "N folders changed ·
 /// Refresh" badge's action. It reuses `FileScanner.rescanSubtrees` (028) exactly the way
 /// `commitWarmStart` (plan 036) does, so most cases here drive it with synthetically-seeded
-/// `fsChanges` for determinism — the splice engine itself is already equivalence-tested by
+/// `fsChanges` for determinism - the splice engine itself is already equivalence-tested by
 /// `SubtreeRescanTests`/`WarmStartTests`. One case (`realMonitorChangesAreAppliedAndRebaselined`)
 /// drives a real `FSEventsMonitor` end to end to prove the monitor-rebaseline bookkeeping
 /// actually clears what the monitor itself tracks, not just `AppState`'s mirrored copy.
 ///
 /// Nested under `AppSupportEnvSuites` (TestHelpers.swift) and wrapped in
 /// `withTemporaryAppSupportDir` throughout: every successful apply ends with a
-/// `TreeCache.save`, which reads `DIRWIZ_APP_SUPPORT_DIR` — leaving it unset would touch the
+/// `TreeCache.save`, which reads `DIRWIZ_APP_SUPPORT_DIR` - leaving it unset would touch the
 /// real `~/Library/Application Support/DirWiz` directory.
 extension AppSupportEnvSuites {
 
@@ -32,7 +32,7 @@ struct AppliedChangesTests {
         return (defaults, { defaults.removePersistentDomain(forName: suiteName) })
     }
 
-    /// Polls `condition` on the main actor until it's true or `timeout` elapses — mirrors
+    /// Polls `condition` on the main actor until it's true or `timeout` elapses - mirrors
     /// `LaunchRestoreTests`' helper of the same name (duplicated rather than shared, matching
     /// this repo's per-suite convention for these small test-only helpers).
     @MainActor
@@ -136,7 +136,7 @@ struct AppliedChangesTests {
         state.selectedNodeIndex = notesIndex
         state.setTreemapRoot(docsIndex, recordHistory: false)
 
-        // Add a sibling file under docs — notes.md itself is untouched and must survive.
+        // Add a sibling file under docs - notes.md itself is untouched and must survive.
         try Data(count: 250).write(to: URL(fileURLWithPath: path).appendingPathComponent("docs/added.txt"))
 
         state.fsChanges = [
@@ -176,7 +176,7 @@ struct AppliedChangesTests {
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
 
-        // A monitor doesn't have to be running for the accumulator itself to be seeded —
+        // A monitor doesn't have to be running for the accumulator itself to be seeded -
         // exercised here as `nil` to prove the guard on `fsEventsMonitor` is optional-safe.
         #expect(state.fsEventsMonitor == nil)
 
@@ -219,7 +219,7 @@ struct AppliedChangesTests {
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
 
-        // A path outside the tree's root can never resolve — `rescanSubtrees` reports it
+        // A path outside the tree's root can never resolve - `rescanSubtrees` reports it
         // unresolved, which `applyAccumulatedChanges` treats as untrustworthy.
         let outsidePath = "/nonexistent-outside-root-\(UUID().uuidString)"
         state.fsChanges = [
@@ -240,7 +240,7 @@ struct AppliedChangesTests {
         #expect(!state.scanProgress.isScanning)
         #expect(
             state.lastScanSummary?.hasPrefix("Scanned") == true,
-            "the fallback is a cold scan, not a warm patch — summary should read accordingly, got \(state.lastScanSummary ?? "nil")"
+            "the fallback is a cold scan, not a warm patch - summary should read accordingly, got \(state.lastScanSummary ?? "nil")"
         )
     }
 
@@ -310,7 +310,7 @@ struct AppliedChangesTests {
 
     // MARK: - Cache continuity under auto-apply (living-view-auto-apply 4.3)
 
-    /// Auto-apply calls this same function, so the cache write-back is the same code — but
+    /// Auto-apply calls this same function, so the cache write-back is the same code - but
     /// the living view means the app now splices for hours without anyone clicking, and the
     /// next launch's warm start depends on that write-back still being right afterwards.
     @Test("An apply persists the tree and an event id the next warm start can replay from")
@@ -374,7 +374,7 @@ struct AppliedChangesTests {
 // MARK: - Real-monitor integration (real FSEvents, temp-dir fixture)
 
 /// FSEvents reports the fully resolved on-disk path for every changed directory. Temp
-/// directories live under `/var`, itself a symlink to `/private/var` — resolve through
+/// directories live under `/var`, itself a symlink to `/private/var` - resolve through
 /// `realpath(3)` first so the root we scan/watch and the root FSEvents reports changes
 /// under are the same string. Mirrors `WarmStartTests.realDirectoryPath` (duplicated per
 /// this repo's per-suite convention for small test-only helpers).
@@ -384,7 +384,7 @@ private func realDirectoryPath(_ path: String) -> String {
     return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
 }
 
-/// FSEvents journals filesystem operations asynchronously — give it a moment to catch up
+/// FSEvents journals filesystem operations asynchronously - give it a moment to catch up
 /// before treating "now" as a clean boundary. Mirrors `WarmStartTests.settleFSEventsJournal`.
 private func settleFSEventsJournal() async throws {
     try await Task.sleep(for: .milliseconds(500))

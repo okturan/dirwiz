@@ -1,13 +1,13 @@
 /// Classifies paths under macOS-managed, SIP-protected locations where user cleanup
 /// is impossible or meaningless (trash fails under SIP; the OS owns the lifecycle).
 public enum SystemPathClassifier {
-    /// Path prefixes (boundary-respecting — each ends with "/", so a merely-textual
+    /// Path prefixes (boundary-respecting - each ends with "/", so a merely-textual
     /// prefix like "/Systemx/" can never match) considered system-managed.
-    /// Conservative list — expand deliberately, with a test per entry:
-    ///   /System/                     — sealed system volume + Preboot/Cryptexes via firmlinks
-    ///   /private/var/db/             — OS databases (dyld caches, ConfigurationProfiles…)
-    ///   /Library/Apple/               — Apple-managed support (e.g. Rosetta)
-    ///   /usr/ (EXCEPT /usr/local/)   — OS binaries; /usr/local is user territory
+    /// Conservative list - expand deliberately, with a test per entry:
+    ///   /System/                     - sealed system volume + Preboot/Cryptexes via firmlinks
+    ///   /private/var/db/             - OS databases (dyld caches, ConfigurationProfiles…)
+    ///   /Library/Apple/               - Apple-managed support (e.g. Rosetta)
+    ///   /usr/ (EXCEPT /usr/local/)   - OS binaries; /usr/local is user territory
     private static let systemPrefixes: [String] = [
         "/System/",
         "/private/var/db/",

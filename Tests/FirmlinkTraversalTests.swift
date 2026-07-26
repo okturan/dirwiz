@@ -4,7 +4,7 @@ import Foundation
 
 /// End-to-end coverage for firmlink deduplication in `FileScanner`.
 ///
-/// Real firmlinks cannot be reproduced in a fixture — APFS has no directory hard links, and
+/// Real firmlinks cannot be reproduced in a fixture - APFS has no directory hard links, and
 /// `FileManager.linkItem` on a directory recursively hardlinks the *files* inside it, which
 /// is a different (and deliberately out-of-scope) phenomenon. So these tests inject the
 /// duplicate-path set through `FileScanner`'s test seam and assert on traversal behavior:
@@ -33,7 +33,7 @@ struct FirmlinkTraversalTests {
 
     private func total(_ tree: FileTree) -> UInt64 { tree.node(at: 0)?.allocatedSize ?? 0 }
 
-    /// The core behavior: a directory named in the duplicate set contributes nothing —
+    /// The core behavior: a directory named in the duplicate set contributes nothing -
     /// neither its bytes nor its children.
     @Test("A duplicate path is not descended into and contributes no bytes")
     func duplicatePathIsSkipped() async throws {

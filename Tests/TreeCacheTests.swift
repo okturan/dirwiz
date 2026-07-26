@@ -5,10 +5,10 @@ import Foundation
 // MARK: - Test Helpers
 //
 // TreeCache's binary header is reproduced here (offsets, FNV-1a 64) so tests can
-// hand-patch a saved cache file and still recompute a valid checksum — the same
+// hand-patch a saved cache file and still recompute a valid checksum - the same
 // hand-assembled-header discipline used in TemporalDiffTests for TemporalSnapshot.
 //
-// `withTemporaryAppSupportDir` lives in TestHelpers.swift — shared with WarmStartTests,
+// `withTemporaryAppSupportDir` lives in TestHelpers.swift - shared with WarmStartTests,
 // which also needs a scratch TreeCache location.
 
 /// Build a small in-memory tree rooted at a real on-disk path (needed so TreeCache's
@@ -78,7 +78,7 @@ private func headerFieldOffsets(rootPath: String, volumeUUID: String) -> (nodeCo
     return (nodeCount: beforeNodeCount, stringPoolLen: stringPoolLenOffset, nodesStart: nodesStart)
 }
 
-/// Flip a single hex character of a UUID string, preserving its byte length exactly —
+/// Flip a single hex character of a UUID string, preserving its byte length exactly -
 /// used to craft a "different but valid-length" volume UUID.
 private func flippedUUID(_ uuid: String) -> String {
     var chars = Array(uuid)
@@ -183,7 +183,7 @@ struct TreeCacheTests {
             try data.write(to: url)
 
             // warm-start-observability: a structurally-corrupt cache must be
-            // distinguishable from "no cache exists" — not just both collapsing to nil.
+            // distinguishable from "no cache exists" - not just both collapsing to nil.
             // loadResult() is called FIRST and ONCE: it invalidates (deletes) a
             // structurally-corrupt file as a side effect, so calling load() first would
             // destroy the evidence before loadResult() ever saw it.
@@ -296,7 +296,7 @@ struct TreeCacheTests {
             try data.write(to: url)
 
             // A declared count this far past what's actually in the file trips the
-            // bounds guard before allocating — that guard throws .truncated (the
+            // bounds guard before allocating - that guard throws .truncated (the
             // file's on-disk content can't back up what the header claims).
             guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
                 Issue.record("expected .rejected for an impossible declared node count")
@@ -331,7 +331,7 @@ struct TreeCacheTests {
             try data.write(to: url)
 
             #expect(TreeCache.load(for: path) == nil)
-            // Not structural corruption — per TreeCache's own doc comment this file may
+            // Not structural corruption - per TreeCache's own doc comment this file may
             // still be valid for its actual owner, so it must NOT read as a rejection
             // (that would misleadingly tell the user "your cache was corrupted" when
             // really a different volume happens to be mounted at this path).
@@ -355,7 +355,7 @@ struct TreeCacheTests {
             let treeA = makeSimpleTree(rootPath: pathA)
             try TreeCache.save(tree: treeA, lastEventId: 1)
 
-            // (a) Distinct cache file — no cache was ever written for pathB.
+            // (a) Distinct cache file - no cache was ever written for pathB.
             #expect(TreeCache.load(for: pathB) == nil)
             guard case .noCacheFile = TreeCache.loadResult(for: pathB) else {
                 Issue.record("expected .noCacheFile when nothing was ever saved for this path")
@@ -373,7 +373,7 @@ struct TreeCacheTests {
             #expect(TreeCache.load(for: pathB) == nil)
             // Same reasoning as the volume-UUID case: a root-path mismatch means this
             // cache belongs to a different lookup, not that the requested lookup's
-            // cache is broken — must read as .noCacheFile, not .rejected.
+            // cache is broken - must read as .noCacheFile, not .rejected.
             guard case .noCacheFile = TreeCache.loadResult(for: pathB) else {
                 Issue.record("expected .noCacheFile (not .rejected) for a root-path mismatch")
                 return
@@ -401,7 +401,7 @@ struct TreeCacheTests {
 
             let url = TreeCache.cacheURL(for: path)
             var data = try Data(contentsOf: url)
-            // Root is node 0 — patch its firstChildIndex to point past the end of the tree.
+            // Root is node 0 - patch its firstChildIndex to point past the end of the tree.
             let patchOffset = offsets.nodesStart + firstChildFieldOffset
             patchUInt32(&data, at: patchOffset, to: UInt32(totalNodes + 10))
             recomputeChecksum(&data)

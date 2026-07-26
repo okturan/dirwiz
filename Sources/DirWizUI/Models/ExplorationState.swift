@@ -17,7 +17,7 @@ struct ExplorationCapture {
     /// Resolve a captured absolute path to the index of itself, or of the nearest
     /// surviving ancestor, in the CURRENT `tree`. Strips trailing path components one at
     /// a time and retries `FileTree.descendPath` until one resolves. Returns nil only
-    /// when `path` was never under this tree's root at all — once a path is confirmed to
+    /// when `path` was never under this tree's root at all - once a path is confirmed to
     /// be under the root, root itself (index 0) is always a valid last-resort resolution,
     /// since `descendPath` with zero components always returns 0.
     static func resolveOrAncestor(_ path: String, tree: FileTree) -> UInt32? {
@@ -37,13 +37,13 @@ struct ExplorationCapture {
 
 /// Shared path-splitting helper for resolving absolute paths against a `FileTree`
 /// snapshot. Used by `ExplorationCapture` (selection/treemap-root restore after a trash)
-/// and `TreeTableView` (expansion-set remap) — both need to turn a captured absolute path
+/// and `TreeTableView` (expansion-set remap) - both need to turn a captured absolute path
 /// back into tree-relative components before calling `FileTree.descendPath`.
 enum PathResolution {
     /// Split `path` into components relative to `rootPath`, or nil if `path` is neither
     /// `rootPath` itself nor a boundary-respecting descendant of it (e.g. rejects
     /// "/root-2" against root "/root"). Reimplements the pattern used by
-    /// `FileScanner.relativeComponents`/`iCloudAnalyzer.relativeComponents` — those are
+    /// `FileScanner.relativeComponents`/`iCloudAnalyzer.relativeComponents` - those are
     /// `internal` to DirWizCore and not visible from this module.
     static func relativeComponents(of path: String, rootPath: String) -> [String]? {
         if path == rootPath { return [] }

@@ -3,7 +3,7 @@ import Foundation
 @testable import DirWizCore
 
 /// Coverage for `WarmStartHistory` (warm-start-observability): a capped, per-volume,
-/// plain-JSON history — deliberately NOT held to `TreeCache`'s fail-closed binary
+/// plain-JSON history - deliberately NOT held to `TreeCache`'s fail-closed binary
 /// discipline, since losing this diagnostic history costs nothing functionally.
 ///
 /// Nested under `AppSupportEnvSuites` (TestHelpers.swift): every test here reads

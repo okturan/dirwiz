@@ -197,11 +197,11 @@ struct ScanSummaryComposerTests {
             ScanSummaryComposer.coldWithReason(
                 items: 12345, seconds: 2.1, reason: "312 folders (38%) changed since last scan"
             ) ==
-            "Scanned 12345 items in 2.1s — full scan: 312 folders (38%) changed since last scan"
+            "Scanned 12345 items in 2.1s - full scan: 312 folders (38%) changed since last scan"
         )
         #expect(
             ScanSummaryComposer.coldWithReason(items: 0, seconds: 0.05, reason: "change journal unavailable") ==
-            "Scanned 0 items in 0.1s — full scan: change journal unavailable"
+            "Scanned 0 items in 0.1s - full scan: change journal unavailable"
         )
     }
 
@@ -231,7 +231,7 @@ struct ScanSummaryComposerTests {
         let now = Date()
         #expect(
             ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: true, wasCancelled: false, now: now) ==
-            "Showing last scan · just now — updating…"
+            "Showing last scan · just now - updating…"
         )
     }
 
@@ -240,7 +240,7 @@ struct ScanSummaryComposerTests {
         let now = Date()
         #expect(
             ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: false, wasCancelled: true, now: now) ==
-            "Showing last scan · just now — refresh cancelled"
+            "Showing last scan · just now - refresh cancelled"
         )
     }
 
@@ -258,7 +258,7 @@ struct ScanSummaryComposerTests {
         let now = Date()
         #expect(
             ScanSummaryComposer.staleBadge(savedAt: now, isRefreshing: true, wasCancelled: true, now: now) ==
-            "Showing last scan · just now — updating…"
+            "Showing last scan · just now - updating…"
         )
     }
 }

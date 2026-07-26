@@ -45,7 +45,7 @@ public final class DuplicateState {
     /// Candidate ids currently being byte-verified.
     public var verifyingCandidateIDs: Set<UUID> = []
 
-    /// Candidate ids that were verified and produced NO identical group — same name, same
+    /// Candidate ids that were verified and produced NO identical group - same name, same
     /// size, different bytes. Surfaced so a rejected candidate reads as a checked answer
     /// rather than as a button that did nothing.
     public var rejectedCandidateIDs: Set<UUID> = []
@@ -82,7 +82,7 @@ public final class DuplicateState {
         resetInstant()
     }
 
-    /// Cleared both on a new scan and after any tree mutation — the candidate paths may no
+    /// Cleared both on a new scan and after any tree mutation - the candidate paths may no
     /// longer exist, and a stale candidate offering to verify a trashed file is worse than
     /// no candidate at all.
     public func resetInstant() {

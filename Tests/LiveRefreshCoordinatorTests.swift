@@ -9,7 +9,7 @@ import Foundation
 @MainActor
 struct LiveRefreshCoordinatorTests {
 
-    /// `canStartHeavyTask` requires a tree — correctly, since there is nothing to splice
+    /// `canStartHeavyTask` requires a tree - correctly, since there is nothing to splice
     /// into without one. Every state here gets a minimal one so the tests exercise the
     /// policy rather than the no-tree short circuit.
     private func stateWithTree() -> AppState {

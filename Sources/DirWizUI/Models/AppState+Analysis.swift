@@ -132,8 +132,8 @@ extension AppState {
 
     // MARK: - FSEvents Monitoring
 
-    /// Starts watching and begins the auto-apply loop. Called on every scan completion —
-    /// cold, warm, and post-restore refresh — so the living view is simply always on.
+    /// Starts watching and begins the auto-apply loop. Called on every scan completion -
+    /// cold, warm, and post-restore refresh - so the living view is simply always on.
     ///
     /// Plan 037's "decision 3a: no auto-apply, ever" is deliberately reversed here. That
     /// call was correct when the splice engine was new; it is now the same path warm start
@@ -169,7 +169,7 @@ extension AppState {
     }
 
     /// Pause/resume auto-apply. Watching continues while paused, so the pending count keeps
-    /// accumulating and the user can still apply manually — pausing suppresses the automatic
+    /// accumulating and the user can still apply manually - pausing suppresses the automatic
     /// splice, it does not blind the app.
     public func toggleLiveRefreshPaused() {
         liveRefreshPaused.toggle()
@@ -199,7 +199,7 @@ extension AppState {
         }
     }
 
-    /// Recomputes the verdict without acting — used when a guard changes (pause toggled,
+    /// Recomputes the verdict without acting - used when a guard changes (pause toggled,
     /// overlay disabled) so the pill updates immediately instead of at the next tick.
     public func evaluateLiveRefresh() {
         liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
@@ -231,14 +231,14 @@ extension AppState {
         liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
     }
 
-    /// Apply the accumulated FSEvents changes to the displayed tree incrementally — the
+    /// Apply the accumulated FSEvents changes to the displayed tree incrementally - the
     /// "N folders changed · Refresh" badge's action (plan 037, user decision 3a: no
-    /// auto-apply/debounced live mode, ever — the view only changes on an explicit click).
+    /// auto-apply/debounced live mode, ever - the view only changes on an explicit click).
     /// Reuses the same `rescanSubtrees` splice engine `commitWarmStart` (AppState+Scan.swift)
     /// uses for warm start, but deliberately skips that flow's `scanProgress.isScanning` /
     /// `staleViewAsOf` plumbing: this patch is meant to feel instantaneous, and blanking the
     /// detail pane while it runs would defeat that. `isApplyingChanges` is the one honest
-    /// signal it needs — it drives the badge's spinner and slots into the existing
+    /// signal it needs - it drives the badge's spinner and slots into the existing
     /// `HeavyTaskKind` exclusivity matrix via `.applyChanges`.
     ///
     /// No threshold gating: this is user-initiated and bounded by their own click, so an
@@ -256,7 +256,7 @@ extension AppState {
         let rootPath = tree.path(at: 0)
         let targets = fsChanges.map(\.path)
 
-        // Captured BEFORE the splice — same discipline as the cold-scan cache write-back
+        // Captured BEFORE the splice - same discipline as the cold-scan cache write-back
         // (AppState+Scan.swift): any change landing during the splice below is covered by
         // the *next* refresh's replay/monitor window rather than lost (029's
         // overlap-is-idempotent rationale).
@@ -268,10 +268,10 @@ extension AppState {
         let report = await scanner.rescanSubtrees(targets, tree: tree, progress: progress)
 
         // A new scan (warm or cold) superseded this apply while the splice was running.
-        // In practice this can no longer happen — `AppState+Scan.swift`'s `startScan`
+        // In practice this can no longer happen - `AppState+Scan.swift`'s `startScan`
         // now declines to start any new scan while `isApplyingChanges` is true, the
         // symmetric counterpart of `canStartHeavyTask` refusing to start this apply while
-        // a scan is running — so `scanToken` can't move during this `await`. Repairing
+        // a scan is running - so `scanToken` can't move during this `await`. Repairing
         // `isApplyingChanges` here anyway is cheap insurance: without it, an unforeseen
         // path to this guard would strand the flag true forever, permanently blocking
         // every `HeavyTaskKind` (`.applyChanges` is one of the cases `canStartHeavyTask`
@@ -283,7 +283,7 @@ extension AppState {
 
         // Failure honesty (same rule `commitWarmStart` applies to its own patch): an
         // unresolved path, or every target collapsing to the tree root because nothing
-        // narrower survived resolution, means the patch can't be trusted — prefer a full
+        // narrower survived resolution, means the patch can't be trusted - prefer a full
         // refresh over publishing a half-applied tree. `startFullRescan()` is 036-safe.
         guard report.unresolvedPaths.isEmpty, !report.rescannedRoots.contains(rootPath) else {
             isApplyingChanges = false
@@ -292,7 +292,7 @@ extension AppState {
         }
 
         // This flow's scanner isn't registered with `scanSession` (see the doc comment
-        // above), so nothing in the UI can cancel it directly today — but the enclosing
+        // above), so nothing in the UI can cancel it directly today - but the enclosing
         // Task could still be cancelled some other way (e.g. the view task it runs on
         // going away). Leave `fsChanges`/the cache untouched rather than claiming full
         // coverage over a possibly-partial splice (028's rescan is idempotent, so simply
@@ -430,13 +430,13 @@ extension AppState {
     }
 
     /// Reset all index-keyed OVERLAY state (search results, recency factors, temporal
-    /// diff arrays — all recomputable, not part of "where was I") and bump the layout
+    /// diff arrays - all recomputable, not part of "where was I") and bump the layout
     /// revision after a tree mutation. When `capture` was taken (via `ExplorationCapture`)
-    /// BEFORE the mutation, also restores the user's interactive position — selection and
-    /// treemap root/path — by re-resolving the captured paths against the post-mutation
+    /// BEFORE the mutation, also restores the user's interactive position - selection and
+    /// treemap root/path - by re-resolving the captured paths against the post-mutation
     /// tree: paths survive `removeSubtree`'s index renumbering, indices don't. A surviving
     /// node keeps its (remapped) index; a deleted node's nearest surviving ancestor takes
-    /// its place. Back/forward navigation stacks always clear — they're index histories
+    /// its place. Back/forward navigation stacks always clear - they're index histories
     /// with no path equivalent, and preserving them is complexity without user value.
     /// Shared by every tree-mutating action so the reset+restore list can't drift between
     /// callers.
@@ -471,7 +471,7 @@ extension AppState {
 
     /// Recomputes the name+size duplicate candidates from the current tree.
     ///
-    /// Pure in-memory over a snapshot — no file content is read — so it is cheap enough to
+    /// Pure in-memory over a snapshot - no file content is read - so it is cheap enough to
     /// run on tab open and after mutations without asking the user to press anything.
     public func refreshInstantDuplicates() {
         guard let tree = fileTree, !scanProgress.isScanning else { return }
@@ -507,7 +507,7 @@ extension AppState {
             await MainActor.run {
                 self.duplicate.verifyingCandidateIDs.remove(candidate.id)
                 if confirmed.isEmpty {
-                    // Same name, same size, different bytes — a real answer, so say so
+                    // Same name, same size, different bytes - a real answer, so say so
                     // instead of leaving a button that appears to have done nothing.
                     self.duplicate.rejectedCandidateIDs.insert(candidate.id)
                     return

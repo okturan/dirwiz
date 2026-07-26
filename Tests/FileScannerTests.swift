@@ -360,7 +360,7 @@ struct FileNodeTests {
         dirA.isDirectory = true
         var dirB = FileNode()
         dirB.isDirectory = true
-        // A has size 100, B has size 1000 — after sort B should come first.
+        // A has size 100, B has size 1000 - after sort B should come first.
         dirA.fileSize = 100
         dirB.fileSize = 1000
         tree.addChildren([
@@ -441,7 +441,7 @@ struct FileNodeTests {
     func sortAllChildrenThreeElementCycle() {
         // A(10), B(30), C(20) inserted in that order.
         // Sorted descending → B(30), C(20), A(10).
-        // perm = [1, 2, 0] which forms a 3-cycle — the old broken algorithm
+        // perm = [1, 2, 0] which forms a 3-cycle - the old broken algorithm
         // produced [C, A, B] (20, 10, 30) instead of the correct [B, C, A] (30, 20, 10).
         let tree = FileTree()
         tree.setRootPath("/test")
@@ -534,7 +534,7 @@ struct FileNodeTests {
         root.isDirectory = true
         tree.addNode(root, name: "root")
 
-        // One `addChildren` call for root's two children — `addChildren` OVERWRITES the
+        // One `addChildren` call for root's two children - `addChildren` OVERWRITES the
         // parent's firstChildIndex/childCount on every call, so two separate calls for
         // the same parent would silently orphan whichever batch came first.
         var dirA = FileNode()
@@ -582,7 +582,7 @@ struct FileNodeTests {
         staging.addNode(placeholder, name: "")
 
         // A single `addChildren` call per parent, exactly like production `scanDirectory`
-        // does — `addChildren` OVERWRITES the parent's firstChildIndex/childCount on every
+        // does - `addChildren` OVERWRITES the parent's firstChildIndex/childCount on every
         // call, so two calls for the same parent (rather than one call with both
         // children) would silently orphan the first batch.
         var stagedFile = FileNode()
@@ -873,7 +873,7 @@ struct FileScannerMockTests {
         // The tree must have at least the root node and no out-of-bounds parent references.
         #expect(tree.count >= 1, "Cancelled scan must still produce at least root node")
         #expect(progress.scanComplete, "Scan should be marked complete even when cancelled")
-        // Plan 040 pin: a cancelled scan must not strand `isScanning == true` — `scan()`'s
+        // Plan 040 pin: a cancelled scan must not strand `isScanning == true` - `scan()`'s
         // finalization block runs unconditionally after the worker pool drains, cancelled
         // or not, so this must always clear. If a future change to `scan()` adds an early
         // return before that finalization, this is the regression it would trip.
@@ -918,7 +918,7 @@ struct FileScannerMockTests {
 
     @Test("Directories with duplicate (dev, inode) are visited only once (firmlink dedup)")
     func firmlinkDeduplication() async {
-        // /root has two dirs with the SAME inode — second should be skipped
+        // /root has two dirs with the SAME inode - second should be skipped
         let mock = MockFilesystemProvider()
         mock.directories["/root"] = [
             MockFilesystemProvider.dir(name: "realDir", inode: 42, device: 1),
@@ -1169,7 +1169,7 @@ struct FileScannerMockTests {
     //
     // `DIRWIZ_DEFER_TREE=0` is the only way to reach the immediate raw-materialization
     // path (`scanDirectoryRaw`) against a real filesystem in production, and until now
-    // no test exercised it — it was environment-gated and skipped by every other test.
+    // no test exercised it - it was environment-gated and skipped by every other test.
     // `FileScanner.init` already accepts `deferTreeMaterialization` as a constructor
     // parameter, so this threads the flag directly instead of touching the environment.
 
@@ -1242,7 +1242,7 @@ struct FileScannerMockTests {
         #expect(immediateRoot.fileSize == deferredRoot.fileSize, "Root fileSize must match across strategies")
         #expect(immediateRoot.allocatedSize == deferredRoot.allocatedSize, "Root allocatedSize must match across strategies")
 
-        // The bundle must have actually resolved to a non-zero size in both strategies —
+        // The bundle must have actually resolved to a non-zero size in both strategies -
         // this is the one place the two strategies genuinely differ in internal sequencing
         // (immediate publishes to the tree then patches the bundle size in place; deferred
         // bakes the bundle size into the scratch buffer before it is copied into the arena).

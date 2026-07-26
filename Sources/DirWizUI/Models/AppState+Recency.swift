@@ -8,7 +8,7 @@ extension AppState {
 
     // MARK: - Recency
 
-    /// Apply recency factors — discards stale results from a superseded scan.
+    /// Apply recency factors - discards stale results from a superseded scan.
     public func applyRecencyFactors(_ factors: [Float], token: UInt64) {
         guard token == recencyToken else { return }
         recencyFactors = factors
@@ -40,7 +40,7 @@ extension AppState {
     /// if a rescan occurs while the snapshot is being built.
     /// "Pin this moment": records a checkpoint on the volume's timeline.
     ///
-    /// A `name` pins the checkpoint permanently — retention never thins a named one, because
+    /// A `name` pins the checkpoint permanently - retention never thins a named one, because
     /// naming it is the user saying "keep this". Unnamed checkpoints are ordinary
     /// auto-checkpoints subject to thinning.
     public func takeSnapshot(name: String? = nil) {
@@ -76,7 +76,7 @@ extension AppState {
     }
 
     /// Records an automatic checkpoint if the throttle allows, so the timeline fills in
-    /// without the user ever pressing the camera. Never pinned — these are the entries
+    /// without the user ever pressing the camera. Never pinned - these are the entries
     /// retention is allowed to thin.
     public func autoCheckpointIfDue() {
         guard let tree = fileTree, tree.count > 0 else { return }
@@ -112,7 +112,7 @@ extension AppState {
     /// Switches the diff baseline to a specific checkpoint on the timeline.
     ///
     /// The overlay is index-keyed against the CURRENT tree, so changing the baseline has to
-    /// recompute it — leaving the old arrays in place would paint one checkpoint's diff with
+    /// recompute it - leaving the old arrays in place would paint one checkpoint's diff with
     /// another's numbers.
     public func selectDiffBaseline(_ checkpoint: SnapshotCheckpoint?) {
         guard let tree = fileTree else { return }
@@ -185,7 +185,7 @@ extension AppState {
         }
     }
 
-    /// Apply a diff result — discards stale results from a superseded scan.
+    /// Apply a diff result - discards stale results from a superseded scan.
     public func applyTemporalDiff(_ result: TemporalDiffResult, token: UInt64) {
         guard token == temporalDiffToken else { return }
         temporalDiff.temporalDiffKinds = result.kinds

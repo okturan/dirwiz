@@ -4,7 +4,7 @@ import Foundation
 
 /// Contract tests for `JSONExporter`. Written against the pre-rewrite implementation
 /// (`JSONSerialization` over a `[String: Any]` graph) and re-run unchanged against the
-/// streaming rewrite — these pin field names, value types, nesting, and filtering
+/// streaming rewrite - these pin field names, value types, nesting, and filtering
 /// semantics so the rewrite can't silently change the exported schema.
 ///
 /// Structure is asserted via `JSONSerialization` parsing, not raw bytes: key order and
@@ -41,7 +41,7 @@ struct JSONExporterTests {
         return result
     }
 
-    /// True if the parsed JSON number is integer-typed rather than a float/double —
+    /// True if the parsed JSON number is integer-typed rather than a float/double -
     /// i.e. the exporter wrote it without a decimal point, so a `UInt64` field
     /// round-trips as an integer and not `123.0`.
     private func isIntegerJSONNumber(_ value: Any?) -> Bool {

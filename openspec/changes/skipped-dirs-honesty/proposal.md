@@ -2,7 +2,7 @@
 
 ## Why
 
-Even with Full Disk Access granted, macOS always denies a handful of SIP-protected directories — so every user permanently sees an alarming orange "N directories unreadable" warning whose tooltip tells them to enable FDA they already have. Only a count is kept; the actual paths vanish into os_log. An unfixable warning erodes trust; an explained one builds it.
+Even with Full Disk Access granted, macOS always denies a handful of SIP-protected directories - so every user permanently sees an alarming orange "N directories unreadable" warning whose tooltip tells them to enable FDA they already have. Only a count is kept; the actual paths vanish into os_log. An unfixable warning erodes trust; an explained one builds it.
 
 ## What Changes
 
@@ -18,7 +18,7 @@ Even with Full Disk Access granted, macOS always denies a handful of SIP-protect
 - `skipped-directories-reporting`: path recording semantics and the FDA-aware presentation rules.
 
 ### Modified Capabilities
-None — no baseline specs exist yet.
+None - no baseline specs exist yet.
 
 ## Impact
 

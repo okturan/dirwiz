@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Selectable render style
-The treemap SHALL offer two render styles — Cushion and Cards — with Cushion remaining the default. The choice SHALL persist across launches. Switching styles SHALL NOT change the underlying layout, sizes, or which nodes exist.
+The treemap SHALL offer two render styles - Cushion and Cards - with Cushion remaining the default. The choice SHALL persist across launches. Switching styles SHALL NOT change the underlying layout, sizes, or which nodes exist.
 
 #### Scenario: Switching preserves layout
 - **WHEN** the user switches from Cushion to Cards on the same tree and view root

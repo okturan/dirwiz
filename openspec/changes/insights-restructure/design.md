@@ -1,4 +1,4 @@
-# Design — Insights Restructure
+# Design - Insights Restructure
 
 ## Context
 
@@ -12,13 +12,13 @@
 
 **Non-Goals:**
 - Changing any analyzer behavior or adding new insights content.
-- A "Cleanup" surface with actionable presets (future, larger proposal — the card's content stays informational).
+- A "Cleanup" surface with actionable presets (future, larger proposal - the card's content stays informational).
 - Per-volume expansion state.
 
 ## Decisions
 
 1. **`CollapsibleSection` wrapper**: header (icon + title + chevron) + content, driven by a persisted `Set<String>` of collapsed section IDs in `UserDefaults` (`insightsCollapsedSections`). Persistence logic in a small testable store type (default-expanded = absent from set, so new sections added later default open for free).
-2. **Card chrome**: one background/corner style applied by the wrapper (rounded rect, subtle fill — same family as `SpaceAnalysisView`'s existing row background) so all sections inherit consistency without per-section restyling.
+2. **Card chrome**: one background/corner style applied by the wrapper (rounded rect, subtle fill - same family as `SpaceAnalysisView`'s existing row background) so all sections inherit consistency without per-section restyling.
 3. **Space card**: `SpaceAnalysisView`'s toolbar/progress/list content refactors into a `SpaceAnalysisCard` embedded as the first section; the standalone view and its file retire. Analyze button, `canStartHeavyTask` gating, progress, and the categorized list all render inside the card. The action bar's "Run Analysis" button is removed (the card owns the action); other action-bar buttons (iCloud, Volume Info, watch-related pending the living-view change) remain.
 4. **Tab removal**: delete `DetailTab.spaceAnalysis`, its `ContentView` switch arm, and the view import. `DetailTab` is `String`-raw-valued but never persisted, so no decode concern. A compile-time exhaustive switch guarantees nothing dangles.
 5. **Section IDs** are stable string keys (not titles) so renaming a header never resets a user's collapse state.
@@ -35,4 +35,4 @@ UI-only; `UserDefaults` key is new. Rollback = revert (collapse-state key become
 
 ## Open Questions
 
-None — deliberately small scope; the ambitious "Cleanup" reframe is a separate future proposal.
+None - deliberately small scope; the ambitious "Cleanup" reframe is a separate future proposal.

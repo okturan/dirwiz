@@ -14,7 +14,7 @@ Every Insights section SHALL be individually collapsible via its header, default
 - **THEN** its header (title + icon) remains visible and re-expands on click
 
 ### Requirement: Space analysis as an Insights card
-The space-analysis category breakdown (categories with safety ratings, sizes, percentage bars, matched paths) SHALL be presented as the top Insights card, containing its own Analyze action, inline progress, and results — action and outcome in one place.
+The space-analysis category breakdown (categories with safety ratings, sizes, percentage bars, matched paths) SHALL be presented as the top Insights card, containing its own Analyze action, inline progress, and results - action and outcome in one place.
 
 #### Scenario: Analyze from the card
 - **WHEN** the user clicks Analyze in the space card
@@ -29,4 +29,4 @@ The tab bar SHALL no longer include a Space tab; space analysis SHALL be reachab
 
 #### Scenario: Tab bar without Space
 - **WHEN** the user views the tab bar after this change
-- **THEN** the tabs are Tree View, Extensions, Duplicates, Hardlinks, Search, Insights — and the analysis lives in Insights
+- **THEN** the tabs are Tree View, Extensions, Duplicates, Hardlinks, Search, Insights - and the analysis lives in Insights

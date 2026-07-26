@@ -74,7 +74,7 @@ public struct RecencyQueryService {
         // All entries start at 0.0 (stale/unknown). Spotlight results overwrite file values;
         // the bottom-up max pass then propagates the highest child recency up to each directory.
         // Directories with no Spotlight-indexed descendants remain at 0.0 (stale) rather than
-        // staying at 1.0 regardless of their contents — the previous 1.0 default made every
+        // staying at 1.0 regardless of their contents - the previous 1.0 default made every
         // directory appear "fully recent" even when all descendants were stale.
         var factors = Array(repeating: Float(0), count: nodeCount)
 
@@ -82,7 +82,7 @@ public struct RecencyQueryService {
         let valueAttrs = [kMDItemPath, kMDItemLastUsedDate] as CFArray
 
         guard let query = MDQueryCreate(kCFAllocatorDefault, queryString, valueAttrs, nil) else {
-            // On failure, return 1.0 everywhere — don't show false stale.
+            // On failure, return 1.0 everywhere - don't show false stale.
             return Array(repeating: Float(1), count: nodeCount)
         }
 

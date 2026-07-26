@@ -1,4 +1,4 @@
-# Tasks — Always-On Hardlinks
+# Tasks - Always-On Hardlinks
 
 ## 1. Capture (DirWizCore)
 

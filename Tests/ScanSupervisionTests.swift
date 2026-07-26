@@ -4,7 +4,7 @@ import Foundation
 @testable import DirWizUI
 
 /// Coverage for plan 040: the scan-flow supervision invariant documented on
-/// `AppState.startScan` (`AppState+Scan.swift`) — after any scan flow exits by ANY path,
+/// `AppState.startScan` (`AppState+Scan.swift`) - after any scan flow exits by ANY path,
 /// either a newer flow has already published its own fresh `ScanProgress`, or the
 /// currently-published one is honestly terminal (`isScanning == false`). Wave 7's flows
 /// (launch auto-refresh, warm patch, preserving-cold, replay-wait windows) introduced exit
@@ -14,7 +14,7 @@ import Foundation
 /// Nested under `AppSupportEnvSuites` (TestHelpers.swift) and wrapped in
 /// `withTemporaryAppSupportDir` throughout: every test here drives `restoreOnLaunch` /
 /// `startFullRescan` to completion, and a completed cold scan's deferred bundle sizing
-/// always ends with a `TreeCache.save` — both read `DIRWIZ_APP_SUPPORT_DIR`.
+/// always ends with a `TreeCache.save` - both read `DIRWIZ_APP_SUPPORT_DIR`.
 extension AppSupportEnvSuites {
 
 @Suite("Scan Supervision Tests")
@@ -34,7 +34,7 @@ struct ScanSupervisionTests {
         return (defaults, { defaults.removePersistentDomain(forName: suiteName) })
     }
 
-    /// Polls `condition` on the main actor until it's true or `timeout` elapses — mirrors
+    /// Polls `condition` on the main actor until it's true or `timeout` elapses - mirrors
     /// `LaunchRestoreTests`'/`AppliedChangesTests`' helper of the same name (duplicated
     /// rather than shared, matching this repo's per-suite convention for these small
     /// test-only helpers).
@@ -67,7 +67,7 @@ struct ScanSupervisionTests {
     }
 
     /// A large-ish real fixture, big enough that a real on-disk scan is still running a
-    /// few milliseconds in — same trick `LaunchRestoreTests.cancellingColdRefreshBehindStaleKeepsStaleViewBody`
+    /// few milliseconds in - same trick `LaunchRestoreTests.cancellingColdRefreshBehindStaleKeepsStaleViewBody`
     /// uses to get a reliable window to land a cancel/supersede mid-flight.
     private func manyFilesLayout() -> [String: UInt64] {
         var layout: [String: UInt64] = [:]
@@ -83,7 +83,7 @@ struct ScanSupervisionTests {
     /// fixtures live under `/var`, itself a symlink to `/private/var` that Foundation's
     /// `resolvingSymlinksInPath` deliberately leaves untouched. Resolve through raw
     /// `realpath(3)` so the root we scan/watch and the root FSEvents reports changes under
-    /// are the same string — same helper as `WarmStartTests`, duplicated per this repo's
+    /// are the same string - same helper as `WarmStartTests`, duplicated per this repo's
     /// per-suite convention.
     private func realDirectoryPath(_ path: String) -> String {
         var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
@@ -92,7 +92,7 @@ struct ScanSupervisionTests {
     }
 
     /// The FSEvents daemon journals asynchronously; give it a moment to catch up before
-    /// treating "now" as a clean boundary — same helper as `WarmStartTests`.
+    /// treating "now" as a clean boundary - same helper as `WarmStartTests`.
     private func settleFSEventsJournal() async throws {
         try await Task.sleep(for: .milliseconds(500))
     }
@@ -121,7 +121,7 @@ struct ScanSupervisionTests {
         state.restoreOnLaunch()  // launch auto-refresh begins its own replay-wait
 
         // The user's reported sequence: click "Scan Volume", then immediately "Full
-        // Rescan" — both landing before the auto-refresh's (or the first click's) own
+        // Rescan" - both landing before the auto-refresh's (or the first click's) own
         // replay-wait has resolved. Calling both synchronously back-to-back, with no
         // `await` in between, guarantees this: `startScan` only ever suspends inside a
         // `Task` it launches and returns immediately, so nothing here has had a chance
@@ -132,7 +132,7 @@ struct ScanSupervisionTests {
         await waitUntil(timeout: 20) { !state.scanProgress.isScanning }
 
         // INVARIANT: however many superseding clicks landed mid-flight, the final
-        // displayed state must be terminal — never frozen mid-scan (the incident).
+        // displayed state must be terminal - never frozen mid-scan (the incident).
         #expect(!state.scanProgress.isScanning)
         #expect(state.fileTree != nil)
         #expect(state.selectedVolume != nil, "the Scan Volume button needs a selected volume to re-enable")
@@ -220,7 +220,7 @@ struct ScanSupervisionTests {
         var layout: [String: UInt64] = ["docs/readme.txt": 100]
         // Padding directories: an unresolvable changed root (the brand-new top-level
         // directory below) contributes the planner's fixed `unresolvedRootItemEstimate`
-        // (32 — WarmStart.swift) toward the changed-item-fraction estimate. Without
+        // (32 - WarmStart.swift) toward the changed-item-fraction estimate. Without
         // enough padding, 32 alone is already >25% of a tiny cached tree, so the
         // *planner's own* threshold check declines before ever reaching the mid-patch
         // abandonment this test exists to exercise (WarmStartTests'
@@ -240,7 +240,7 @@ struct ScanSupervisionTests {
 
         // A brand-new TOP-LEVEL directory: `resolveRescanTarget`'s ancestor walk-up finds
         // nothing narrower than the tree root resolves for it (it isn't in the cached
-        // tree, and neither is any ancestor of it besides root itself) — so the rescan
+        // tree, and neither is any ancestor of it besides root itself) - so the rescan
         // target collapses to the root, `rescannedRoots.contains(path)` is true, and
         // `commitWarmStart` abandons the patch for a cold fallback (028/040's documented
         // "prefer a full rescan over patching the whole tree through the splice path it
@@ -271,7 +271,7 @@ struct ScanSupervisionTests {
             "expected the fallback cold scan to have picked up the new top-level directory")
 
         // warm-start-observability: the abandonment reason must reach the visible
-        // summary, not just settle into a plain "Scanned N items" with no explanation —
+        // summary, not just settle into a plain "Scanned N items" with no explanation -
         // this is exactly the silent-cold-fallback gap the change fixes.
         #expect(
             state.lastScanSummary?.contains("nothing narrower to patch") == true,
@@ -293,7 +293,7 @@ struct ScanSupervisionTests {
         let tree = await scanFixture(at: path)
         try TreeCache.save(tree: tree, lastEventId: FSEventsJournal.currentEventId())
 
-        // Truncate the saved cache — same structural-corruption shape
+        // Truncate the saved cache - same structural-corruption shape
         // `TreeCacheTests.truncatedFileFailsClosed` pins at the `TreeCache` level; here
         // the same fixture is driven through the full `AppState` scan flow to prove the
         // reason reaches `lastScanSummary`, not just `TreeCache.loadResult` in isolation.
@@ -340,15 +340,15 @@ struct ScanSupervisionTests {
 
         #expect(!state.scanProgress.isScanning)
         #expect(state.lastScanSummary?.hasPrefix("Scanned") == true)
-        // `ScanSummaryComposer.coldWithReason`'s literal separator — its absence proves
+        // `ScanSummaryComposer.coldWithReason`'s literal separator - its absence proves
         // no reason was attached, i.e. this reads as a first scan, not a rejected cache.
         #expect(
-            state.lastScanSummary?.contains(" — full scan: ") != true,
+            state.lastScanSummary?.contains(" - full scan: ") != true,
             "a first-ever scan must not read as a rejected-cache explanation, got \(state.lastScanSummary ?? "nil")"
         )
     }
 
-    @Test("ultrareview bug_002: a warm patch behind a stale view never shows a misleading 'No Hardlinks Found' — populated groups stay populated (or visibly recomputing) the whole time")
+    @Test("ultrareview bug_002: a warm patch behind a stale view never shows a misleading 'No Hardlinks Found' - populated groups stay populated (or visibly recomputing) the whole time")
     func warmPatchNeverShowsFalseEmptyHardlinks() async throws {
         try await withTemporaryAppSupportDir {
             try await self.warmPatchNeverShowsFalseEmptyHardlinksBody()
@@ -356,14 +356,14 @@ struct ScanSupervisionTests {
     }
 
     /// `commitWarmStart` used to call the shared `resetForNewScan()` unconditionally,
-    /// even in the preserving-stale-view branch — synchronously clearing
+    /// even in the preserving-stale-view branch - synchronously clearing
     /// `hardlink.hardlinkGroups` and `isHardlinkScanRunning` while the stale tree stayed
     /// fully on screen. `HardlinkView`'s empty state reads "No files on this volume
-    /// share an inode" — a definitive claim — for however long the subsequent
+    /// share an inode" - a definitive claim - for however long the subsequent
     /// `await scanner.rescanSubtrees(...)` takes. The fix calls `refreshHardlinkGroups()`
     /// again immediately (same synchronous scope, no `await` in between), which flips
-    /// `isHardlinkScanRunning` true before any observer — including this test's polling
-    /// loop — can get scheduled, so the bad `(empty && !running)` combination is not
+    /// `isHardlinkScanRunning` true before any observer - including this test's polling
+    /// loop - can get scheduled, so the bad `(empty && !running)` combination is not
     /// just rare but structurally unreachable. This test polls continuously through the
     /// whole patch window and fails immediately if that combination is ever observed,
     /// rather than sampling once and hoping to get lucky/unlucky.
@@ -386,7 +386,7 @@ struct ScanSupervisionTests {
         defer { cleanup() }
         let root = realDirectoryPath(rawRoot)
 
-        // A hardlinked pair so hardlinkGroups is non-empty after the first scan —
+        // A hardlinked pair so hardlinkGroups is non-empty after the first scan -
         // otherwise "stays empty" and "wrongly cleared" are indistinguishable.
         let original = URL(fileURLWithPath: root).appendingPathComponent("pad0/original.txt")
         try Data(repeating: 0xAB, count: 256).write(to: original)
@@ -399,7 +399,7 @@ struct ScanSupervisionTests {
         #expect(tree.linkCountsCaptured)
         try TreeCache.save(tree: tree, lastEventId: savedEventId)
 
-        // Grow each churn directory substantially — real work for the patch to chew
+        // Grow each churn directory substantially - real work for the patch to chew
         // through, even though the warm decision (based on the cache above) sees only a
         // small fraction of the tree as changed.
         for i in 0..<40 {
@@ -423,11 +423,11 @@ struct ScanSupervisionTests {
         #expect(state.hardlink.hardlinkGroups.count == 1, "fixture must have exactly the one seeded hardlink group before the patch begins")
 
         // Wait past the "preparing"/replay-wait sub-state into the actual patch, where
-        // commitWarmStart has registered its scanner via markStarted — same proven idiom
+        // commitWarmStart has registered its scanner via markStarted - same proven idiom
         // as `warmPatchIsCancellableMidFlightBody`. This is the exact, reliable
         // checkpoint right after commitWarmStart's synchronous top-of-function work
         // (reset + this fix's immediate refreshHardlinkGroups()) has run and before the
-        // real `await rescanSubtrees(...)` suspension — the precise moment the OLD,
+        // real `await rescanSubtrees(...)` suspension - the precise moment the OLD,
         // unfixed code would have shown the misleading empty state.
         await waitUntil(timeout: 10, pollInterval: .milliseconds(1)) {
             state.scanProgress.isScanning && !state.isPreparingScan
@@ -437,14 +437,14 @@ struct ScanSupervisionTests {
         // would make the rest of this test pass for the wrong reason.
         #expect(state.scanProgress.currentPath.contains("last scan")
             || state.scanProgress.currentPath.contains("changed folders"),
-            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" — did the fixture stop qualifying as warm?")
+            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" - did the fixture stop qualifying as warm?")
 
         #expect(
             !(state.hardlink.hardlinkGroups.isEmpty && !state.hardlink.isHardlinkScanRunning),
-            "hardlinkGroups read (empty && not running) right at patch entry — the exact bug_002 window"
+            "hardlinkGroups read (empty && not running) right at patch entry - the exact bug_002 window"
         )
 
-        // Keep watching through the remainder of the (real, churn-sized) patch — belt
+        // Keep watching through the remainder of the (real, churn-sized) patch - belt
         // and suspenders alongside the entry-point checkpoint above.
         var observedFalseEmpty = false
         while state.scanProgress.isScanning {
@@ -463,7 +463,7 @@ struct ScanSupervisionTests {
 
     // MARK: - 5. Every flow's scanner is cancellable
 
-    @Test("cancelActiveScan actually stops the running scanner — no scan work keeps going in the background")
+    @Test("cancelActiveScan actually stops the running scanner - no scan work keeps going in the background")
     func everyFlowScannerIsCancellable() async throws {
         try await withTemporaryAppSupportDir {
             try await self.everyFlowScannerIsCancellableBody()
@@ -480,7 +480,7 @@ struct ScanSupervisionTests {
         let state = AppState(defaults: defaults)
         state.selectedVolume = URL(fileURLWithPath: path)
 
-        state.startFullRescan()  // cold, non-preserving — registers its scanner via markStarted
+        state.startFullRescan()  // cold, non-preserving - registers its scanner via markStarted
         await waitUntil(timeout: 2, pollInterval: .milliseconds(1)) { state.scanProgress.isScanning }
 
         state.cancelScan()
@@ -517,8 +517,8 @@ struct ScanSupervisionTests {
 
         state.startSelectedVolumeScan()
 
-        // Immediately after the call returns — before the async journal replay has even
-        // started — the sidebar must already show a live, honest "checking" state
+        // Immediately after the call returns - before the async journal replay has even
+        // started - the sidebar must already show a live, honest "checking" state
         // instead of nothing (the user's "clicked Scan Volume → visibly nothing"
         // complaint).
         #expect(state.scanProgress.isScanning)
@@ -537,7 +537,7 @@ struct ScanSupervisionTests {
     /// into parallel-enumerate/serial-apply. This proves the rework kept (and, per the
     /// 040-flagged nit fixed in 042, actually FIXED) real cancellation: clicking away
     /// mid-patch must stop actual work, not just eventually settle on its own.
-    @Test("A warm patch can be cancelled mid-flight — no patch work keeps going in the background afterward")
+    @Test("A warm patch can be cancelled mid-flight - no patch work keeps going in the background afterward")
     func warmPatchIsCancellableMidFlight() async throws {
         try await withTemporaryAppSupportDir {
             try await self.warmPatchIsCancellableMidFlightBody()
@@ -548,15 +548,15 @@ struct ScanSupervisionTests {
     private func warmPatchIsCancellableMidFlightBody() async throws {
         var layout: [String: UInt64] = [:]
         // Padding: keeps both the root-count AND cost-based (item-fraction) warm-start
-        // thresholds comfortably satisfied despite changing 40 real directories below —
+        // thresholds comfortably satisfied despite changing 40 real directories below -
         // same trick `warmToColdAbandonmentBody`/`composedWarmStartMatchesColdScan` use.
         for i in 0..<300 {
             layout["pad\(i)/seed.txt"] = 1
         }
-        // 40 real changed roots (kept under the plan-042 `maxPatchRoots` default, 48 —
+        // 40 real changed roots (kept under the plan-042 `maxPatchRoots` default, 48 -
         // that gate is always on and would otherwise cold-fallback this fixture before
         // ever reaching Phase A/B, defeating the point of this test), each starting tiny
-        // in the CACHED tree — the warm-start decision judges the changed set by this
+        // in the CACHED tree - the warm-start decision judges the changed set by this
         // small cached size (exactly like the reported incident: the decision can't know
         // ahead of time how much new content a root is about to gain on disk), so it
         // still warms even though the mutation below gives Phase A/B real work to do.
@@ -572,7 +572,7 @@ struct ScanSupervisionTests {
         let tree = await scanFixture(at: root)
         try TreeCache.save(tree: tree, lastEventId: savedEventId)
 
-        // Grow each churn directory substantially — real work for the parallel patch to
+        // Grow each churn directory substantially - real work for the parallel patch to
         // chew through, even though the warm decision (based on the cache above) sees
         // only a small fraction of the tree as changed.
         for i in 0..<40 {
@@ -599,13 +599,13 @@ struct ScanSupervisionTests {
 
         // Confirm this is actually exercising a WARM patch, not a cold fallback that
         // would make the rest of this test pass for the wrong reason (a real risk: the
-        // planner's `maxPatchRoots` gate — or any future gate — could silently push this
+        // planner's `maxPatchRoots` gate - or any future gate - could silently push this
         // fixture to cold, and every assertion below is generic enough to pass either
         // way). `commitWarmStart` sets this text synchronously right after registering
         // its scanner, before any Phase A work begins; cold's `beginColdScan` never does.
         #expect(state.scanProgress.currentPath.contains("last scan")
             || state.scanProgress.currentPath.contains("changed folders"),
-            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" — did the fixture stop qualifying as warm?")
+            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" - did the fixture stop qualifying as warm?")
 
         state.cancelScan()
         await waitUntil(timeout: 20) { !state.scanProgress.isScanning }
@@ -627,12 +627,12 @@ struct ScanSupervisionTests {
 
 } // extension AppSupportEnvSuites
 
-// MARK: - Apply-changes / scan gating symmetry (no App Support I/O — pure state)
+// MARK: - Apply-changes / scan gating symmetry (no App Support I/O - pure state)
 
 @Suite("Scan / Apply-Changes Gating Symmetry Tests")
 struct ScanApplyGatingSymmetryTests {
     @MainActor
-    @Test("A scan cannot start while applyAccumulatedChanges is running — symmetric with canStartHeavyTask refusing to start apply during a scan")
+    @Test("A scan cannot start while applyAccumulatedChanges is running - symmetric with canStartHeavyTask refusing to start apply during a scan")
     func scanBlockedWhileApplyingChanges() {
         let state = AppState()
         state.fileTree = FileTree()

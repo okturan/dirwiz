@@ -17,14 +17,14 @@ enum ScanSummaryComposer {
     }
 
     /// The cold flavor, with the human-readable reason a warm start didn't happen
-    /// appended — so a fallback still reads as an answer ("why was this slow?") rather
+    /// appended - so a fallback still reads as an answer ("why was this slow?") rather
     /// than silence in the logs.
     static func coldWithReason(items: Int, seconds: TimeInterval, reason: String) -> String {
-        cold(items: items, seconds: seconds) + " — full scan: \(reason)"
+        cold(items: items, seconds: seconds) + " - full scan: \(reason)"
     }
 
     /// warm-start-observability: `restoreOnLaunch`'s cache was rejected before any scan
-    /// even ran — distinct from `coldWithReason`, which describes a scan that DID
+    /// even ran - distinct from `coldWithReason`, which describes a scan that DID
     /// complete. Saying "Scanned 0 items in 0.0s" here would be dishonest; nothing was
     /// scanned yet.
     static func cacheRejectedAtLaunch(reason: String) -> String {
@@ -42,12 +42,12 @@ enum ScanSummaryComposer {
     /// `isRefreshing` wins over `wasCancelled` if somehow both are true.
     static func staleBadge(savedAt: Date, isRefreshing: Bool, wasCancelled: Bool, now: Date = Date()) -> String {
         let base = stale(savedAt: savedAt, now: now)
-        if isRefreshing { return base + " — updating…" }
-        if wasCancelled { return base + " — refresh cancelled" }
+        if isRefreshing { return base + " - updating…" }
+        if wasCancelled { return base + " - refresh cancelled" }
         return base
     }
 
-    /// Sub-minute ages read as "just now" rather than a formatter's "in 0 seconds" —
+    /// Sub-minute ages read as "just now" rather than a formatter's "in 0 seconds" -
     /// same discipline as the CLI's `diff` age rendering (plan 016).
     private static func relativeDescription(of date: Date, now: Date) -> String {
         let age = now.timeIntervalSince(date)
@@ -59,12 +59,12 @@ enum ScanSummaryComposer {
 
 /// Styling rule for the sidebar's skipped-directories line (skipped-dirs-honesty):
 /// fixability decides tone. With Full Disk Access granted, the skips are SIP-protected
-/// locations the user cannot unlock — quiet informational styling with an explainer,
+/// locations the user cannot unlock - quiet informational styling with an explainer,
 /// never an FDA call-to-action they've already satisfied. Without FDA the skips are
 /// fixable, so they belong inside the existing FDA warning banner (one alarm, one
 /// action) rather than a second independent warning line.
 public enum SkippedDirsPresentation: Equatable {
-    /// Nothing skipped — show nothing.
+    /// Nothing skipped - show nothing.
     case hidden
     /// FDA granted: secondary-styled informational line with the explainer popover.
     case quietInfo
@@ -80,7 +80,7 @@ public enum SkippedDirsPresentation: Equatable {
 extension AppState {
     private static let lastScannedVolumePathKey = "lastScannedVolumePath"
 
-    /// Human-readable stale-view badge text ("Showing last scan · X ago[ — updating…]"),
+    /// Human-readable stale-view badge text ("Showing last scan · X ago[ - updating…]"),
     /// or nil when no restored view is displayed. Computed live off `staleViewAsOf` and
     /// `scanProgress` rather than cached, so the relative time and refresh status stay
     /// current across repeated reads without AppState having to re-write a stored string
@@ -99,7 +99,7 @@ extension AppState {
         startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: false)
     }
 
-    /// Bypasses any cached tree and always performs a full cold scan — the "Full
+    /// Bypasses any cached tree and always performs a full cold scan - the "Full
     /// Rescan" escape hatch next to "Scan Volume", for when a warm start is suspected
     /// stale (e.g. Full Disk Access changed between sessions).
     public func startFullRescan() {
@@ -113,7 +113,7 @@ extension AppState {
 
     /// True while a scan flow has published its "preparing" `ScanProgress` (see
     /// `startScan`'s supervisor doc comment) but hasn't yet registered a real
-    /// `FileScanner` — i.e. mid cache-lookup or FSEvents replay-wait. Distinguishes the
+    /// `FileScanner` - i.e. mid cache-lookup or FSEvents replay-wait. Distinguishes the
     /// sidebar/button's honest "Checking what changed…" sub-state from "Scanning…" once
     /// real enumeration work has actually begun, using only existing bookkeeping
     /// (`scanSession.activeScanner` is nil until `markStarted` registers one, and
@@ -124,14 +124,14 @@ extension AppState {
     }
 
     /// Cheap existence check (no decode) for whether a warm-start cache is on disk for
-    /// `path` — lets the UI show the "Full Rescan" affordance without paying for a full
+    /// `path` - lets the UI show the "Full Rescan" affordance without paying for a full
     /// `TreeCache.load`.
     public func hasCachedTree(for path: String) -> Bool {
         FileManager.default.fileExists(atPath: TreeCache.cacheURL(for: path).path)
     }
 
     /// Rescan the selected volume from scratch (e.g., after trashing a file). Always
-    /// cold — the caller already knows what changed (it just changed it), so a warm
+    /// cold - the caller already knows what changed (it just changed it), so a warm
     /// start's "what changed since the cache" question doesn't apply here.
     public func rescanVolume() {
         guard let volumeURL = selectedVolume else { return }
@@ -140,7 +140,7 @@ extension AppState {
 
     /// Called once from the app's launch entry point. Restores the last successfully
     /// scanned volume's cached tree instantly (no enumeration) and kicks off the normal
-    /// scan flow behind it to freshen it — the auto-refresh stays behind a `staleViewAsOf`
+    /// scan flow behind it to freshen it - the auto-refresh stays behind a `staleViewAsOf`
     /// badge and never blanks the restored view (see `beginColdScan`/`commitWarmStart`'s
     /// preserve-behind-stale branches). A no-op, leaving today's empty launch state, when:
     /// the kill switch is set, nothing was scanned before, the volume is no longer
@@ -153,12 +153,12 @@ extension AppState {
         guard FileManager.default.fileExists(atPath: path) else { return }
 
         // warm-start-observability: `restoreOnLaunch` runs on every cold app launch, so
-        // in practice it's usually the FIRST code to ever touch a stored cache — meaning
+        // in practice it's usually the FIRST code to ever touch a stored cache - meaning
         // it's usually the first (and, since a rejection invalidates the file as a side
         // effect, often the ONLY) chance to explain a corrupted/outdated cache before the
         // evidence is gone. Using plain `load(for:)` here would silently discard that
         // reason into the exact same empty-launch-state silence as "never scanned
-        // before" — indistinguishable, exactly the gap this change exists to close.
+        // before" - indistinguishable, exactly the gap this change exists to close.
         let cached: TreeCache.Payload
         switch TreeCache.loadResult(for: path) {
         case .success(let payload):
@@ -166,18 +166,18 @@ extension AppState {
         case .noCacheFile:
             return
         case .rejected(let reason):
-            // Deliberately does NOT auto-start a scan — today's behavior (empty launch
+            // Deliberately does NOT auto-start a scan - today's behavior (empty launch
             // state, user clicks Scan Volume themselves) is unchanged; only the
             // explanation is new. `itemCount`/`elapsedSeconds` are 0: nothing was
             // scanned, there's nothing else honest to put there.
             //
             // ultrareview-caught (bug_001): this branch must set `selectedVolume`, same
-            // as the `.success` case below — otherwise it stays nil, and
+            // as the `.success` case below - otherwise it stays nil, and
             // `VolumePickerView.refreshVolumes` (called from its own `.onAppear`, which
             // fires right after this) auto-selects `availableVolumes.first` (typically
             // "/") whenever `selectedVolume` is nil. Every downstream consumer of
-            // `selectedVolume` — the "Scan history" popover, the "Scan Volume" button,
-            // and the `persistLastScannedVolume` write-back once that scan completes —
+            // `selectedVolume` - the "Scan history" popover, the "Scan Volume" button,
+            // and the `persistLastScannedVolume` write-back once that scan completes -
             // would then silently point at a DIFFERENT volume than the one this message
             // just named, exactly in the external-drive/multi-volume scenario a
             // corrupted cache is most likely to occur in.
@@ -199,7 +199,7 @@ extension AppState {
         // selection and treemap root through `resolveOrAncestor` so a folder deleted
         // since last launch degrades to its nearest surviving ancestor instead of
         // restoring nothing. TreeTableView seeds its own `expandedPaths` from the same
-        // session on appear (`seedExpansionFromSessionIfNeeded`) — nothing to do here for
+        // session on appear (`seedExpansionFromSessionIfNeeded`) - nothing to do here for
         // expansion, which is view-local state AppState doesn't own.
         let session = sessionStore.load(forVolume: path)
         selectedNodeIndex = session?.selectedPath.flatMap {
@@ -222,18 +222,18 @@ extension AppState {
     /// Entry point for every scan trigger (incl. `restoreOnLaunch`'s auto-refresh). If a
     /// cache exists for `path` and warm start isn't disabled/forced off, attempts to
     /// replay the FSEvents journal and patch just what changed instead of a full
-    /// enumeration. Any anomaly — no cache, a poisoned or oversized journal replay, an
-    /// unresolved or root-level rescan target — falls back to exactly the cold flow
+    /// enumeration. Any anomaly - no cache, a poisoned or oversized journal replay, an
+    /// unresolved or root-level rescan target - falls back to exactly the cold flow
     /// below, unmodified.
     ///
     /// **Scan-flow supervision invariant**: after any scan flow exits by ANY path
     /// (success, supersession, cancellation, warm→cold handoff, error), exactly one
-    /// holds — (a) a newer flow has since published its own fresh `ScanProgress`, or (b)
+    /// holds - (a) a newer flow has since published its own fresh `ScanProgress`, or (b)
     /// the currently-published `scanProgress.isScanning == false` and the sidebar
     /// reflects a terminal state (complete / cancelled / summary). This is enforced
     /// structurally, not per-path: entering this function ALWAYS, synchronously and
     /// unconditionally, bumps `scanSession`'s token and publishes a brand-new
-    /// `ScanProgress` (the "preparing" state below) before doing anything else — so every
+    /// `ScanProgress` (the "preparing" state below) before doing anything else - so every
     /// later token-mismatch guard anywhere in the scan pipeline (`commitWarmStart`,
     /// `beginColdScan`, `beginDeferredBundleSizing`) is automatically safe: a mismatch can
     /// only exist because a NEWER call to this same function already replaced
@@ -256,7 +256,7 @@ extension AppState {
 
         scanSession.cancelActiveScan()
         // A new scan flow always supersedes any bundle-sizing pass left over from a
-        // previous cold scan — it's scoped to that scan's own tree, which this flow is
+        // previous cold scan - it's scoped to that scan's own tree, which this flow is
         // about to replace. `resetForNewScan()`/`resetTreeDerivedState()` already cancel
         // it once a flow reaches that point, but doing it here too means a click landing
         // during THIS flow's own replay-wait doesn't leave stale bundle-sizing state
@@ -268,15 +268,15 @@ extension AppState {
         let path = volumeURL.path
 
         // warm-start-observability: distinguishes "no cache exists yet" (first-ever
-        // scan — not an anomaly, `noCacheReason` stays nil) from "a cache exists but was
-        // rejected" (worth explaining — same reason string that later reaches
+        // scan - not an anomaly, `noCacheReason` stays nil) from "a cache exists but was
+        // rejected" (worth explaining - same reason string that later reaches
         // `lastScanSummary` via `coldFallbackReason` below, and the warm-start history).
         let cached: TreeCache.Payload?
         var noCacheReason: String?
         if !forceCold, ProcessInfo.processInfo.environment["DIRWIZ_NO_WARM_START"] != "1" {
             if let preloadedCache {
                 // Comes from `restoreOnLaunch()`, which already loaded and published this
-                // exact payload's tree moments earlier — reusing it here avoids decoding
+                // exact payload's tree moments earlier - reusing it here avoids decoding
                 // the same cache file from disk a second time.
                 cached = preloadedCache
             } else {
@@ -294,7 +294,7 @@ extension AppState {
             cached = nil
         }
 
-        // Publish the "preparing" ScanProgress now, unconditionally — see the supervision
+        // Publish the "preparing" ScanProgress now, unconditionally - see the supervision
         // invariant above. This is what makes the (possibly multi-second) FSEvents
         // replay-wait below visible instead of silent: `isScanning` flips true and
         // `currentPath` says what's happening immediately, before any async work has even
@@ -307,7 +307,7 @@ extension AppState {
         let attemptToken = scanSession.token
 
         guard let cached else {
-            // Only log when there's an actual anomaly to explain — a genuine first-ever
+            // Only log when there's an actual anomaly to explain - a genuine first-ever
             // scan (`noCacheReason == nil`) isn't worth a log line, matching the same
             // "not an anomaly" judgment `loadResult`/`lastScanSummary` already make for it.
             if let noCacheReason {
@@ -324,11 +324,11 @@ extension AppState {
 
         Task {
             let replay = await FSEventsJournal.replay(root: path, since: cached.lastEventId)
-            // A true folder count for the threshold, not the cache's raw node count —
+            // A true folder count for the threshold, not the cache's raw node count -
             // computed fresh each attempt since the cached tree itself never changes here.
             let cachedDirectoryCount = Self.directoryCount(in: cached.tree)
             // Cost-based rule (plan 042): estimate how much of the cached tree the
-            // changed roots actually represent, not just how many of them there are — a
+            // changed roots actually represent, not just how many of them there are - a
             // handful of collapsed roots can still be a subtree of 100k+ files.
             let estimatedPatchItems: Int? = {
                 guard case .changes(let targets) = replay.outcome else { return nil }
@@ -364,7 +364,7 @@ extension AppState {
     }
 
     /// Snapshots the current selection/treemap-root as an `ExplorationCapture` when a
-    /// restored stale view is displayed (`staleViewAsOf != nil`) — nil otherwise, which
+    /// restored stale view is displayed (`staleViewAsOf != nil`) - nil otherwise, which
     /// makes every downstream "restore position" branch a no-op for the ordinary
     /// (non-restored) scan flow. Callers invoke this immediately before whichever reset
     /// they're about to perform, so it reflects the user's latest interaction with the
@@ -378,7 +378,7 @@ extension AppState {
     }
 
     /// Records the volume that just finished scanning (warm or cold) so the next launch
-    /// can restore it. Best-effort — `UserDefaults` writes don't throw, and a missed
+    /// can restore it. Best-effort - `UserDefaults` writes don't throw, and a missed
     /// write just means the next launch opens empty, i.e. today's behavior.
     private func persistLastScannedVolume(path: String) {
         defaults.set(path, forKey: Self.lastScannedVolumePathKey)
@@ -387,14 +387,14 @@ extension AppState {
     // MARK: - Session State (plan 038)
 
     /// Merges the current selection + treemap-root paths into whatever session snapshot
-    /// is already stored for `selectedVolume` — preserving `expandedPaths`, which this
+    /// is already stored for `selectedVolume` - preserving `expandedPaths`, which this
     /// method doesn't touch (`TreeTableView` owns that field; see
-    /// `saveExpandedPathsSession(_:)`) — and re-saves. Called from `selectedNodeIndex`'s
-    /// `didSet` (AppState.swift) and from `setTreemapRoot` (AppState+Navigation.swift) —
+    /// `saveExpandedPathsSession(_:)`) - and re-saves. Called from `selectedNodeIndex`'s
+    /// `didSet` (AppState.swift) and from `setTreemapRoot` (AppState+Navigation.swift) -
     /// the two AppState-owned actions that change "where you are"; every other treemap
     /// navigation helper (`navigateUp`/`navigateBack`/`navigateForward`/`navigateHome`/
     /// `navigateTo`) goes through `navigation.treemapRootIndex` directly rather than
-    /// `setTreemapRoot` and so isn't separately persisted here — same tradeoff 033 already
+    /// `setTreemapRoot` and so isn't separately persisted here - same tradeoff 033 already
     /// made for those stacks (dropped by design; see plan's "out of scope"). No-op without
     /// a selected, non-empty tree: nothing meaningful to persist during the brief
     /// empty-tree window at the start of a scan reset.
@@ -421,8 +421,8 @@ extension AppState {
 
     /// Publishes the cached tree, patches only the directories the journal says changed,
     /// and re-establishes the exact post-conditions a cold scan produces. Any sign the
-    /// patch can't be trusted — an unresolved path, or a target that bottomed out at the
-    /// root because nothing narrower resolved — abandons the warm attempt and restarts
+    /// patch can't be trusted - an unresolved path, or a target that bottomed out at the
+    /// root because nothing narrower resolved - abandons the warm attempt and restarts
     /// cold instead of publishing a partial result.
     private func commitWarmStart(
         cached: TreeCache.Payload,
@@ -434,7 +434,7 @@ extension AppState {
         let tree = cached.tree
         let scanner = FileScanner()
         let preservingStaleView = staleViewAsOf != nil
-        // Captured before resetForNewScan() below clears selection/navigation — reused
+        // Captured before resetForNewScan() below clears selection/navigation - reused
         // to restore position after a successful patch, or handed to the cold fallback
         // if the patch itself can't be trusted (028's unresolved-path/root-level-rescan
         // guard), since that fallback runs after this reset already cleared self's state.
@@ -444,17 +444,17 @@ extension AppState {
         resetForNewScan()
         if preservingStaleView {
             // ultrareview-caught (bug_002): resetForNewScan() just cleared hardlink
-            // groups even though the stale tree — still fully on screen and interactive
-            // per this function's preserving-stale contract — hasn't actually changed
+            // groups even though the stale tree - still fully on screen and interactive
+            // per this function's preserving-stale contract - hasn't actually changed
             // yet (the patch hasn't run). Without this, HardlinkView reads the cleared,
             // not-yet-running state as a definitive "No files on this volume share an
             // inode" for the whole multi-second patch. HardlinkGroup stores paths, not
             // node indices, so recomputing from the CURRENT (pre-patch) tree here is
-            // safe even though the tree is about to be spliced in place — unlike
+            // safe even though the tree is about to be spliced in place - unlike
             // index-keyed state (search results, recency factors, temporal-diff arrays;
             // see CLAUDE.md), a fresh path-based recompute has nothing to invalidate.
             // isHardlinkScanRunning flips true synchronously inside this call, before
-            // any observer can render the misleading gap — not just a shorter window,
+            // any observer can render the misleading gap - not just a shorter window,
             // no window. The post-patch refreshHardlinkGroups() below (already present)
             // replaces these again once the splice actually completes.
             refreshHardlinkGroups()
@@ -472,18 +472,18 @@ extension AppState {
         guard scanToken == token else { return }
 
         // A root-level target means some changed path couldn't resolve to anything
-        // narrower than the scan root (028's `SubtreeRescanReport.rescannedRoots` doc) —
+        // narrower than the scan root (028's `SubtreeRescanReport.rescannedRoots` doc) -
         // treat it the same as an unresolved path: prefer a full rescan over patching
         // the whole tree through the splice path it wasn't designed to replace wholesale.
         guard report.unresolvedPaths.isEmpty, !report.rescannedRoots.contains(path) else {
-            // warm-start-observability: name which of the two abandonment shapes fired —
+            // warm-start-observability: name which of the two abandonment shapes fired -
             // this reason reaches `lastScanSummary` (via `beginColdScan`'s
             // `coldFallbackReason`, same mechanism a planner-declined warm start already
             // uses) and the warm-start history, rather than a silent, unexplained cold
             // scan directly after a "Checking what changed…" wait.
             let reason = !report.unresolvedPaths.isEmpty
                 ? "couldn't resolve \(report.unresolvedPaths.count) changed path\(report.unresolvedPaths.count == 1 ? "" : "s") against the cached tree"
-                : "a changed path resolved to the scan root — nothing narrower to patch"
+                : "a changed path resolved to the scan root - nothing narrower to patch"
             log.notice("Warm start abandoned mid-patch for \(path, privacy: .public): \(reason, privacy: .public)")
             beginColdScan(
                 path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason,
@@ -492,7 +492,7 @@ extension AppState {
             return
         }
 
-        // A cancelled rescan (plan 042) leaves `tree` valid but only partially patched —
+        // A cancelled rescan (plan 042) leaves `tree` valid but only partially patched -
         // whatever finished applying stays applied, the rest didn't. Report that honestly
         // instead of the "success" bookkeeping below: no cache write-back under the new
         // event id (it would wrongly claim every target was applied), no completion
@@ -556,17 +556,17 @@ extension AppState {
     /// inverts `FileScanner.init`'s own default, which favors deferred for callers (the
     /// CLI) that don't materialize incrementally into a displayed tree. `DIRWIZ_DEFER_TREE`
     /// still wins when set explicitly, in both directions: `0` is immediate (matching the
-    /// app default, so it's a no-op here) and anything else forces deferred — the instant
+    /// app default, so it's a no-op here) and anything else forces deferred - the instant
     /// rollback for A/B debugging if immediate ever misbehaves on an exotic volume.
     private static var appDefersTreeMaterialization: Bool {
         guard let envValue = ProcessInfo.processInfo.environment["DIRWIZ_DEFER_TREE"] else { return false }
         return envValue != "0"
     }
 
-    /// Today's full enumeration — byte-for-byte the pre-warm-start flow. Reused both as
+    /// Today's full enumeration - byte-for-byte the pre-warm-start flow. Reused both as
     /// the direct path (no cache, or "Full Rescan") and as the fallback whenever a warm
     /// attempt can't be trusted. `coldFallbackReason` is only set when this cold scan
-    /// replaces a warm attempt the planner declined — surfaced in the completion summary
+    /// replaces a warm attempt the planner declined - surfaced in the completion summary
     /// so the fallback is legible instead of only a log line.
     private func beginColdScan(
         path: String,
@@ -585,13 +585,13 @@ extension AppState {
         let tree = FileTree()
         let preservingStaleView = staleViewAsOf != nil
         // The stale tree's own item count is a far better progress-bar denominator than
-        // inode statistics for this specific case — it's this exact volume's actual count
+        // inode statistics for this specific case - it's this exact volume's actual count
         // as of the last scan, not an estimate. Captured now, before `preservingStaleView`'s
         // branch below leaves `fileTree` untouched for the scan's duration.
         let staleItemCountHint = preservingStaleView ? (fileTree?.count ?? 0) : 0
 
         if preservingStaleView {
-            // A restored view is on screen — build into `tree` (a detached instance) and
+            // A restored view is on screen - build into `tree` (a detached instance) and
             // keep displaying the stale `fileTree`/selection/navigation untouched until
             // the scan finishes, so it stays fully browsable while this runs behind it.
             scanSession.invalidate()
@@ -610,7 +610,7 @@ extension AppState {
                 guard self.scanToken == token else { return (false, nil) }
                 self.scanSession.markFinished()
                 // Cancellation mid-preserving-cold: leave the stale tree, selection, and
-                // badge exactly as they were — nothing newer replaces them, so the badge
+                // badge exactly as they were - nothing newer replaces them, so the badge
                 // stays honest without this branch needing to say anything further.
                 guard !self.scanProgress.isCancelled else { return (false, nil) }
 
@@ -664,7 +664,7 @@ extension AppState {
         }
     }
 
-    /// One O(n) pass over the cached tree's snapshot counting directory nodes — the
+    /// One O(n) pass over the cached tree's snapshot counting directory nodes - the
     /// denominator for `WarmStartPlanner`'s percentage threshold. Not stored in the
     /// `TreeCache` header (that's a format change, out of scope here); cheap enough
     /// (~ms at millions of nodes) to recompute per warm-start attempt instead.
@@ -697,7 +697,7 @@ extension AppState {
 
             // Off-main and after the handoff above: sizes are final once bundle
             // resolution completes, so this is the earliest safe point to persist.
-            // Save failures are logged, never surfaced — a missing/stale cache just
+            // Save failures are logged, never surfaced - a missing/stale cache just
             // means the next scan falls back cold, exactly today's behavior.
             guard shouldSaveCache else { return }
             do {

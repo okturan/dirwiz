@@ -1,4 +1,4 @@
-# Tasks — Unify Extension Surfaces
+# Tasks - Unify Extension Surfaces
 
 ## 1. Plumbing
 
@@ -28,7 +28,7 @@
   test pins it against a real `ExtensionPalette.assign`, so if the reserved value ever moves,
   "Other" starts drilling like a real extension and the test catches it rather than users.
 - 1.2 the drill-down lived as a closure inside `ContentView`, i.e. in the app executable
-  where the test target cannot reach it — which is also why the legend could not reuse it.
+  where the test target cannot reach it - which is also why the legend could not reuse it.
   It now lives on `AppState` (`drillDownToExtension`), is called by both surfaces, and is
   tested directly, following the `CLIArguments`/`TemporalDiffSummary` pattern.
 - The drill-down clears `searchQuery`. A leftover query silently ANDs with the new extension

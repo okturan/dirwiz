@@ -54,7 +54,7 @@ private struct CategoryDefinition {
 /// All known category patterns. Order matters: first match wins, so more specific
 /// patterns (e.g. SPM cache inside DerivedData) must come before broader ones.
 private let categoryDefinitions: [CategoryDefinition] = [
-    // Developer Tools — specific before general
+    // Developer Tools - specific before general
     CategoryDefinition(
         id: "xcode_derived_data",
         name: "Xcode DerivedData",
@@ -156,7 +156,7 @@ private let categoryDefinitions: [CategoryDefinition] = [
         pathSuffixes: ["Library/Containers/com.docker.docker", ".docker"]
     ),
 
-    // Browser Caches — before general Application Caches
+    // Browser Caches - before general Application Caches
     CategoryDefinition(
         id: "browser_caches",
         name: "Browser Caches",
@@ -172,7 +172,7 @@ private let categoryDefinitions: [CategoryDefinition] = [
         ]
     ),
 
-    // System Caches — general (after specific cache patterns)
+    // System Caches - general (after specific cache patterns)
     CategoryDefinition(
         id: "application_caches",
         name: "Application Caches",
@@ -243,7 +243,7 @@ public struct SpaceAnalyzer: Sendable {
     public init() {}
 
     /// Analyze a scanned FileTree and categorize disk space usage.
-    /// Cancellation-aware — checks `Task.isCancelled` periodically.
+    /// Cancellation-aware - checks `Task.isCancelled` periodically.
     public func analyze(tree: FileTree) async -> SpaceAnalysisResult {
         let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
         guard !nodes.isEmpty else {
@@ -279,7 +279,7 @@ public struct SpaceAnalyzer: Sendable {
                 else {
                     // Unresolved (or resolved to a non-directory): this category isn't present
                     // in the scanned tree, so it contributes nothing. This is also where the old
-                    // "direct child of an unclaimed prefix" branch is dropped — it only fired
+                    // "direct child of an unclaimed prefix" branch is dropped - it only fired
                     // when a child's array index was lower than its parent's, which no real scan
                     // can produce (propagateSizes/sortAllChildren both rely on parent index <
                     // child index holding everywhere). See
@@ -380,7 +380,7 @@ public struct SpaceAnalyzer: Sendable {
 
     /// Path components of `child` relative to `ancestor`, when `ancestor` is `child` itself
     /// or a path-boundary-respecting prefix of it. Returns nil when `ancestor` is not an
-    /// ancestor of (or equal to) `child` — including a merely-textual prefix match with no
+    /// ancestor of (or equal to) `child` - including a merely-textual prefix match with no
     /// "/" boundary. Mirrors `iCloudAnalyzer.relativeComponents(of:from:)`; kept as a local
     /// copy so the two analyzers stay decoupled.
     private func relativeComponents(of child: String, from ancestor: String) -> [String]? {

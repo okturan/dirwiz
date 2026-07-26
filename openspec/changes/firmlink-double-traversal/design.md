@@ -1,4 +1,4 @@
-# Design — Firmlink-Aware Traversal
+# Design - Firmlink-Aware Traversal
 
 ## Context
 
@@ -13,7 +13,7 @@ getattrlistbulk entry for "Applications"
 stat /System/Volumes/Data/Applications   -> dev=16777233  ino=283981561
 ```
 
-The `/`-side directory entry carries a **synthetic firmlink id** (`0x0FFFFFFF00000000 + n`), not the target's real inode. `283981561 != 1152921500311879701`, so `visited.insert` returns true for both and both subtrees are enumerated. Note `dev` is identical on both sides — firmlinks deliberately present the Data volume under the System volume's device — so a `du -x`-style "don't cross devices" rule cannot distinguish them either.
+The `/`-side directory entry carries a **synthetic firmlink id** (`0x0FFFFFFF00000000 + n`), not the target's real inode. `283981561 != 1152921500311879701`, so `visited.insert` returns true for both and both subtrees are enumerated. Note `dev` is identical on both sides - firmlinks deliberately present the Data volume under the System volume's device - so a `du -x`-style "don't cross devices" rule cannot distinguish them either.
 
 Measured consequences on a real 4.45M-item scan of `/`:
 
@@ -37,15 +37,15 @@ Two distinct failure modes from one cause: sometimes *both* sides enumerate (dou
 - Degrade to today's behavior if the firmlink table is unavailable.
 
 **Non-Goals:**
-- Closing the remaining gap to `statfs` physical usage. After removing the duplicate the tree still exceeds physical usage, because summing per-file `allocatedSize` counts APFS-clone and hardlink bytes once per reference — 31.0 GB from duplicate `(dev, inode)` alone, on this machine. That is inherent to the measure, shared by every treemap tool, and is a *reporting* question, not a traversal bug.
+- Closing the remaining gap to `statfs` physical usage. After removing the duplicate the tree still exceeds physical usage, because summing per-file `allocatedSize` counts APFS-clone and hardlink bytes once per reference - 31.0 GB from duplicate `(dev, inode)` alone, on this machine. That is inherent to the measure, shared by every treemap tool, and is a *reporting* question, not a traversal bug.
 - Changing `VisitedDirectories`, which still earns its keep as the loop guard.
-- Any change to warm start's node layout or cache format — this is traversal only, so existing caches stay valid.
+- Any change to warm start's node layout or cache format - this is traversal only, so existing caches stay valid.
 
 ## Decisions
 
 1. **Use the OS's own table, not an inode heuristic.** `/usr/share/firmlinks` is tab-separated `<system path>\t<data-relative path>` (19 rows on macOS 15). Parse it once per scan into the set of absolute Data-side paths `"/System/Volumes/Data/" + target`.
-   - *Alternative considered — detect the synthetic id range* (`ino >= 0x0FFFFFFF00000000`): rejected. It works today but is an undocumented encoding that Apple can change silently, and a false positive would make the scanner skip real content. The table is the supported contract.
-   - *Alternative considered — resolve every directory with `lstat` before the visited check*: rejected. Correct, but an extra syscall per directory across hundreds of thousands of directories, to fix a 19-entry problem.
+   - *Alternative considered - detect the synthetic id range* (`ino >= 0x0FFFFFFF00000000`): rejected. It works today but is an undocumented encoding that Apple can change silently, and a false positive would make the scanner skip real content. The table is the supported contract.
+   - *Alternative considered - resolve every directory with `lstat` before the visited check*: rejected. Correct, but an extra syscall per directory across hundreds of thousands of directories, to fix a 19-entry problem.
 2. **Skip the Data-side copy, keep the `/`-side path.** When a directory about to be enqueued has an absolute path in the skip set, drop it. This makes attribution deterministic and preserves familiar names. The inverse (skip the firmlinks, keep Data paths) would count correctly but display `/System/Volumes/Data/Users/...`, which is worse for users.
 3. **Only skip when the `/`-side path is inside the scan root.** Guard on the scan root actually containing both, so scanning `/System/Volumes/Data` (or any subtree) directly still enumerates everything. Without this the feature would silently hide content from a legitimate scan.
 4. **Fail open.** A missing, unreadable, or malformed table yields an empty skip set and today's exact behavior. This must never be the reason a scan loses data.
@@ -64,4 +64,4 @@ Pure traversal change; no persisted format touched, warm-start caches remain val
 
 ## Open Questions
 
-- Should the UI surface that firmlinked content is shown at its system path (a tooltip on `/Applications` etc.)? Probably unnecessary — the point is that it now matches what Finder shows.
+- Should the UI surface that firmlinked content is shown at its system path (a tooltip on `/Applications` etc.)? Probably unnecessary - the point is that it now matches what Finder shows.

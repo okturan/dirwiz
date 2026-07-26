@@ -1,4 +1,4 @@
-# Tasks — Insights Restructure
+# Tasks - Insights Restructure
 
 ## 1. Collapsible infrastructure
 
@@ -14,7 +14,7 @@
 ## 3. Tab removal
 
 - [x] 3.1 Remove `DetailTab.spaceAnalysis` and the `ContentView` switch arm; verify exhaustive switches compile; update any tab-count assumptions
-- [x] 3.2 Confirm no persisted or session state references the removed tab (activeTab is unpersisted — assert in a test if cheap)
+- [x] 3.2 Confirm no persisted or session state references the removed tab (activeTab is unpersisted - assert in a test if cheap)
 
 ## 4. Verification
 
@@ -31,10 +31,10 @@
   would have produced two headers per card, so the inner calls were removed and their
   richer titles (the ones carrying counts) moved onto the wrapper. `sectionHeader` is gone.
 - The Analyze control sits in the section's header accessory rather than in the card body,
-  so it stays reachable while the card is collapsed — otherwise collapsing the card would
+  so it stays reachable while the card is collapsed - otherwise collapsing the card would
   hide the action that fills it.
 - 3.2: `activeTab` really is unpersisted, and there is now a test asserting a fresh
-  `AppState` starts on the first tab. That is what makes removing a `DetailTab` case safe —
+  `AppState` starts on the first tab. That is what makes removing a `DetailTab` case safe -
   no saved state can point at the retired tab.
 
 ## Screenshot pass (4.1, done after the first pass)
@@ -46,6 +46,6 @@
   "Extension/s" and "Duplicates" to "Duplicate/s". Fixed with `lineLimit(1)` +
   `fixedSize(horizontal:)` on the tab labels. This is exactly the class of bug a screenshot
   pass exists to catch and no test would have.
-- Hook note: the tab must be set AFTER the scan completes — `startSelectedVolumeScan` runs
+- Hook note: the tab must be set AFTER the scan completes - `startSelectedVolumeScan` runs
   `resetForNewScan`, which resets `activeTab`, so setting it first silently captures Tree
   View.

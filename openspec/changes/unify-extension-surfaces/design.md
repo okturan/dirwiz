@@ -1,4 +1,4 @@
-# Design — Unify Extension Surfaces
+# Design - Unify Extension Surfaces
 
 ## Context
 
@@ -17,8 +17,8 @@
 
 ## Decisions
 
-1. **Shared component over shared data**: keep the two data sources (palette entries for the legend, full stats for the tab) and unify at the row-view level — `ExtensionRowView(model: ExtensionRowModel, style: .compact | .table)` where `ExtensionRowModel` is a tiny value struct both `PaletteEntry` and `FileTypeStat` map into (name, hash?, color?, size, count, fraction). Unifying the data sources instead was rejected: the palette's top-N + Other shape is a rendering concern of the treemap and shouldn't leak into the stats table.
-2. **Drill-down centralized on AppState**: extract the closure body from `ContentView` into `AppState.drillDownToExtension(hash:displayName:)` used by both surfaces (and by the future multi-select seeding in the search-filter-upgrade change — the two changes touch the same seam; whichever lands second adapts trivially).
+1. **Shared component over shared data**: keep the two data sources (palette entries for the legend, full stats for the tab) and unify at the row-view level - `ExtensionRowView(model: ExtensionRowModel, style: .compact | .table)` where `ExtensionRowModel` is a tiny value struct both `PaletteEntry` and `FileTypeStat` map into (name, hash?, color?, size, count, fraction). Unifying the data sources instead was rejected: the palette's top-N + Other shape is a rendering concern of the treemap and shouldn't leak into the stats table.
+2. **Drill-down centralized on AppState**: extract the closure body from `ContentView` into `AppState.drillDownToExtension(hash:displayName:)` used by both surfaces (and by the future multi-select seeding in the search-filter-upgrade change - the two changes touch the same seam; whichever lands second adapts trivially).
 3. **`PaletteEntry` identity**: add `extensionHash` at palette construction if absent ("Other" gets nil → routes to the Extensions tab). No persisted formats involved.
 4. **Hover affordance**: row background tint + pointing-hand cursor on hover (standard AppKit cursor via `onHover`), matching the tab rows' tap affordance; percentage bar remains non-interactive content.
 5. **Footer**: plain button styled as a tertiary link, pinned under the scroll list.

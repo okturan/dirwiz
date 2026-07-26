@@ -4,7 +4,7 @@ import Foundation
 @testable import DirWizUI
 
 /// The legend and the Extensions tab are two views of one thing. These tests pin the parts
-/// that used to be duplicated — naming and drill-down — so they cannot drift apart again.
+/// that used to be duplicated - naming and drill-down - so they cannot drift apart again.
 @Suite("Extension Surface Tests")
 struct ExtensionSurfaceTests {
 

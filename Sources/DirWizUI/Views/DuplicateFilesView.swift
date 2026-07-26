@@ -52,7 +52,7 @@ public struct DuplicateFilesView: View {
                 }
             }
         }
-        // Instant grouping is in-memory and cheap, so it just happens — no button.
+        // Instant grouping is in-memory and cheap, so it just happens - no button.
         .onAppear { appState.refreshInstantDuplicates() }
         .onChange(of: appState.scanToken) { _, _ in appState.refreshInstantDuplicates() }
         .onChange(of: scanMinimumSize) { _, newValue in
@@ -126,7 +126,7 @@ public struct DuplicateFilesView: View {
                 )) {
                     Button("OK", role: .cancel) { trashErrorPaths = [] }
                 } message: {
-                    Text("\(trashErrorPaths.count) file(s) couldn't be moved to Trash — they may have changed since the duplicate scan, been deleted already, or require additional permissions.\n\n\(trashErrorPaths.prefix(3).joined(separator: "\n"))\(trashErrorPaths.count > 3 ? "\n…" : "")")
+                    Text("\(trashErrorPaths.count) file(s) couldn't be moved to Trash - they may have changed since the duplicate scan, been deleted already, or require additional permissions.\n\n\(trashErrorPaths.prefix(3).joined(separator: "\n"))\(trashErrorPaths.count > 3 ? "\n…" : "")")
                 }
             }
 
@@ -234,7 +234,7 @@ public struct DuplicateFilesView: View {
                     Image(systemName: "wand.and.stars")
                         .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Likely duplicates — same name & size, not content-verified")
+                        Text("Likely duplicates - same name & size, not content-verified")
                             .font(.system(size: 12, weight: .semibold))
                         Text("\(visibleCandidates.count) groups · up to "
                              + SizeFormatter.shared.format(
@@ -463,7 +463,7 @@ public struct DuplicateFilesView: View {
         Dictionary(uniqueKeysWithValues: appState.cloneResults.map { ($0.group.id, $0) })
     }
 
-    /// IDs of groups where every path is macOS-managed/SIP-protected — not user-reclaimable.
+    /// IDs of groups where every path is macOS-managed/SIP-protected - not user-reclaimable.
     private func systemGroupIDs(for groups: [DuplicateGroup]) -> Set<UUID> {
         Set(groups.filter { SystemPathClassifier.isSystemManagedGroup(paths: $0.paths) }.map(\.id))
     }
@@ -510,7 +510,7 @@ public struct DuplicateFilesView: View {
         appState.duplicateTask = Task.detached(priority: .userInitiated) {
             let finder = DuplicateFinder(minimumFileSize: selectedScanMinimumSize)
             let groups = await finder.findDuplicates(in: tree) { [token] update in
-                // Progress callback is @MainActor — hops to main thread automatically.
+                // Progress callback is @MainActor - hops to main thread automatically.
                 guard appState.duplicateToken == token else { return }
                 if appState.duplicate.duplicatePhase == update.phase {
                     let clamped = max(appState.duplicate.duplicateProgress.processed, update.processed)
@@ -582,7 +582,7 @@ private struct DuplicateGroupRow: View {
     @Binding var checkedPaths: Set<String>
     var onToggleExpand: () -> Void
 
-    private static let systemManagedHelp = "macOS-managed (SIP-protected) — not user-reclaimable; the OS owns this space"
+    private static let systemManagedHelp = "macOS-managed (SIP-protected) - not user-reclaimable; the OS owns this space"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -663,7 +663,7 @@ private struct DuplicateGroupRow: View {
                     .fill(Color.secondary.opacity(0.06))
             )
 
-            // Expanded paths — with per-path modification date label.
+            // Expanded paths - with per-path modification date label.
             if isExpanded {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(group.paths.enumerated()), id: \.element) { index, path in
@@ -728,7 +728,7 @@ private struct DuplicateGroupRow: View {
 
     /// Check all paths in this group except the one with the newest/oldest modification date.
     private func selectAllExcept(keepNewest: Bool) {
-        guard !isSystemManaged else { return } // defense in depth — the menu is hidden for these groups
+        guard !isSystemManaged else { return } // defense in depth - the menu is hidden for these groups
         let dated: [(path: String, date: Date)] = group.paths.map { path in
             let url = URL(fileURLWithPath: path)
             let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
@@ -747,7 +747,7 @@ private struct DuplicateGroupRow: View {
     }
 
     private func deselectGroup() {
-        guard !isSystemManaged else { return } // defense in depth — the menu is hidden for these groups
+        guard !isSystemManaged else { return } // defense in depth - the menu is hidden for these groups
         for path in group.paths {
             checkedPaths.remove(path)
         }

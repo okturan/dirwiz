@@ -242,7 +242,7 @@ struct NavigationTests {
         state.navigateBack()    // root, forwardStack=[1]
         #expect(state.navigation.canNavigateForward)
 
-        state.setTreemapRoot(2) // dirB — should clear forwardStack
+        state.setTreemapRoot(2) // dirB - should clear forwardStack
 
         #expect(state.navigation.forwardStack.isEmpty)
         #expect(!state.navigation.canNavigateForward)

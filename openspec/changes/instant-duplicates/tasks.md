@@ -1,4 +1,4 @@
-# Tasks — Instant Duplicates
+# Tasks - Instant Duplicates
 
 ## 1. Core analyzer (DirWizCore)
 
@@ -30,13 +30,13 @@
 
 - **The safety gate is a TYPE, not a flag.** `InstantDuplicateCandidate` is a separate type
   from `DuplicateGroup`, and every cleanup/trash path takes `DuplicateGroup`. A heuristic
-  result therefore cannot reach deletion by accident — the compiler enforces what a
+  result therefore cannot reach deletion by accident - the compiler enforces what a
   `isVerified: Bool` would have left to reviewer discipline. `InstantDuplicateVerifier` is
   the only bridge between the two.
 - **2.1/2.2 were not done as specified, deliberately.** The task called for refactoring
   `DuplicateFinder` to expose passes 2–4 as a scoped entry point. But
-  `DuplicateContentVerifier.exactGroups` — already hardened, already opening with
-  `O_NOFOLLOW`, already the guard on the existing trash path — does precisely the needed
+  `DuplicateContentVerifier.exactGroups` - already hardened, already opening with
+  `O_NOFOLLOW`, already the guard on the existing trash path - does precisely the needed
   job. The partial/full hash passes exist to avoid byte-comparing millions of files; for
   one candidate group of a few files they are pure overhead. Reusing the verifier avoids a
   risky refactor of the exhaustive engine for no benefit. The characterization tests of
@@ -46,7 +46,7 @@
   either merging non-identical files or discarding real duplicates.
 - Hardlinks collapse to one representative per bucket via `(device, inode)`. Counting them
   would promise space that deleting them cannot reclaim.
-- Rejected candidates are surfaced as "Different content" rather than silently vanishing —
+- Rejected candidates are surfaced as "Different content" rather than silently vanishing -
   a checked answer, not a button that appears to do nothing.
 - A nested `ScrollView` bug was introduced and caught while wiring the two-section view:
   `duplicateList` had its own scroll view, and putting it inside the new outer one collapses

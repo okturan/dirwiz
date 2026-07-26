@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Bounds are computed from a caller-supplied `now` rather than read from the clock, so the
 /// mapping is testable and so a long-lived view cannot keep filtering against the timestamp
-/// it was first rendered at — callers recompute at search time.
+/// it was first rendered at - callers recompute at search time.
 public enum SearchDatePreset: String, CaseIterable, Sendable, Identifiable {
     case any
     case last24Hours

@@ -1,4 +1,4 @@
-# Design — Skipped Directories Honesty
+# Design - Skipped Directories Honesty
 
 ## Context
 
@@ -7,7 +7,7 @@
 ## Goals / Non-Goals
 
 **Goals:**
-- Paths, not just a number — capped, cheap, race-free via the existing hot-counter pattern.
+- Paths, not just a number - capped, cheap, race-free via the existing hot-counter pattern.
 - Styling that matches fixability: quiet when unfixable, actionable when fixable.
 
 **Non-Goals:**
@@ -20,7 +20,7 @@
 1. **Recording**: `incrementSkippedDirectories(path:)` appends into a `[String]` inside the existing hot mutex struct while under the cap (100), always incrementing the exact count. `publishCounters` copies list + count out like other fields; `reset()` clears both. The rescan/splice path (`rescanSubtrees`) uses the same call, so warm starts and live applies feed the same surface.
 2. **Presentation logic as a pure helper** (`SkippedDirsPresentation.style(fdaGranted:count:) -> quiet | fdaWarning | hidden`) so the styling rule is unit-testable, mirroring the `ScanSummaryComposer` pattern in the same file family.
 3. **Quiet state UI**: secondary-color line with an `info.circle` glyph (no orange, no triangle), `.popover` listing paths in a scrollable monospaced list (home-abbreviated like other path displays) under a one-paragraph explanation. Wording: "macOS protects these locations even from apps with Full Disk Access. Every disk utility skips them; their contents are not included in totals."
-4. **FDA-missing state**: the skip count folds into the existing `fullDiskAccessBanner` as its detail line ("Results will be incomplete — N folders couldn't be read"), keeping the single Grant action; the standalone orange line disappears entirely.
+4. **FDA-missing state**: the skip count folds into the existing `fullDiskAccessBanner` as its detail line ("Results will be incomplete - N folders couldn't be read"), keeping the single Grant action; the standalone orange line disappears entirely.
 5. **Cap choice (100)**: FDA-granted skips are typically <30; FDA-missing skips can be thousands but the banner state only needs the count. 100 keeps the popover useful without unbounded memory.
 
 ## Risks / Trade-offs
@@ -35,4 +35,4 @@ Pure addition + presentation swap; no persisted formats. Rollback = revert.
 
 ## Open Questions
 
-None — scope is deliberately small.
+None - scope is deliberately small.

@@ -13,7 +13,7 @@ struct ColumnSpec {
 /// Observable per-table column widths with `UserDefaults` persistence.
 ///
 /// Widths are stored as a single JSON dictionary (`[id: Double]`) under `storageKey`.
-/// Unknown ids, corrupt data, and non-finite/non-positive values are ignored on load —
+/// Unknown ids, corrupt data, and non-finite/non-positive values are ignored on load -
 /// callers always get a valid, clamped width back, never a crash or NaN.
 @MainActor
 @Observable
@@ -23,7 +23,7 @@ final class ColumnWidthsStore {
     private let defaults: UserDefaults
     private var overrides: [String: CGFloat] = [:]
 
-    /// Bumped on every `setWidth`/`reset`/`resetAll` — cheap invalidation hook for
+    /// Bumped on every `setWidth`/`reset`/`resetAll` - cheap invalidation hook for
     /// views that don't otherwise read a per-column width directly.
     private(set) var revision: Int = 0
 
@@ -95,7 +95,7 @@ final class ColumnWidthsStore {
 ///
 /// Attach as an `.overlay(alignment: .leading)` on the column to the *right* of the
 /// boundary, offset by `-Self.hitWidth / 2`, so the strip is centered on the boundary
-/// and painted as part of that (later-drawn) column's subtree — this keeps it on top
+/// and painted as part of that (later-drawn) column's subtree - this keeps it on top
 /// of its left neighbor for the overlapping half without perturbing either column's
 /// layout width, which is what preserves header/row alignment.
 struct ColumnResizeHandle: View {
@@ -156,7 +156,7 @@ struct ColumnResizeHandle: View {
     }
 
     /// Keeps the resize cursor pushed for as long as we're hovering OR dragging, and
-    /// guards against unbalanced push/pop — NSCursor's stack corrupts otherwise.
+    /// guards against unbalanced push/pop - NSCursor's stack corrupts otherwise.
     private func syncCursor() {
         let shouldShow = isHovering || isDragging
         if shouldShow, !cursorPushed {
@@ -171,7 +171,7 @@ struct ColumnResizeHandle: View {
 
 extension View {
     /// Attaches a `ColumnResizeHandle` for the boundary immediately to this view's
-    /// leading edge — call on the column to the *right* of the boundary (see
+    /// leading edge - call on the column to the *right* of the boundary (see
     /// `ColumnResizeHandle`'s doc comment for why: it keeps the handle painted on top
     /// of its left neighbor without adding layout width to either column).
     func resizeHandle(store: ColumnWidthsStore, controls: String, direction: CGFloat) -> some View {

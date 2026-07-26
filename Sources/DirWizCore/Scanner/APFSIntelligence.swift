@@ -87,7 +87,7 @@ public struct APFSIntelligence: Sendable {
             guard let values = try? url.resourceValues(
                 forKeys: [.totalFileAllocatedSizeKey]
             ) else {
-                // If we can't read one file, skip entire group — incomplete data
+                // If we can't read one file, skip entire group - incomplete data
                 return nil
             }
             let allocated = UInt64(values.totalFileAllocatedSize ?? 0)

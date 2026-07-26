@@ -1,4 +1,4 @@
-# Tasks — Skipped Directories Honesty
+# Tasks - Skipped Directories Honesty
 
 ## 1. Recording (DirWizCore)
 
@@ -15,4 +15,4 @@
 
 ## 3. Verification
 
-- [x] 3.1 Full suite green; CLAUDE.md untouched (no invariant changes) — confirm
+- [x] 3.1 Full suite green; CLAUDE.md untouched (no invariant changes) - confirm

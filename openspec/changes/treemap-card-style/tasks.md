@@ -1,4 +1,4 @@
-# Tasks — Card Treemap Style
+# Tasks - Card Treemap Style
 
 ## 1. Geometry rules (DirWizUI, pure + testable first)
 
@@ -8,7 +8,7 @@
 
 ## 2. Shader (DirWizUI/Treemap)
 
-- [x] 2.1 Extend `CushionUniforms`/`CushionInstance` with style, radius and gap; keep Cushion's byte layout and behavior identical (Swift/Metal struct layout must stay in lockstep — the existing SIMD4 padding comment applies)
+- [x] 2.1 Extend `CushionUniforms`/`CushionInstance` with style, radius and gap; keep Cushion's byte layout and behavior identical (Swift/Metal struct layout must stay in lockstep - the existing SIMD4 padding comment applies)
 - [x] 2.2 Card branch in `cushionFragmentShader`: flat directional gradient in place of the parabolic-normal lighting, preserving the existing selection, hover and recency-heatmap treatments
 - [x] 2.3 Rounded-box SDF using `rectPos`/`rectSize`; `discard_fragment()` outside the shape; define the view background so cut corners reveal something intentional
 - [x] 2.4 Verify Cushion output is byte-identical before/after the refactor (screenshot diff at a fixed view)
@@ -23,19 +23,19 @@
 ## 4. Hit testing (the known trap)
 
 - [x] 4.1 Keep `SpatialGrid` built from LAYOUT rects, not inset visual rects
-- [x] 4.2 Test: with Card insets active, hovering just inside a rect's inset edge selects the node whose layout rect contains the cursor — pins the drift bug before it can ship
+- [x] 4.2 Test: with Card insets active, hovering just inside a rect's inset edge selects the node whose layout rect contains the cursor - pins the drift bug before it can ship
 - [x] 4.3 Decide and test directory-container click behavior (zoom into the directory) so containers don't swallow clicks meant for children
 
 ## 5. Settings + disclosure (DirWizUI)
 
 - [x] 5.1 Style preference, persisted, defaulting to Cushion
-- [x] 5.2 One-line UI notice when aggregation is active, and when the view fell back to Cushion for density — say why, in the spirit of the skipped-dirs and warm-start reason surfacing
+- [x] 5.2 One-line UI notice when aggregation is active, and when the view fell back to Cushion for density - say why, in the spirit of the skipped-dirs and warm-start reason surfacing
 - [x] 5.3 Toggle placement (treemap toolbar) and wording
 
 ## 6. Verification
 
 - [x] 6.1 Screenshot pass in both styles at several densities (small folder, /Applications-scale, whole-volume root), per the repo's screenshot-iterate convention
-- [x] 6.2 Confirm the `ScanTimeLayoutBudget` timing gate still passes — container instances must not make scan-time layout starve the scanner
+- [x] 6.2 Confirm the `ScanTimeLayoutBudget` timing gate still passes - container instances must not make scan-time layout starve the scanner
 - [x] 6.3 Full suite green; CLAUDE.md treemap notes record that hierarchy is lit (cushions) vs drawn (cards), and that hit testing must stay on layout rects
 
 ## Implementation notes (as built)
@@ -47,7 +47,7 @@
   exactly as before.
 - Task 2.4 is verified by *offscreen GPU render* rather than a screenshot diff. The app's
   Metal layer is not captured by `cacheDisplay`, which is what the repo's headless
-  screenshot technique uses — the treemap comes out blank, so a screenshot diff would have
+  screenshot technique uses - the treemap comes out blank, so a screenshot diff would have
   compared two empty rectangles and "passed". `CardStyleRenderTests` instead compiles the
   real shader source, renders to a texture and reads back pixels: cushion fills its corner,
   cards discard it, the two interiors differ, and a sub-decoration-size card still fills
@@ -63,7 +63,7 @@
 ## Nesting, containers and aggregation (as built)
 
 - `SquarifyLayout` already emitted every directory as an `isBackground` rect before its
-  children, so no new instances were needed for 3.1 — the containers were always there,
+  children, so no new instances were needed for 3.1 - the containers were always there,
   just completely covered. Card style makes them visible by pulling children into the
   container's padded interior (`CardGeometry.innerRect`), which also frees the header strip.
 - The transform lives in `CardNesting.place`, deliberately pure and outside the renderer so
@@ -77,7 +77,7 @@
   a container, so the dropped tail reads as "more inside this folder" against its parent's
   fill rather than as a hole. The UI says aggregation is active.
 - 6.1 could not use the repo's headless screenshot technique (`cacheDisplay` does not
-  capture the Metal layer — the treemap comes out blank). Substituted with an offscreen
+  capture the Metal layer - the treemap comes out blank). Substituted with an offscreen
   render of a 33-rect composed layout pushed through the real `CardNesting.place`, inspected
   in both styles, plus the pixel-level assertions in `CardStyleRenderTests`.
 
@@ -86,6 +86,6 @@
 - Decision: NO new click handling was needed, and there is now a test proving it rather
   than an argument claiming it. `SquarifyLayout` emits a container before its children and
   `SpatialGrid.hitTest` scans its cell in reverse, so the deepest rect covering a point
-  always wins. A container is therefore hit only where no child covers the point — which,
+  always wins. A container is therefore hit only where no child covers the point - which,
   once children are inset, is exactly its visible frame and header strip. Clicking there
   selects the directory (and double-click zooms, via the existing handler).

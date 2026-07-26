@@ -61,7 +61,7 @@ struct TreeNodeItem: Identifiable, Equatable {
         return n.childCount > 0 && n.firstChildIndex != FileNode.invalid
     }
 
-    /// Sorted children — only call when actually expanding.
+    /// Sorted children - only call when actually expanding.
     var children: [TreeNodeItem] {
         let range = tree.children(of: id)
         guard !range.isEmpty else { return [] }

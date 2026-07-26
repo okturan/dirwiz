@@ -12,13 +12,13 @@ public struct TreeTableView: View {
     /// Path-keyed mirror of `expandedFolders`, kept in sync on every user-initiated
     /// expand/collapse. Paths survive `removeSubtree`'s index renumbering, so after any
     /// tree mutation (trash, warm-start splice, ...) `expandedFolders` is rebuilt from this
-    /// set — see the `treeLayoutRevision` handler below — instead of being wiped wholesale.
+    /// set - see the `treeLayoutRevision` handler below - instead of being wiped wholesale.
     @State private var expandedPaths: Set<String> = []
     @State private var scrollGeneration: UInt64 = 0
     @State private var minSizeFilter: UInt64 = 0
     @State private var columnStore = ColumnWidthsStore(specs: TreeTableColumns.specs, storageKey: TreeTableColumns.storageKey)
     @FocusState private var isFocused: Bool
-    /// Cached visible items for keyboard navigation — avoids O(n) recompute on every keypress.
+    /// Cached visible items for keyboard navigation - avoids O(n) recompute on every keypress.
     @State private var cachedItems: [TreeNodeItem] = []
 
     public init(appState: AppState) {
@@ -95,7 +95,7 @@ public struct TreeTableView: View {
                 }
                 .onChange(of: expandedFolders) { _, _ in cachedItems = flattenedVisibleItems(tree: tree) }
                 .onChange(of: expandedPaths) { _, newValue in
-                    // Cheap, no debouncing needed — UserDefaults coalesces writes itself
+                    // Cheap, no debouncing needed - UserDefaults coalesces writes itself
                     // (plan 038's session persistence; see AppState.saveExpandedPathsSession).
                     appState.saveExpandedPathsSession(newValue)
                 }
@@ -193,7 +193,7 @@ public struct TreeTableView: View {
                         Task {
                             // On success, AppState bumps treeLayoutRevision, which the
                             // .onChange handler above uses to remap expandedFolders and
-                            // rebuild cachedItems — nothing to do here on either outcome.
+                            // rebuild cachedItems - nothing to do here on either outcome.
                             _ = await appState.trashNode(at: item.id)
                         }
                     }
@@ -412,7 +412,7 @@ public struct TreeTableView: View {
         }
 
         if didExpand {
-            // Ancestors were expanded — wait for SwiftUI to lay out new rows, then scroll.
+            // Ancestors were expanded - wait for SwiftUI to lay out new rows, then scroll.
             scrollGeneration &+= 1
             let gen = scrollGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -420,7 +420,7 @@ public struct TreeTableView: View {
                 proxy.scrollTo(nodeIndex)
             }
         } else {
-            // Node already visible in the list — minimal scroll, no delay.
+            // Node already visible in the list - minimal scroll, no delay.
             proxy.scrollTo(nodeIndex)
         }
     }
@@ -429,7 +429,7 @@ public struct TreeTableView: View {
     private func ensureVisibleInTreemap(_ nodeIndex: UInt32, nodes: [FileNode]) {
         let root = appState.navigation.treemapRootIndex
 
-        // Walk parent chain — if we hit the current root, node is already visible
+        // Walk parent chain - if we hit the current root, node is already visible
         var current = nodeIndex
         var hops = 0
         while current != FileNode.invalid && Int(current) < nodes.count && hops < 512 {
@@ -438,9 +438,9 @@ public struct TreeTableView: View {
             hops += 1
         }
 
-        // Not under current root — navigate treemap to parent dir.
+        // Not under current root - navigate treemap to parent dir.
         // showNodeInTreemap also sets selectedNodeIndex, but we already set it
-        // in onTapGesture — the duplicate write is harmless (same value).
+        // in onTapGesture - the duplicate write is harmless (same value).
         appState.showNodeInTreemap(nodeIndex)
     }
 
@@ -504,10 +504,10 @@ public struct TreeTableView: View {
 
     /// Rebuild an index-keyed expansion set from path-keyed state after a tree mutation
     /// that renumbers indices. Resolves each path strictly (no ancestor fallback, unlike
-    /// `ExplorationCapture.resolveOrAncestor`) — a folder that no longer exists simply
+    /// `ExplorationCapture.resolveOrAncestor`) - a folder that no longer exists simply
     /// drops out of the result, which is exactly "collapsed because it's gone".
     /// Seeds `expandedPaths`/`expandedFolders` from the persisted session (plan 038) the
-    /// first time this view appears with a tree and nothing already expanded — e.g. right
+    /// first time this view appears with a tree and nothing already expanded - e.g. right
     /// after `restoreOnLaunch` publishes a cached tree. Guarded on `expandedPaths.isEmpty`
     /// so it never clobbers expansion state already built up in this view's lifetime.
     private func seedExpansionFromSessionIfNeeded(tree: FileTree) {

@@ -82,7 +82,7 @@ public enum SearchEngine {
     ///
     /// This relies on the tree's parent-index-< -child-index invariant: by the time node `i`
     /// is visited, its parent's membership is already final, so membership is just inherited.
-    /// If that invariant ever breaks, this silently under-reports rather than crashing —
+    /// If that invariant ever breaks, this silently under-reports rather than crashing -
     /// hence the test that pins deep descendants.
     public static func scopeBitset(rootIndex: UInt32, nodes: [FileNode]) -> ScopeBitset? {
         let count = nodes.count
@@ -115,7 +115,7 @@ public enum SearchEngine {
     ) -> SearchResult {
         let start = CFAbsoluteTimeGetCurrent()
 
-        // Mismatch is benign — the scan loop below uses min(nodeCount, entryCount),
+        // Mismatch is benign - the scan loop below uses min(nodeCount, entryCount),
         // so it never reads out of bounds. Log in debug to catch stale snapshots early.
         if searchEntries.count < nodes.count {
             #if DEBUG
@@ -129,7 +129,7 @@ public enum SearchEngine {
         // Category and size bounds are deliberately NOT in this list. They predate this
         // change with the documented behavior "an empty query returns nothing regardless of
         // filters" (pinned by SearchEngineTests), and a size filter in particular tends to
-        // sit at a non-zero default — flipping it would make an empty search box suddenly
+        // sit at a non-zero default - flipping it would make an empty search box suddenly
         // enumerate the volume. New filter kinds get the better semantics; existing ones
         // keep the contract they shipped with.
         let hasNarrowingFilter = filters.extensionHash != nil
@@ -163,7 +163,7 @@ public enum SearchEngine {
         let expectedScanCount = scanAll ? min(nodes.count, searchEntries.count) : scanIndices.count
         matches.reserveCapacity(min(resultCap, expectedScanCount))
 
-        // All array access via UnsafeBufferPointer — no bounds checks in debug mode.
+        // All array access via UnsafeBufferPointer - no bounds checks in debug mode.
         queryBytes.withUnsafeBufferPointer { needleBuf in
             nodes.withUnsafeBufferPointer { nodesBuf in
                 searchEntries.withUnsafeBufferPointer { entriesBuf in
@@ -250,7 +250,7 @@ public enum SearchEngine {
         if node.fileSize < filters.minimumSize { return false }
         if let maxSize = filters.maximumSize, node.fileSize > maxSize { return false }
 
-        // Date bounds. modifiedDate == 0 means "unknown", which is never inside a window —
+        // Date bounds. modifiedDate == 0 means "unknown", which is never inside a window -
         // treating it as a match would invent a date the scanner never read.
         if filters.modifiedAfter != nil || filters.modifiedBefore != nil {
             let mod = node.modifiedDate

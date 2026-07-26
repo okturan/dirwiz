@@ -3,7 +3,7 @@ import Foundation
 @testable import DirWizCore
 
 /// The auto-apply decision. Pure and clock-injected, so every branch is exercised without
-/// waiting real seconds — the reason the policy is separate from the coordinator at all.
+/// waiting real seconds - the reason the policy is separate from the coordinator at all.
 @Suite("Live Refresh Policy Tests")
 struct LiveRefreshPolicyTests {
 
@@ -27,7 +27,7 @@ struct LiveRefreshPolicyTests {
     @Test("Nothing pending is idle, never an apply")
     func idleWhenNothingPending() {
         #expect(LiveRefreshPolicy.decide(input(pending: 0)) == .idle)
-        // Guards must not turn an empty queue into a deferral — that would show a
+        // Guards must not turn an empty queue into a deferral - that would show a
         // "deferred" pill with nothing actually waiting.
         #expect(LiveRefreshPolicy.decide(input(pending: 0, paused: true)) == .idle)
         #expect(LiveRefreshPolicy.decide(input(pending: 0, scanning: true)) == .idle)
@@ -53,7 +53,7 @@ struct LiveRefreshPolicyTests {
         #expect(justInside == .waitingForQuiescence)
     }
 
-    /// A missing timestamp must not block forever — better to apply than to wedge.
+    /// A missing timestamp must not block forever - better to apply than to wedge.
     @Test("An unknown last-change time does not stall the loop")
     func missingChangeTimestampApplies() {
         #expect(LiveRefreshPolicy.decide(input(lastChange: nil)) == .apply)
@@ -90,7 +90,7 @@ struct LiveRefreshPolicyTests {
         #expect(LiveRefreshPolicy.decide(input(pending: over, lastChange: nil))
                 == .storm(pendingCount: over))
 
-        // Exactly at the threshold is still spliceable — the check is strictly greater.
+        // Exactly at the threshold is still spliceable - the check is strictly greater.
         #expect(LiveRefreshPolicy.decide(input(pending: LiveRefreshPolicy.stormThreshold,
                                                lastChange: nil)) == .apply)
         // And once the set shrinks, normal service resumes with no latch to reset.

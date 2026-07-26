@@ -3,8 +3,8 @@ import DirWizCore
 
 /// The one place a file-extension row is described.
 ///
-/// File-type information appears on two surfaces — the always-visible sidebar legend and
-/// the Extensions tab — which had drifted into different visual hierarchies and different
+/// File-type information appears on two surfaces - the always-visible sidebar legend and
+/// the Extensions tab - which had drifted into different visual hierarchies and different
 /// capabilities (the always-visible one being the inert one, which is backwards). Both now
 /// build from this model, so a change to naming or formatting cannot land on one surface
 /// and miss the other.
@@ -52,7 +52,7 @@ public struct ExtensionRowModel: Identifiable, Sendable, Equatable {
     }
 }
 
-/// Compact legend row: swatch, name, size/count, percentage bar — and, unlike before,
+/// Compact legend row: swatch, name, size/count, percentage bar - and, unlike before,
 /// tappable, because the treemap's color key is exactly where you want to say
 /// "show me these files".
 public struct ExtensionLegendRow: View {
@@ -108,7 +108,7 @@ public struct ExtensionLegendRow: View {
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
         .help(model.isOther
-              ? "Other groups many extensions — open the Extensions tab to see them"
+              ? "Other groups many extensions - open the Extensions tab to see them"
               : "Search for \(model.displayName) files")
     }
 

@@ -3,7 +3,7 @@ import Foundation
 /// A volume's timeline: many compressed checkpoints plus a small JSON index.
 ///
 /// Replaces the single-slot `.tdiff` file that every camera click overwrote. The index
-/// exists so the timeline can be listed — dates, names, change summaries — without
+/// exists so the timeline can be listed - dates, names, change summaries - without
 /// decompressing a single checkpoint.
 ///
 /// The index is a CACHE, not the truth: it is rebuilt from the directory whenever it is
@@ -63,7 +63,7 @@ public struct SnapshotStore: Sendable {
 
         if let data = try? Data(contentsOf: indexURL),
            let index = try? JSONDecoder.snapshotDecoder.decode(Index.self, from: data) {
-            // Drop entries whose file has vanished — an index promising a checkpoint that
+            // Drop entries whose file has vanished - an index promising a checkpoint that
             // cannot be opened is worse than a shorter list.
             let present = index.checkpoints.filter {
                 fm.fileExists(atPath: directory.appendingPathComponent($0.filename).path)
@@ -76,7 +76,7 @@ public struct SnapshotStore: Sendable {
     /// Self-healing: reconstruct what can be known from the files themselves.
     ///
     /// Names, pins and change summaries live only in the index and are genuinely lost, so
-    /// recovered checkpoints are marked pinned — the store cannot tell which the user cared
+    /// recovered checkpoints are marked pinned - the store cannot tell which the user cared
     /// about, and silently thinning them away after an index loss would compound the damage.
     @discardableResult
     private func rebuildIndexFromDirectory() -> [SnapshotCheckpoint] {
@@ -209,7 +209,7 @@ public struct SnapshotStore: Sendable {
 
     /// Imports the pre-store single-slot `.tdiff`, if present, as a pinned checkpoint.
     ///
-    /// Pinned and named because it is the user's only existing baseline — the one thing
+    /// Pinned and named because it is the user's only existing baseline - the one thing
     /// that must not be thinned away by the retention policy on its first run. The original
     /// file is renamed rather than deleted, so a failed migration is recoverable.
     @discardableResult
@@ -275,7 +275,7 @@ public struct SnapshotStore: Sendable {
 /// Whether a scan completion is worth recording. Pure, so the throttle is testable.
 public enum AutoCheckpointPolicy {
     public static let minimumIntervalSeconds: TimeInterval = 6 * 3_600
-    /// Growth that justifies a checkpoint even inside the interval — a big change is worth
+    /// Growth that justifies a checkpoint even inside the interval - a big change is worth
     /// recording precisely because it is the one you will want to look back at.
     public static let significantGrowthFraction = 0.01
 
