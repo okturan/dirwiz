@@ -12,7 +12,9 @@ docs/*
 !docs/assets/
 docs/assets/*
 !docs/assets/*.png
+!docs/assets/*.webp
 !docs/assets/dirwiz-logo.svg
+!docs/index.html
 .claude/worktrees/
 repomix-output*
 scripts/notary.env

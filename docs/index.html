@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DirWiz — See every byte on your Mac</title>
+<meta name="description" content="DirWiz is a fast disk space analyzer for macOS. Live Metal treemap, byte-verified duplicates, snapshot diffs, hardlink analysis, and a scriptable CLI — native Swift, zero dependencies.">
+<link rel="canonical" href="https://dirwiz.app/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="DirWiz">
+<meta property="og:url" content="https://dirwiz.app/">
+<meta property="og:title" content="DirWiz — See every byte on your Mac">
+<meta property="og:description" content="Every byte on your Mac, mapped. Live Metal treemap, byte-verified duplicates, snapshot diffs, and a scriptable CLI.">
+<meta property="og:image" content="https://dirwiz.app/assets/dirwiz-social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DirWiz — See every byte on your Mac">
+<meta name="twitter:description" content="Every byte on your Mac, mapped. Live Metal treemap, byte-verified duplicates, snapshot diffs, and a scriptable CLI.">
+<meta name="twitter:image" content="https://dirwiz.app/assets/dirwiz-social-preview.png">
+<meta name="theme-color" content="#fdfdfb">
+<link rel="icon" type="image/png" href="assets/dirwiz-logo.png">
+<style>
+/* ————— tokens: warm paper ground, navy ink, one blue accent ————— */
+:root{
+  color-scheme: light;
+  --paper:#fdfdfb;
+  --band:#f3f6fa;
+  --card:#ffffff;
+  --ink:#1a2233;
+  --body:#3f4756;
+  --mut:#69748a;
+  --faint:#98a1b3;
+  --line:#e4e8ef;
+  --line2:#cdd6e4;
+  --accent:#3568d4;
+  --accent-deep:#16305e;
+  --tint:#eaf0fb;
+  --ok:#33d159;      /* temporal diff: new     */
+  --grown:#338cf2;   /* temporal diff: grown   */
+  --shrunk:#f2b833;  /* temporal diff: shrunk  */
+  --gone:#e64040;    /* temporal diff: deleted */
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --serif:ui-serif,"New York",Georgia,serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--paper);color:var(--body);font-family:var(--sans);
+  font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:#cfdefa}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;height:auto;display:block}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+[id]{scroll-margin-top:76px}
+
+/* ————— nav ————— */
+.nav{position:fixed;top:0;left:0;right:0;z-index:50;height:56px;
+  display:flex;align-items:center;gap:18px;
+  padding:0 clamp(18px,4vw,36px);
+  transition:background .3s,border-color .3s;border-bottom:1px solid transparent}
+.nav.scrolled{background:rgba(253,253,251,.85);-webkit-backdrop-filter:blur(16px) saturate(160%);
+  backdrop-filter:blur(16px) saturate(160%);border-bottom-color:var(--line)}
+.nav-brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:15px;
+  letter-spacing:-.01em;color:var(--ink)}
+.nav-brand img{width:24px;height:24px}
+.nav-links{display:flex;gap:26px;font-size:13.5px;color:var(--mut);margin-left:auto}
+.nav-links a{transition:color .2s}
+.nav-links a:hover{color:var(--ink)}
+.nav-actions{display:flex;align-items:center;gap:10px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;
+  letter-spacing:-.005em;border-radius:10px;white-space:nowrap;
+  transition:background .2s,border-color .2s,transform .15s,box-shadow .2s}
+.btn-primary{color:#fff;background:var(--accent);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 1px 2px rgba(22,48,94,.25)}
+.btn-primary:hover{background:#2c5bc4;transform:translateY(-1px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 4px 12px rgba(22,48,94,.22)}
+.btn-primary:active{transform:none}
+.btn-quiet{color:var(--accent);font-weight:600}
+.btn-quiet:hover{color:var(--accent-deep)}
+.btn-sm{font-size:13px;padding:6.5px 15px;border-radius:999px}
+.btn-lg{font-size:15.5px;padding:12px 25px}
+.btn-gh{font-size:13px;padding:6px 13px;border-radius:999px;color:var(--body);
+  border:1px solid var(--line);background:var(--card);display:inline-flex;align-items:center;gap:6px}
+.btn-gh:hover{border-color:var(--line2);color:var(--ink);transform:translateY(-1px);
+  box-shadow:0 3px 10px -4px rgba(22,48,94,.15)}
+
+/* ————— layout & shared ————— */
+.wrap{max-width:1120px;margin:0 auto;padding:0 clamp(20px,4.5vw,36px)}
+section{padding:clamp(76px,10vw,120px) 0}
+/* section.wrap carries both roles — restate vertical padding at higher
+   specificity so .wrap's `padding:0 …` can't zero it out */
+section.wrap{padding:clamp(76px,10vw,120px) clamp(20px,4.5vw,36px)}
+.band{background:var(--band);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+h1,h2,h3{color:var(--ink);text-wrap:balance}
+h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;line-height:1.15;margin:12px 0 14px}
+.lede{color:var(--body);font-size:17px;max-width:60ch}
+.center-head{text-align:center}
+.center-head .lede{margin:0 auto}
+.mono{font-family:var(--mono);font-size:.92em}
+.rv{opacity:0;transform:translateY(22px)}
+.rv.in{opacity:1;transform:none;
+  transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);
+  transition-delay:var(--d,0s)}
+
+/* ————— hero ————— */
+.hero{padding:clamp(116px,15vh,160px) 0 0;text-align:center}
+.hero-icon{width:120px;height:120px;margin:0 auto 20px;
+  filter:drop-shadow(0 10px 22px rgba(22,48,94,.18))}
+.hero h1{font-size:clamp(38px,6.4vw,64px);font-weight:750;letter-spacing:-.025em;
+  line-height:1.05;margin:14px auto 18px;max-width:16ch}
+.hero h1 em{font-family:var(--serif);font-style:italic;font-weight:600;color:var(--accent)}
+.hero p.sub{font-size:clamp(16.5px,2vw,19px);max-width:52ch;margin:0 auto 30px;color:var(--body)}
+.hero-ctas{display:flex;gap:22px;justify-content:center;align-items:center;flex-wrap:wrap}
+.hero-fine{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+.hero-shot{margin:58px auto 0;max-width:1080px;padding:0 clamp(14px,3vw,28px)}
+.hero-shot img{border-radius:10px;border:1px solid var(--line);
+  box-shadow:0 1px 2px rgba(22,48,94,.06),0 12px 32px -12px rgba(22,48,94,.18),
+             0 40px 90px -30px rgba(22,48,94,.25)}
+.hero-shot figcaption{margin-top:18px;font-size:13px;color:var(--faint)}
+.hero-shot figcaption .mono{font-size:12px}
+.hero-bleed{padding-bottom:clamp(76px,10vw,120px)}
+
+/* ————— stats strip ————— */
+.stats{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:0;background:var(--card)}
+.stats .wrap{display:grid;grid-template-columns:repeat(4,1fr)}
+.stat{padding:30px 26px;border-left:1px solid var(--line)}
+.stat:first-child{border-left:0}
+.stat .k{font-family:var(--mono);font-size:15.5px;font-weight:600;color:var(--ink)}
+.stat .v{font-size:13.5px;color:var(--mut);margin-top:5px;line-height:1.55}
+
+/* ————— feature cards ————— */
+.bento{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:48px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:24px;
+  transition:border-color .25s,transform .25s,box-shadow .25s}
+.card:hover{border-color:var(--line2);transform:translateY(-2px);
+  box-shadow:0 8px 24px -12px rgba(22,48,94,.14)}
+.card h3{font-size:16px;font-weight:650;letter-spacing:-.012em;margin:14px 0 7px}
+.card p{font-size:14px;color:var(--mut);line-height:1.62}
+.card .ico{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;
+  color:var(--accent);background:var(--tint);border:1px solid #dbe6f8}
+.cat-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+.cat-chips .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+  font-size:11px;color:var(--body);border:1px solid var(--line);border-radius:999px;
+  padding:3.5px 10px 3.5px 7px;background:#fafbfd}
+.cat-chips .chip i{width:8px;height:8px;border-radius:2.5px}
+
+/* ————— live demo panel ————— */
+.demo-grid{display:grid;grid-template-columns:1fr;gap:34px;margin-top:44px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(22,48,94,.05),0 16px 40px -24px rgba(22,48,94,.18)}
+.crumbs{display:flex;align-items:center;gap:2px;height:38px;padding:0 12px;
+  font-family:var(--mono);font-size:12px;color:var(--faint);
+  border-bottom:1px solid var(--line);background:#fafbfd;overflow:hidden;white-space:nowrap}
+.crumbs button{color:var(--accent);padding:2px 7px;border-radius:5px;font-family:var(--mono);font-size:12px}
+.crumbs button:hover{background:var(--tint)}
+.crumbs .cur{color:var(--ink);font-weight:600;padding:2px 7px}
+.crumbs .sep{opacity:.55}
+.crumbs .hint{margin-left:auto;font-size:11px;color:var(--faint)}
+.tm-wrap{position:relative;height:min(480px,58vw)}
+.tm-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:default}
+.tm-tip{position:absolute;z-index:5;pointer-events:none;opacity:0;transition:opacity .15s;
+  background:rgba(20,28,44,.94);color:#f2f5fa;border-radius:8px;padding:7px 11px;
+  font-size:12.5px;line-height:1.45;box-shadow:0 8px 24px rgba(22,48,94,.35);max-width:280px}
+.tm-tip b{font-weight:650;display:block;color:#fff}
+.tm-tip span{color:#aab5cc;font-family:var(--mono);font-size:11px}
+.legend{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:10px 12px;
+  border-top:1px solid var(--line);background:#fafbfd}
+.legend .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+  font-size:10.5px;color:var(--body);border:1px solid var(--line);border-radius:999px;
+  padding:2.5px 9px 2.5px 6px;background:#fff}
+.legend .chip i{width:8px;height:8px;border-radius:2.5px}
+.legend .live{margin-left:auto;display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.legend .live i{width:6px;height:6px;border-radius:50%;background:var(--ok);animation:pulse 2.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.demo-note{margin-top:20px;font-size:13.5px;color:var(--mut);text-align:center}
+.demo-note b{color:var(--body);font-weight:600}
+
+/* ————— split deep-dives ————— */
+.split{display:grid;grid-template-columns:1fr 1.1fr;gap:clamp(36px,6vw,72px);align-items:center}
+.split.flip .copy{order:2}
+.split .copy .lede{font-size:16.5px}
+.split ul.ticks{margin-top:22px;display:grid;gap:12px;list-style:none}
+.split ul.ticks li{display:flex;gap:11px;font-size:14.5px;color:var(--mut);line-height:1.55}
+.split ul.ticks li svg{flex:0 0 auto;margin-top:3px;color:var(--accent)}
+.split ul.ticks b{color:var(--ink);font-weight:600}
+
+/* duplicate groups mock (light) */
+.dupcard{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(22,48,94,.05),0 20px 50px -24px rgba(22,48,94,.2);font-size:13px}
+.dup-head{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line);
+  background:#fafbfd;font-family:var(--mono);font-size:11.5px;color:var(--body)}
+.dup-head .reclaim{margin-left:auto;font-weight:700;color:var(--accent-deep);font-size:13px}
+.dup-group{padding:7px 0;border-bottom:1px solid var(--line)}
+.dup-group:last-of-type{border-bottom:0}
+.dup-row{display:grid;grid-template-columns:minmax(0,1fr) 74px 92px;gap:10px;align-items:center;
+  padding:6.5px 16px;font-family:var(--mono);font-size:11.5px}
+.dup-row .p{color:var(--body);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dup-row .s{color:var(--faint);text-align:right}
+.dup-row .tag{justify-self:end;font-size:10px;font-weight:600;border-radius:999px;padding:2px 8px;border:1px solid}
+.dup-row .tag.keep{color:#1c7a34;background:#eafaf0;border-color:#bfe9cd}
+.dup-row .tag.same{color:var(--accent);background:var(--tint);border-color:#cfdefa}
+.dup-foot{padding:10px 16px;background:#fafbfd;font-size:11.5px;color:var(--mut);
+  display:flex;align-items:center;gap:8px}
+.dup-foot svg{color:var(--accent);flex:0 0 auto}
+
+/* snapshot diff mock (light) */
+.mockcard{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(22,48,94,.05),0 20px 50px -24px rgba(22,48,94,.2);font-size:13px}
+.snap-head{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);background:#fafbfd}
+.snap-range{font-family:var(--mono);font-size:11.5px;color:var(--body);
+  border:1px solid var(--line);border-radius:7px;padding:4px 10px;background:#fff}
+.snap-total{margin-left:auto;font-family:var(--mono);font-size:19px;font-weight:700;
+  color:var(--grown);letter-spacing:-.02em}
+.snap-rows{padding:6px 0}
+.snap-row{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr) 82px;gap:12px;
+  align-items:center;padding:8.5px 16px}
+.snap-row .p{font-family:var(--mono);font-size:11.5px;color:var(--body);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snap-row .bar{height:7px;border-radius:4px;background:#edf0f5;overflow:hidden}
+.snap-row .bar i{display:block;height:100%;border-radius:4px;width:calc(var(--w)*1%);
+  transform-origin:left;transform:scaleX(0)}
+.in .snap-row .bar i{transform:scaleX(1);
+  transition:transform 1s cubic-bezier(.2,.7,.2,1) calc(.15s + var(--i)*.08s)}
+.snap-row .d{font-family:var(--mono);font-size:11.5px;text-align:right;font-weight:600}
+.snap-legend{display:flex;gap:14px;padding:11px 16px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10.5px;color:var(--mut);flex-wrap:wrap;background:#fafbfd}
+.snap-legend s{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.snap-legend i{width:8px;height:8px;border-radius:2.5px}
+
+/* terminal — the one dark block on the page */
+.term{background:#101623;border:1px solid #1e2839;border-radius:12px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(22,48,94,.1),0 24px 60px -28px rgba(22,48,94,.4)}
+.term-bar{display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;
+  background:#161d2e;border-bottom:1px solid #1e2839}
+.term-bar i{width:11px;height:11px;border-radius:50%}
+.term-bar i:nth-child(1){background:#ff5f57}.term-bar i:nth-child(2){background:#febc2e}.term-bar i:nth-child(3){background:#28c840}
+.term-bar span{flex:1;text-align:center;font-family:var(--mono);font-size:11.5px;color:#8b96ad}
+.term-body{padding:16px 18px 20px;overflow-x:auto}
+.term-body pre{font-family:var(--mono);font-size:12.5px;line-height:1.65;color:#aab5cc;min-height:16.5em;white-space:pre}
+.term-body .pr{color:#7fa5f2}
+.term-body .cm{color:#e8edf7}
+.term-body .dim{color:#5d6b84}
+.term-body .cur{display:inline-block;width:7px;height:14px;background:#7fa5f2;
+  vertical-align:-2px;animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* ————— safety ————— */
+.safety .inner{max-width:860px;margin:0 auto;text-align:center}
+.safety h2{font-size:clamp(25px,3.4vw,34px);font-weight:700;letter-spacing:-.02em;
+  line-height:1.2;margin-bottom:46px}
+.safety-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:left}
+.safety-grid .cell{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}
+.safety-grid h3{font-size:15px;font-weight:650;margin-bottom:7px;display:flex;align-items:center;gap:9px}
+.safety-grid h3 i{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.safety-grid p{font-size:13.5px;color:var(--mut);line-height:1.6}
+
+/* ————— download ————— */
+.dl{text-align:center}
+.dl .dl-icon{width:96px;height:96px;margin:0 auto 24px;
+  filter:drop-shadow(0 10px 22px rgba(22,48,94,.16))}
+.dl h2{font-size:clamp(28px,4.2vw,42px);font-weight:750;letter-spacing:-.025em;
+  line-height:1.1;margin-bottom:28px}
+.dl .hero-fine{margin-top:18px}
+.dl .notes{margin:30px auto 0;max-width:56ch;display:grid;gap:12px;text-align:left}
+.dl .note{font-size:13.5px;color:var(--mut);line-height:1.6;background:var(--card);
+  border:1px solid var(--line);border-radius:10px;padding:13px 16px}
+.dl .note b{color:var(--body);font-weight:600}
+.checksum{max-width:620px;margin:26px auto 0;text-align:left;
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.checksum-head{background:#fafbfd;border-bottom:1px solid var(--line);padding:8px 14px;
+  font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.14em;color:var(--faint)}
+.checksum-body{padding:13px 16px;font-family:var(--mono);font-size:11.5px;color:var(--accent-deep);
+  word-break:break-all;line-height:1.85}
+.checksum-body .c{color:var(--faint)}
+.buildline{margin-top:24px;font-size:13px;color:var(--mut)}
+.buildline code{font-family:var(--mono);font-size:11.5px;background:var(--card);
+  border:1px solid var(--line);border-radius:5px;padding:2px 7px;color:var(--accent-deep)}
+
+/* ————— footer ————— */
+footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--paper)}
+.foot{display:flex;align-items:center;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--faint)}
+.foot .brand{display:flex;align-items:center;gap:8px;color:var(--body);font-weight:600}
+.foot .brand img{width:20px;height:20px}
+.foot nav{display:flex;gap:18px;margin-left:auto}
+.foot nav a:hover{color:var(--ink)}
+.foot .egg{width:100%;font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:4px}
+
+/* ————— responsive ————— */
+@media (max-width:960px){
+  .bento{grid-template-columns:1fr 1fr}
+  .split{grid-template-columns:1fr}
+  .split.flip .copy{order:0}
+  .stats .wrap{grid-template-columns:1fr 1fr}
+  .stat{border-left:0;border-top:1px solid var(--line)}
+  .stat:nth-child(-n+2){border-top:0}
+  .stat:nth-child(even){border-left:1px solid var(--line)}
+}
+@media (max-width:680px){
+  .nav-links{display:none}
+  .bento{grid-template-columns:1fr}
+  .safety-grid{grid-template-columns:1fr}
+  .snap-row{grid-template-columns:minmax(0,1fr) 74px}
+  .snap-row .bar{display:none}
+  .dup-row{grid-template-columns:minmax(0,1fr) 74px}
+  .dup-row .tag{display:none}
+  .tm-wrap{height:340px}
+  .stats .wrap{grid-template-columns:1fr}
+  .stat{border-left:0!important;border-top:1px solid var(--line)}
+  .stat:first-child{border-top:0}
+  .foot nav{margin-left:0}
+}
+.split > *,.demo-grid > *,.stats .wrap > *{min-width:0}
+.stat .k{overflow-wrap:anywhere}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  .rv{opacity:1;transform:none}
+}
+</style>
+<noscript><style>.rv{opacity:1;transform:none}</style></noscript>
+</head>
+<body>
+
+<nav class="nav" id="nav" aria-label="Main">
+  <a class="nav-brand" href="#top">
+    <img src="assets/dirwiz-logo.png" alt="DirWiz icon">
+    DirWiz
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#demo">Live demo</a>
+    <a href="#duplicates">Duplicates</a>
+    <a href="#cli">CLI</a>
+  </div>
+  <div class="nav-actions">
+    <a class="btn-gh" href="https://github.com/okturan/dirwiz" aria-label="DirWiz on GitHub">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.49c-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
+      GitHub
+    </a>
+    <a class="btn btn-primary btn-sm" href="#download">Download</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <img class="hero-icon rv" src="assets/dirwiz-logo.png" alt="DirWiz app icon — a folder containing a blue treemap" width="120" height="120">
+    <h1 class="rv" style="--d:.1s">Every byte on your Mac, <em>mapped</em>.</h1>
+    <p class="sub rv" style="--d:.15s">DirWiz scans millions of files in seconds and draws each one as a
+    rectangle, sized by the space it actually takes on disk. Find what’s eating
+    your Mac, then send it to the Trash with a clear conscience.</p>
+    <div class="hero-ctas rv" style="--d:.2s">
+      <a class="btn btn-primary btn-lg" href="https://github.com/okturan/dirwiz/releases/latest">Download for macOS</a>
+      <a class="btn btn-quiet" href="#demo">Try the live demo&ensp;↓</a>
+    </div>
+    <p class="hero-fine rv" style="--d:.25s">v1.1.1 · macOS 15+ · universal binary · zero dependencies · free &amp; open source</p>
+  </div>
+  <figure class="hero-shot hero-bleed rv" style="--d:.3s">
+    <img src="assets/dirwiz-showcase.webp"
+         alt="DirWiz after scanning a Mac boot volume: a sortable file tree above a colorful cushion treemap, with a file type legend on the right"
+         width="2200" height="1580">
+    <figcaption>An actual scan of this Mac’s boot volume: 4,454,141 files and 991 GB, mapped in 23 seconds.
+    Every rectangle is sized by the space it really occupies on disk.</figcaption>
+  </figure>
+</header>
+
+<div class="stats" aria-label="Technical highlights">
+  <div class="wrap">
+    <div class="stat rv"><div class="k">4.45M items · 23 s</div><div class="v">Cold scan of a full 991 GB boot volume, via <span class="mono">getattrlistbulk</span> bulk kernel reads.</div></div>
+    <div class="stat rv" style="--d:.06s"><div class="k">on-disk truth</div><div class="v">Sizes are allocated blocks, not logical lengths. Sparse files don’t lie.</div></div>
+    <div class="stat rv" style="--d:.12s"><div class="k">0 dependencies</div><div class="v">Native Swift and Metal. Nothing else ships in the bundle.</div></div>
+    <div class="stat rv" style="--d:.18s"><div class="k">Trash-only</div><div class="v">Every removal goes through the Trash. A delete code path doesn’t exist.</div></div>
+  </div>
+</div>
+
+<section class="wrap" id="features">
+  <h2 class="sec rv" style="--d:.05s">Built for the “what is eating my disk?” moment</h2>
+  <p class="lede rv" style="--d:.1s">One window: a treemap you can steer, a sortable tree table, duplicate and
+  hardlink groups, and space insights — all fed by one very fast scanner.</p>
+
+  <div class="bento">
+    <div class="card rv">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="8" height="18" rx="1.5"/><rect x="13" y="3" width="8" height="9" rx="1.5"/><rect x="13" y="14" width="8" height="7" rx="1.5"/></svg></div>
+      <h3>A map, not a list</h3>
+      <p>The Metal cushion treemap gives every file a rectangle sized by its bytes,
+      colored by extension. A 40&nbsp;GB folder of forgotten screen recordings is
+      hard to miss when it’s a 40&nbsp;GB rectangle.</p>
+    </div>
+    <div class="card rv" style="--d:.06s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 5 14h6l-1 8 8-12h-6l1-8z"/></svg></div>
+      <h3>Warm start</h3>
+      <p>DirWiz saves the tree after every scan, then replays the FSEvents journal
+      and re-reads only folders that changed. On any doubt it quietly falls back
+      to a full cold scan.</p>
+    </div>
+    <div class="card rv" style="--d:.12s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="12" height="12" rx="2"/><rect x="8" y="8" width="12" height="12" rx="2"/></svg></div>
+      <h3>Byte-verified duplicates</h3>
+      <p>Candidates are grouped by size and hash, then read end-to-end before any
+      cleanup. Hardlinks are recognized for what they are: the same bytes, not
+      reclaimable space.</p>
+    </div>
+    <div class="card rv" style="--d:.18s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2.2"/></svg></div>
+      <h3>Snapshots &amp; diffs</h3>
+      <p>Save a baseline today. Diff next month and the treemap tints what’s new,
+      what grew, what shrank, and what’s gone.</p>
+    </div>
+    <div class="card rv" style="--d:.24s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9.5 3 3-3 3M13.5 15.5H17"/></svg></div>
+      <h3>A CLI with the same engine</h3>
+      <p><span class="mono">scan · duplicates · snapshot · diff · benchmark</span>,
+      with <span class="mono">--json</span> for scripts. Snapshots taken in the
+      terminal show up in the app.</p>
+    </div>
+    <div class="card rv" style="--d:.3s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 20V10m7 10V4m7 16v-7"/></svg></div>
+      <h3>Space insights</h3>
+      <p>Categories, file ages, size distributions, iCloud placeholders, APFS
+      clones, local snapshots — including the purgeable space Finder won’t explain.</p>
+      <div class="cat-chips" aria-hidden="true">
+        <span class="chip"><i style="background:#3366d9"></i>Documents</span>
+        <span class="chip"><i style="background:#d95999"></i>Images</span>
+        <span class="chip"><i style="background:#bf4040"></i>Video</span>
+        <span class="chip"><i style="background:#4db359"></i>Code</span>
+        <span class="chip"><i style="background:#bfbf80"></i>Caches</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="demo">
+  <div class="wrap">
+    <div class="center-head">
+      <h2 class="sec rv" style="--d:.05s">Have a play before you download</h2>
+      <p class="lede rv" style="--d:.1s">This panel runs the app’s real squarified
+      layout and its actual Oklab-equalized extension palette on demo data.</p>
+    </div>
+    <div class="demo-grid rv" style="--d:.15s">
+      <div class="panel">
+        <div class="crumbs" id="crumbs" aria-label="Treemap path"></div>
+        <div class="tm-wrap">
+          <canvas id="tm"></canvas>
+          <div class="tm-tip" id="tmTip" aria-hidden="true"></div>
+        </div>
+        <div class="legend" id="legend" aria-hidden="true"></div>
+      </div>
+    </div>
+    <p class="demo-note rv"><b>Click a folder to zoom in</b> · Esc or the path bar zooms out ·
+    sizes drift every few seconds, the layout glides to follow</p>
+  </div>
+</section>
+
+<section class="wrap" id="duplicates">
+  <div class="split">
+    <div class="copy">
+      <h2 class="sec rv" style="--d:.05s">Delete the copy. Keep the original.</h2>
+      <p class="lede rv" style="--d:.1s">DirWiz groups files by content, not by name. Before anything moves,
+      each file is re-read byte for byte — and cleanup only proceeds while an
+      unselected, identical copy survives. Trashing your last copy isn’t an
+      accident that can happen; the action refuses to run.</p>
+      <ul class="ticks">
+        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Byte-for-byte verification</b> right before the move, not just hashes from ten minutes ago.</span></li>
+        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Hardlink-aware</b> — linked bytes are reported separately, never sold to you as reclaimable space.</span></li>
+        <li class="rv" style="--d:.26s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Presets fail closed</b> — a selection that matches nothing does nothing.</span></li>
+      </ul>
+    </div>
+    <div class="rv" style="--d:.12s">
+      <div class="dupcard" aria-label="Duplicate groups illustration">
+        <div class="dup-head">
+          <span>3 groups · 7 files</span>
+          <span class="reclaim">412.6 MB reclaimable</span>
+        </div>
+        <div class="dup-group">
+          <div class="dup-row"><span class="p">~/Movies/exports/final-cut-01.mov</span><span class="s">4.2 GB</span><span class="tag keep">keeper</span></div>
+          <div class="dup-row"><span class="p">~/Downloads/final-cut-01.mov</span><span class="s">4.2 GB</span><span class="tag same">identical</span></div>
+          <div class="dup-row"><span class="p">~/Desktop/final-cut-01 (2).mov</span><span class="s">4.2 GB</span><span class="tag same">identical</span></div>
+        </div>
+        <div class="dup-group">
+          <div class="dup-row"><span class="p">~/Documents/spec.pdf</span><span class="s">1.8 MB</span><span class="tag keep">keeper</span></div>
+          <div class="dup-row"><span class="p">~/Downloads/spec (1).pdf</span><span class="s">1.8 MB</span><span class="tag same">identical</span></div>
+        </div>
+        <div class="dup-group">
+          <div class="dup-row"><span class="p">~/Pictures/Photos Library</span><span class="s">86.4 MB</span><span class="tag keep">keeper</span></div>
+          <div class="dup-row"><span class="p">~/Desktop/photo-dump</span><span class="s">86.4 MB</span><span class="tag same">identical</span></div>
+        </div>
+        <div class="dup-foot">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg>
+          Re-read byte-for-byte at the moment of action — never trust a stale hash.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="snapshots">
+  <div class="wrap split flip">
+    <div class="copy">
+      <h2 class="sec rv" style="--d:.05s">Where did those 20 GB go?</h2>
+      <p class="lede rv" style="--d:.1s">Snapshot your disk while it’s tidy. Three weeks later, when the
+      “disk almost full” banner shows up, diff against the baseline. New files show
+      green, growth blue, shrinkage amber, deletions red — painted straight onto
+      the treemap, with a ranked list of the worst offenders.</p>
+      <ul class="ticks">
+        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Compact binary snapshots</b> stored per scan root — take one whenever things feel right.</span></li>
+        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Shared with the CLI</b> — <span class="mono">dirwiz-cli snapshot</span> from a cron job, diff in the app on Friday.</span></li>
+      </ul>
+    </div>
+    <div class="rv" style="--d:.12s">
+      <div class="mockcard" aria-label="Snapshot diff illustration">
+        <div class="snap-head">
+          <span class="snap-range">Jun 12, 2026&ensp;→&ensp;Today</span>
+          <span class="snap-total">+18.4 GB</span>
+        </div>
+        <div class="snap-rows">
+          <div class="snap-row" style="--i:0"><span class="p">~/Library/…/Xcode/DerivedData</span><span class="bar"><i style="--w:100;background:var(--grown)"></i></span><span class="d" style="color:var(--grown)">+9.1 GB</span></div>
+          <div class="snap-row" style="--i:1"><span class="p">~/Projects/acme-web/node_modules</span><span class="bar"><i style="--w:46;background:var(--grown)"></i></span><span class="d" style="color:var(--grown)">+4.2 GB</span></div>
+          <div class="snap-row" style="--i:2"><span class="p">~/Library/Caches</span><span class="bar"><i style="--w:42;background:var(--grown)"></i></span><span class="d" style="color:var(--grown)">+3.8 GB</span></div>
+          <div class="snap-row" style="--i:3"><span class="p">~/Downloads/Xcode_16.4.xip</span><span class="bar"><i style="--w:32;background:var(--ok)"></i></span><span class="d" style="color:var(--ok)">new 2.9 GB</span></div>
+          <div class="snap-row" style="--i:4"><span class="p">~/Movies/exports</span><span class="bar"><i style="--w:18;background:var(--shrunk)"></i></span><span class="d" style="color:var(--shrunk)">−1.6 GB</span></div>
+        </div>
+        <div class="snap-legend">
+          <s><i style="background:var(--ok)"></i>new</s>
+          <s><i style="background:var(--grown)"></i>grew</s>
+          <s><i style="background:var(--shrunk)"></i>shrank</s>
+          <s><i style="background:var(--gone)"></i>deleted</s>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap" id="cli">
+  <div class="split">
+    <div class="copy">
+      <h2 class="sec rv" style="--d:.05s">The same scanner, over SSH.</h2>
+      <p class="lede rv" style="--d:.1s">The app and the CLI are two doors into one engine. Scan with JSON
+      export, check duplicates, save and diff snapshots, or run the built-in
+      benchmark — on the Mac in front of you or the Mac mini in the closet.</p>
+      <ul class="ticks">
+        <li class="rv" style="--d:.14s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b><span class="mono">--json</span> everywhere</b> — pipe scans, duplicate groups, and diffs into jq or a dashboard.</span></li>
+        <li class="rv" style="--d:.2s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m4.5 12.5 5 5 10-11"/></svg><span><b>Progress on stderr, data on stdout</b> — quiet with <span class="mono">-q</span>, script-safe by default.</span></li>
+      </ul>
+    </div>
+    <div class="rv" style="--d:.12s">
+      <div class="term" aria-label="Terminal session with dirwiz-cli">
+        <div class="term-bar"><i></i><i></i><i></i><span>you@studio — zsh</span></div>
+        <div class="term-body"><pre id="termOut" aria-live="polite"></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band safety">
+  <div class="wrap inner">
+    <h2 class="rv" style="--d:.05s">The scariest thing DirWiz can do<br>is move a file to the Trash.</h2>
+    <div class="safety-grid">
+      <div class="cell rv" style="--d:.1s">
+        <h3><i></i>Trash, never delete</h3>
+        <p>Every removal goes through the system Trash and can be put back. There is
+        no “rm” hiding behind a confirmation dialog.</p>
+      </div>
+      <div class="cell rv" style="--d:.16s">
+        <h3><i></i>Verified before it moves</h3>
+        <p>Duplicate cleanup re-reads files end to end at the moment of action and
+        refuses to run unless an identical copy survives.</p>
+      </div>
+      <div class="cell rv" style="--d:.22s">
+        <h3><i></i>Fails closed</h3>
+        <p>Cleanup presets that match nothing select nothing. Ambiguity always
+        resolves to “do nothing”, never to “guess”.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap dl" id="download">
+  <img class="dl-icon rv" src="assets/dirwiz-logo.png" alt="" width="96" height="96">
+  <h2 class="rv" style="--d:.05s">Your Downloads folder isn’t<br>going to clean itself.</h2>
+  <div class="hero-ctas rv" style="--d:.1s">
+    <a class="btn btn-primary btn-lg" href="https://github.com/okturan/dirwiz/releases/latest">Download for macOS</a>
+  </div>
+  <p class="hero-fine rv" style="--d:.15s">Version 1.1.1 · macOS 15 or later · universal (Apple silicon &amp; Intel) · 3 MB</p>
+
+  <div class="checksum rv" style="--d:.2s">
+    <div class="checksum-head">SHA-256 — VERIFY YOUR DOWNLOAD</div>
+    <div class="checksum-body">
+      e8e04c446506d137b4f8b61e8daae94f47b91d22b33ceaa973eab0cda9cd07fd<br>
+      <span class="c">$</span> shasum -a 256 DirWiz-1.1.1-macos.zip
+    </div>
+  </div>
+
+  <div class="notes">
+    <p class="note rv" style="--d:.24s"><b>Signed and notarized by Apple.</b> Double-click to open —
+    no right-click trick, no Gatekeeper warning to talk your way past.</p>
+    <p class="note rv" style="--d:.28s"><b>Full Disk Access.</b> Scanning system folders needs it.
+    DirWiz detects the permission at launch and walks you through System Settings —
+    no guesswork about why a folder came back empty.</p>
+  </div>
+
+  <p class="buildline rv" style="--d:.32s">Rather build it yourself?
+  <code>git clone https://github.com/okturan/dirwiz</code> then
+  <code>./scripts/package-release.sh</code>.</p>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span class="brand"><img src="assets/dirwiz-logo.png" alt="">DirWiz</span>
+    <span>© 2026 · Made for macOS</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/okturan/dirwiz">GitHub</a>
+      <a href="https://github.com/okturan/dirwiz/releases">Releases</a>
+      <a href="https://github.com/okturan/dirwiz/issues">Issues</a>
+      <a href="https://github.com/okturan/dirwiz/blob/main/SECURITY.md">Security</a>
+    </nav>
+    <span class="egg">zero dependencies — the app, and this page. Mac and macOS are trademarks of Apple Inc.</span>
+  </div>
+</footer>
+
+<script>
+(() => {
+"use strict";
+const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+
+/* ————— the app's 17 Oklab-equalized WinDirStat hues (ExtensionPalette) ————— */
+const EXT17 = ["#5588fc","#fd3a2c","#0bad09","#95950b","#13a3a3","#e607e6","#c08007","#5089fd","#ff2c5c","#36ab01","#b657fd","#08ad38","#f905a7","#0e98e2","#f25002","#11a971","#7b7cfe"];
+const FALLBACK = "#9aa3b5";
+
+function hexRgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
+function rgbCss(r,g,b,a=1){return `rgba(${r|0},${g|0},${b|0},${a})`}
+function mix(c1,c2,t){return [c1[0]+(c2[0]-c1[0])*t, c1[1]+(c2[1]-c1[1])*t, c1[2]+(c2[2]-c1[2])*t]}
+function shade(c,f){return f>=0 ? mix(c,[255,255,255],f) : mix(c,[0,0,0],-f)}
+
+function fmtGB(gb){
+  if (gb >= 100) return gb.toFixed(0) + " GB";
+  if (gb >= 10)  return gb.toFixed(1) + " GB";
+  if (gb >= 1)   return gb.toFixed(2) + " GB";
+  return Math.max(1, Math.round(gb*1024)) + " MB";
+}
+
+/* ————— demo tree data ————— */
+function makeData(){
+  let nextId = 1;
+  const L = (name,gb,ext) => ({id:nextId++, name, size:gb, orig:gb, ext});
+  const D = (name,children) => ({id:nextId++, name, children});
+  return D("Macintosh HD", [
+    D("Library", [
+      D("Developer", [ L("DerivedData",31,"o"), L("iOS DeviceSupport",12,"dyld"), L("CoreSimulator",5.2,"simruntime") ]),
+      D("Application Support", [ L("Docker.raw",24.3,"raw"), L("JetBrains",6.8,"jar"), L("MobileSync backup",13.5,"mbdb") ]),
+      D("Caches", [ L("com.apple.dt.Xcode",18.2,"cache"), L("Homebrew",6.4,"bottle"), L("pip + npm",9.1,"cache") ]),
+    ]),
+    D("Projects", [
+      D("acme-web", [ L("node_modules",41.2,"js"), L(".next",6.3,"js"), L("assets",4.1,"png") ]),
+      D("ml-experiments", [ L("datasets",12.4,"parquet"), L("checkpoints",6.2,"ckpt") ]),
+      D("rustytools", [ L("target",14.6,"rlib"), L("vendor",2.2,"rs") ]),
+      L("archives.zip", 9.8, "zip"),
+    ]),
+    D("Movies", [ L("WWDC-recap.fcpbundle",52,"fcpbundle"), L("screen-studio",18.3,"mov"), L("captures",14.2,"mov") ]),
+    D("Pictures", [ L("Photos Library",68,"photoslibrary"), L("RAW imports",6.4,"dng") ]),
+    D("Downloads", [ L("Xcode_16.4.xip",11.8,"xip"), L("installers",11.2,"dmg"), L("datasets.zip",8.1,"zip"), L("misc",9.4,"pdf") ]),
+    D("Music", [ L("Logic projects",19.2,"logicx"), L("Samples",12.8,"wav") ]),
+    D("Applications", [ L("Xcode.app",12.4,"app"), L("everything else",6.1,"app") ]),
+    D("Documents", [ L("Keynotes",5.2,"key"), L("PDF hoard",3.9,"pdf") ]),
+    L("Desktop", 4.1, "heic"),
+  ]);
+}
+
+/* rank extensions by total bytes → palette index (mirrors ExtensionPalette.assign) */
+function assignPalette(root){
+  const totals = new Map();
+  (function walk(n){
+    if (n.children) n.children.forEach(walk);
+    else totals.set(n.ext, (totals.get(n.ext)||0) + n.size);
+  })(root);
+  const ranked = [...totals.entries()].sort((a,b)=>b[1]-a[1]);
+  const map = new Map();
+  ranked.forEach(([ext],i)=> map.set(ext, i < EXT17.length ? EXT17[i] : FALLBACK));
+  return {map, ranked};
+}
+
+function nodeSize(n){ return n.children ? n.children.reduce((s,c)=>s+nodeSize(c),0) : n.size }
+/* directory color: dominant child ext blended toward blue-gray (mirrors resolveColor) */
+function dirColor(n, extMap){
+  let best=null, bestSz=0;
+  (function walk(m){ if(m.children) m.children.forEach(walk);
+    else if(m.size>bestSz){bestSz=m.size;best=m.ext} })(n);
+  const base=[120,132,155];
+  return best ? mix(base, hexRgb(extMap.get(best)||FALLBACK), .55) : base;
+}
+
+/* ————— squarified treemap (Bruls et al.) ————— */
+function squarify(items, x, y, w, h, out){
+  if (!items.length || w<=1 || h<=1) return;
+  const total = items.reduce((s,i)=>s+i._sz,0);
+  if (total<=0) return;
+  const scaled = items.map(it=>({it, area: it._sz/total*w*h})).sort((a,b)=>b.area-a.area);
+  let i=0;
+  while (i<scaled.length){
+    const side = Math.min(w,h);
+    let row=[scaled[i]], rowArea=scaled[i].area, worst=worstRatio(row,rowArea,side);
+    let j=i+1;
+    while (j<scaled.length){
+      const cArea=rowArea+scaled[j].area;
+      row.push(scaled[j]);
+      const cWorst=worstRatio(row,cArea,side);
+      if (cWorst<=worst){rowArea=cArea;worst=cWorst;j++}
+      else {row.pop();break}
+    }
+    const thick = side>0 ? rowArea/side : 0;
+    let off=0;
+    for (const r of row){
+      const len = thick>0 ? r.area/thick : 0;
+      if (w>=h) out.push({it:r.it, x, y:y+off, w:thick, h:len});
+      else      out.push({it:r.it, x:x+off, y, w:len, h:thick});
+      off+=len;
+    }
+    if (w>=h){x+=thick;w-=thick} else {y+=thick;h-=thick}
+    i=j;
+  }
+}
+function worstRatio(row,rowArea,side){
+  const thick=rowArea/side; let worst=1;
+  for (const r of row){ const len=r.area/thick;
+    worst=Math.max(worst, thick/len, len/thick) }
+  return worst;
+}
+
+/* ————— treemap widget (light chrome) ————— */
+function makeTreemap(cfg){
+  const canvas = cfg.canvas, ctx = canvas.getContext("2d");
+  const tip = cfg.tip;
+  const data = cfg.data;
+  const {map: extMap, ranked} = assignPalette(data);
+  let root = data, rootPath = [data];
+  let entries = [];
+  let prev = new Map();
+  let tweenT0 = 0, tweening = false, needsDraw = true;
+  let hovered = null, inView = !("IntersectionObserver" in window);
+  let born = new Map();
+  let dpr = 1, W = 0, H = 0;
+  const rnd = Math.random;
+
+  function resize(){
+    const r = canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    dpr = Math.min(2, window.devicePixelRatio||1);
+    W = r.width; H = r.height;
+    canvas.width = Math.round(W*dpr); canvas.height = Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    layout(false); needsDraw = true;
+  }
+
+  function layout(tween){
+    const old = new Map(entries.map(e=>[e.id,e]));
+    entries = [];
+    const pad = 6;
+    place(root, pad, pad, W-pad*2, H-pad*2, 0);
+    if (tween && !RM){
+      prev = new Map();
+      for (const e of entries){
+        const o = old.get(e.id);
+        prev.set(e.id, o ? {x:o.x,y:o.y,w:o.w,h:o.h} :
+          {x:e.x+e.w/2, y:e.y+e.h/2, w:0, h:0});
+      }
+      tweenT0 = performance.now(); tweening = true;
+    } else prev = null;
+    needsDraw = true;
+  }
+
+  function place(node, x, y, w, h, depth){
+    const kids = (node.children||[]).map(c=>({...c, _ref:c, _sz:nodeSize(c)})).filter(k=>k._sz>0);
+    const rects = [];
+    squarify(kids, x, y, w, h, rects);
+    for (const r of rects){
+      const n = r.it._ref;
+      const g = 1.2;
+      const rx = r.x+g, ry = r.y+g, rw = r.w-g*2, rh = r.h-g*2;
+      if (rw<2 || rh<2) continue;
+      if (n.children && rw>76 && rh>56 && depth<1){
+        const labelH = (rw>100 && rh>68) ? 18 : 0;
+        entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:false,
+          col:dirColor(n,extMap), label: labelH?n.name:null, labelH});
+        place(n, rx+2, ry+2+labelH, rw-4, rh-4-labelH, depth+1);
+      } else {
+        const col = n.children ? dirColor(n,extMap) : hexRgb(extMap.get(n.ext)||FALLBACK);
+        const v = ((n.id*2654435761)>>>16 & 255)/255*.14-.07;
+        entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:true, col:shade(col,v)});
+      }
+    }
+  }
+
+  const easeOut = t => 1-Math.pow(1-t,3);
+
+  function draw(now){
+    ctx.clearRect(0,0,W,H);
+    let t = 1;
+    if (tweening){
+      t = clamp((now-tweenT0)/620, 0, 1);
+      if (t>=1) tweening = false;
+      t = easeOut(t);
+    }
+    for (const e of entries){
+      let {x,y,w,h} = e;
+      if (tweening && prev && prev.has(e.id)){
+        const p = prev.get(e.id);
+        x=p.x+(x-p.x)*t; y=p.y+(y-p.y)*t; w=p.w+(w-p.w)*t; h=p.h+(h-p.h)*t;
+      }
+      let alpha = 1;
+      if (!RM && born.has(e.id)){
+        const bt = (now-born.get(e.id))/420;
+        if (bt<0){alpha=0} else if (bt<1){alpha=easeOut(bt)} else born.delete(e.id);
+        const s = .82+.18*alpha;
+        const cx=x+w/2, cy=y+h/2; w*=s; h*=s; x=cx-w/2; y=cy-h/2;
+      }
+      if (w<1.5 || h<1.5 || alpha<=0) continue;
+      if (!e.leaf){
+        ctx.globalAlpha = alpha;
+        ctx.beginPath(); rr(ctx,x,y,w,h,4);
+        ctx.fillStyle = rgbCss(e.col[0],e.col[1],e.col[2],.10); ctx.fill();
+        ctx.strokeStyle = "rgba(90,110,150,.28)"; ctx.lineWidth=1; ctx.stroke();
+        if (e.label && w>60){
+          ctx.font = "600 10.5px ui-monospace, 'SF Mono', Menlo, monospace";
+          ctx.fillStyle = "rgba(58,70,95,.85)";
+          ctx.save(); ctx.beginPath(); ctx.rect(x+7,y,w-14,17); ctx.clip();
+          ctx.fillText(truncate(ctx, e.label, w-14), x+7, y+13); ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+        continue;
+      }
+      const c = e.col;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath(); rr(ctx,x,y,w,h,Math.min(3,w/3,h/3));
+      ctx.fillStyle = rgbCss(c[0],c[1],c[2],1); ctx.fill();
+      const g = ctx.createLinearGradient(x,y,x+w,y+h);   // cushion shading
+      g.addColorStop(0,"rgba(255,255,255,.34)");
+      g.addColorStop(.5,"rgba(255,255,255,.04)");
+      g.addColorStop(1,"rgba(0,0,0,.22)");
+      ctx.fillStyle = g; ctx.fill();
+      ctx.strokeStyle = "rgba(30,42,66,.25)"; ctx.lineWidth = 1; ctx.stroke();
+      if (hovered === e.id){
+        ctx.fillStyle = "rgba(255,255,255,.16)"; ctx.fill();
+        ctx.strokeStyle = "rgba(22,48,94,.95)"; ctx.lineWidth = 1.6; ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+  function rr(c,x,y,w,h,r){
+    r = Math.max(0, Math.min(r, w/2, h/2));
+    if (c.roundRect) c.roundRect(x,y,w,h,r);
+    else c.rect(x,y,w,h);
+  }
+  function truncate(c, s, maxW){
+    if (c.measureText(s).width <= maxW) return s;
+    while (s.length>1 && c.measureText(s+"…").width > maxW) s = s.slice(0,-1);
+    return s+"…";
+  }
+
+  /* ————— interaction ————— */
+  function hitLeaf(px,py){
+    let best=null, bestA=Infinity;
+    for (const e of entries){
+      if (!e.leaf) continue;
+      if (px>=e.x && px<=e.x+e.w && py>=e.y && py<=e.y+e.h){
+        const a=e.w*e.h; if (a<bestA){bestA=a;best=e}
+      }
+    }
+    return best;
+  }
+  function hitGroup(px,py){
+    for (const e of entries){
+      if (e.leaf || !e.node.children) continue;
+      if (px>=e.x && px<=e.x+e.w && py>=e.y && py<=e.y+e.h) return e;
+    }
+    const l = hitLeaf(px,py);
+    return (l && l.node.children) ? l : null;
+  }
+  function findParentChainName(node){
+    const chain=[];
+    (function walk(n,acc){
+      if (n===node){chain.push(...acc);return true}
+      if (!n.children) return false;
+      for (const c of n.children) if (walk(c,[...acc,n.name])) return true;
+      return false;
+    })(root,[]);
+    return chain;
+  }
+
+  canvas.addEventListener("pointermove", ev => {
+    const r = canvas.getBoundingClientRect();
+    const px = ev.clientX-r.left, py = ev.clientY-r.top;
+    const leaf = hitLeaf(px,py);
+    const grp = hitGroup(px,py);
+    canvas.style.cursor = (cfg.drill && grp) ? "pointer" : "default";
+    const id = leaf ? leaf.id : null;
+    if (id !== hovered){ hovered = id; needsDraw = true }
+    if (leaf && tip){
+      const chain = findParentChainName(leaf.node);
+      tip.innerHTML = "<b></b><span></span>";
+      tip.firstChild.textContent = leaf.node.name;
+      tip.lastChild.textContent = fmtGB(nodeSize(leaf.node)) + "  ·  " +
+        [...chain, ""].join(" / ");
+      tip.style.opacity = 1;
+      const tw = tip.offsetWidth, wrap = canvas.parentElement.getBoundingClientRect();
+      let tx = px+14, ty = py+16;
+      if (tx+tw > wrap.width-8) tx = px-tw-12;
+      if (ty+tip.offsetHeight > wrap.height-8) ty = py-tip.offsetHeight-10;
+      tip.style.transform = `translate(${Math.max(4,tx)}px,${Math.max(4,ty)}px)`;
+    } else if (tip) tip.style.opacity = 0;
+  });
+  canvas.addEventListener("pointerleave", () => {
+    hovered=null; needsDraw=true; if (tip) tip.style.opacity=0;
+  });
+  if (cfg.drill) canvas.addEventListener("click", ev => {
+    const r = canvas.getBoundingClientRect();
+    const g = hitGroup(ev.clientX-r.left, ev.clientY-r.top);
+    if (!g) return;
+    root = g.node; rootPath.push(g.node);
+    renderCrumbs(); layout(true);
+  });
+  if (cfg.drill) document.addEventListener("keydown", ev => {
+    if (ev.key==="Escape" && rootPath.length>1){ popTo(rootPath.length-2) }
+  });
+  function popTo(i){
+    rootPath = rootPath.slice(0,i+1);
+    root = rootPath[rootPath.length-1];
+    renderCrumbs(); layout(true);
+  }
+  function renderCrumbs(){
+    if (!cfg.crumbs) return;
+    cfg.crumbs.textContent = "";
+    rootPath.forEach((n,i)=>{
+      if (i){ const s=document.createElement("span"); s.className="sep"; s.textContent="›"; cfg.crumbs.appendChild(s) }
+      if (i === rootPath.length-1){
+        const c=document.createElement("span"); c.className="cur"; c.textContent=n.name; cfg.crumbs.appendChild(c);
+      } else {
+        const b=document.createElement("button"); b.type="button"; b.textContent=n.name;
+        b.addEventListener("click",()=>popTo(i)); cfg.crumbs.appendChild(b);
+      }
+    });
+    const hint=document.createElement("span"); hint.className="hint";
+    hint.textContent = fmtGB(nodeSize(root)) + " shown";
+    cfg.crumbs.appendChild(hint);
+  }
+
+  function renderMeta(){
+    if (!cfg.legend) return;
+    cfg.legend.textContent="";
+    ranked.slice(0,7).forEach(([ext,sz])=>{
+      const chip=document.createElement("span"); chip.className="chip";
+      chip.title = fmtGB(sz);
+      const dot=document.createElement("i"); dot.style.background = extMap.get(ext);
+      chip.appendChild(dot); chip.appendChild(document.createTextNode(ext));
+      cfg.legend.appendChild(chip);
+    });
+    const o=document.createElement("span"); o.className="chip";
+    const od=document.createElement("i"); od.style.background=FALLBACK;
+    o.appendChild(od); o.appendChild(document.createTextNode("other"));
+    cfg.legend.appendChild(o);
+    const live=document.createElement("span"); live.className="live";
+    const dot=document.createElement("i");
+    live.appendChild(dot); live.appendChild(document.createTextNode("demo data, drifting live"));
+    cfg.legend.appendChild(live);
+  }
+
+  /* live mutations */
+  if (cfg.mutate && !RM) setInterval(()=>{
+    if (!inView || document.hidden) return;
+    const leaves=[];
+    (function walk(n){ if(n.children) n.children.forEach(walk); else leaves.push(n) })(root);
+    if (!leaves.length) return;
+    for (let k=0;k<2;k++){
+      const l = leaves[(rnd()*leaves.length)|0];
+      l.size = clamp(l.orig*(0.55+rnd()*1.7), l.orig*.4, l.orig*2.4);
+    }
+    renderCrumbs(); layout(true);
+  }, cfg.mutateMs||6500);
+
+  let builtIn = false;
+  function buildIn(){
+    if (builtIn) return; builtIn = true;
+    if (RM) return;
+    const now = performance.now();
+    entries.forEach((e,i)=> born.set(e.id, now + i*13));
+    needsDraw = true;
+  }
+
+  function frame(now){
+    if (needsDraw || tweening || born.size){
+      needsDraw = false;
+      draw(now);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver(es=>{
+      es.forEach(e=>{ inView = e.isIntersecting; if (inView) buildIn() });
+    },{threshold:.25}).observe(canvas);
+  } else buildIn();
+
+  if ("ResizeObserver" in window) new ResizeObserver(resize).observe(canvas.parentElement);
+  resize(); renderCrumbs(); renderMeta();
+  requestAnimationFrame(frame);
+}
+
+/* ————— terminal typing ————— */
+function terminal(){
+  const el = $("#termOut");
+  const cmd = "dirwiz-cli scan /Applications";
+  const lines = [
+    ["dim","Scanning /Applications …"],
+    ["dim","Scanned 67 items in 8.2s"],
+    ["cm","/Applications                      44.2 GB    67"],
+    ["dim","────────────────────────────────────────────"],
+    ["cm","  Xcode.app/                       12.4 GB     0"],
+    ["cm","  iMovie.app/                       3.7 GB     0"],
+    ["cm","  Android Studio.app/               3.2 GB     0"],
+    ["cm","  Microsoft Outlook.app/            2.3 GB     0"],
+    ["cm","  ChatGPT.app/                      1.4 GB     0"],
+    ["cm","  Google Chrome.app/                1.4 GB     0"],
+  ];
+  let ran = false;
+  function run(){
+    if (ran) return; ran = true;
+    const prompt = '<span class="pr">➜  ~</span> ';
+    if (RM){
+      el.innerHTML = prompt + '<span class="cm"></span>\n';
+      el.children[1].textContent = cmd;
+      lines.forEach(([cls,txt])=>{
+        const s=document.createElement("span"); s.className=cls; s.textContent=txt;
+        el.appendChild(s); el.appendChild(document.createTextNode("\n"));
+      });
+      el.insertAdjacentHTML("beforeend", "\n"+prompt+'<span class="cur"></span>');
+      return;
+    }
+    el.innerHTML = prompt;
+    const typed = document.createElement("span"); typed.className="cm";
+    el.appendChild(typed);
+    const caret = document.createElement("span"); caret.className="cur";
+    el.appendChild(caret);
+    let i = 0;
+    (function type(){
+      if (i <= cmd.length){
+        typed.textContent = cmd.slice(0,i); i++;
+        setTimeout(type, 26 + Math.random()*40);
+      } else setTimeout(emit, 380);
+    })();
+    let li = 0;
+    function emit(){
+      if (li < lines.length){
+        const [cls,txt] = lines[li++];
+        const s=document.createElement("span"); s.className=cls; s.textContent=txt;
+        caret.before(document.createTextNode("\n"), s);
+        setTimeout(emit, li<3 ? 420 : 46);
+      } else {
+        caret.before(document.createTextNode("\n\n"));
+        const p=document.createElement("span"); p.className="pr"; p.textContent="➜  ~";
+        caret.before(p, document.createTextNode(" "));
+      }
+    }
+  }
+  if ("IntersectionObserver" in window){
+    new IntersectionObserver((es,o)=>{ es.forEach(e=>{ if(e.isIntersecting){run();o.disconnect()} }) },
+      {threshold:.4}).observe(el);
+  } else run();
+}
+
+/* ————— scroll reveals ————— */
+function reveals(){
+  const els = document.querySelectorAll(".rv");
+  if (RM || !("IntersectionObserver" in window)){ els.forEach(e=>e.classList.add("in")); return }
+  const io = new IntersectionObserver(es=>{
+    es.forEach(e=>{ if (e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target) } });
+  },{threshold:.12, rootMargin:"0px 0px -40px 0px"});
+  els.forEach(e=>io.observe(e));
+}
+
+/* ————— nav scroll state ————— */
+function navState(){
+  const nav = $("#nav");
+  const upd = ()=> nav.classList.toggle("scrolled", scrollY > 12);
+  addEventListener("scroll", upd, {passive:true}); upd();
+}
+
+/* ————— boot ————— */
+const boot = [
+  ["reveals", reveals],
+  ["nav", navState],
+  ["terminal", terminal],
+  ["treemap", ()=> makeTreemap({
+      canvas: $("#tm"), tip: $("#tmTip"), crumbs: $("#crumbs"),
+      legend: $("#legend"), data: makeData(), drill: true, mutate: true })],
+];
+for (const [name, fn] of boot){
+  try { fn() } catch (err) { console.warn("DirWiz landing: "+name+" failed", err) }
+}
+})();
+</script>
+
+</body>
+</html>
