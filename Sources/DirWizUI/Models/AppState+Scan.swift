@@ -533,6 +533,7 @@ extension AppState {
         lastScanSummary = summary
         staleViewAsOf = nil
         startLiveMonitoring()
+        autoCheckpointIfDue()
         WarmStartHistory.record(
             .init(date: Date(), wasWarm: true, reason: nil, itemCount: tree.count, elapsedSeconds: elapsed),
             for: path
@@ -652,6 +653,7 @@ extension AppState {
                 // in the background and the policy's own heavy-task guard defers any apply
                 // until it finishes, so there is nothing to gain by waiting.
                 self.startLiveMonitoring()
+                self.autoCheckpointIfDue()
                 return (true, self.bundleSizingTask)
             }
 

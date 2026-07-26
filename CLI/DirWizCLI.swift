@@ -7,7 +7,8 @@ import DirWizCore
 ///   dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>]
 ///   dirwiz-cli duplicates <path> [--min-size <bytes>] [--json]
 ///   dirwiz-cli info <path>
-///   dirwiz-cli snapshot <path> [--json]
+///   dirwiz-cli snapshot <path> [--name <label>] [--json]
+///   dirwiz-cli snapshot list <path> [--json]
 ///   dirwiz-cli diff <path> [--json]
 ///   dirwiz-cli benchmark <path> [--iterations <n>] [--json]
 ///   dirwiz-cli --help
@@ -250,7 +251,75 @@ struct DirWizCLI {
 
     // MARK: - Snapshot Command
 
+    /// Lists a volume's recorded checkpoints from the index — nothing is decompressed,
+    /// which is the reason the index carries names and summaries at all.
+    static func handleSnapshotList(args: [String]) {
+        let parsed = CLIArguments(args)
+        guard let path = parsed.path else {
+            errPrint("Error: snapshot list requires a path argument")
+            exit(1)
+        }
+        let store = SnapshotStore(rootPath: path)
+        _ = store.importLegacySnapshotIfPresent()
+        let checkpoints = store.list()
+
+        if parsed.has("--json") {
+            let items: [[String: Any]] = checkpoints.map { c in
+                var item: [String: Any] = [
+                    "id": c.id.uuidString,
+                    "createdAt": ISO8601DateFormatter().string(from: c.createdAt),
+                    "totalBytes": c.totalBytes,
+                    "dirCount": c.dirCount,
+                    "storedBytes": c.storedBytes,
+                    "pinned": c.isPinned,
+                ]
+                if let name = c.name { item["name"] = name }
+                if let s = c.summary { item["totalDelta"] = s.totalDelta }
+                return item
+            }
+            let payload: [String: Any] = [
+                "rootPath": path,
+                "checkpointCount": checkpoints.count,
+                "storeBytes": store.totalStoredBytes(),
+                "checkpoints": items,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                print(text)
+            }
+            return
+        }
+
+        guard !checkpoints.isEmpty else {
+            print("No checkpoints for \(sanitizeForTerminal(path)).")
+            print("Run 'dirwiz-cli snapshot \(sanitizeForTerminal(path))' to record one.")
+            return
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        print("Checkpoints for \(sanitizeForTerminal(path)) — \(checkpoints.count), "
+              + "\(SizeFormatter.shared.format(store.totalStoredBytes())) on disk")
+        for c in checkpoints {
+            let pin = c.isPinned ? "*" : " "
+            let name = c.name.map { " \(sanitizeForTerminal($0))" } ?? ""
+            let delta = c.summary.map { s -> String in
+                let sign = s.totalDelta >= 0 ? "+" : "-"
+                return "  \(sign)\(SizeFormatter.shared.format(UInt64(abs(s.totalDelta))))"
+            } ?? ""
+            print("\(pin) \(formatter.string(from: c.createdAt))  "
+                  + "\(SizeFormatter.shared.format(c.totalBytes))\(delta)\(name)")
+        }
+        print("\n* = pinned (never removed by retention)")
+    }
+
     static func handleSnapshot(args: [String]) async {
+        // `snapshot list <path>` lists the timeline without scanning anything.
+        if args.first == "list" {
+            handleSnapshotList(args: Array(args.dropFirst()))
+            return
+        }
+
         let parsed = CLIArguments(args)
         guard let path = parsed.path else {
             errPrint("Error: snapshot requires a path argument")
@@ -268,14 +337,20 @@ struct DirWizCLI {
         await scanner.scan(path: path, progress: progress, tree: tree)
 
         let snap = await TemporalDiffService.buildSnapshot(tree: tree)
+        // GUI and CLI share one store, so a checkpoint taken here shows up on the app's
+        // timeline and vice versa. `--name` pins it, matching the app's "pin this moment".
+        let name = parsed.string("--name")
+        let store = SnapshotStore(rootPath: snap.meta.rootPath)
+        _ = store.importLegacySnapshotIfPresent()
+        let checkpoint: SnapshotCheckpoint
         do {
-            try snap.save()
+            checkpoint = try store.createCheckpoint(from: snap, name: name, pinned: name != nil)
         } catch {
             errPrint("Error saving snapshot: \(error.localizedDescription)")
             exit(1)
         }
 
-        let savedURL = TemporalSnapshot.snapshotURL(for: snap.meta.rootPath)
+        let savedURL = store.directory.appendingPathComponent(checkpoint.filename)
 
         if outputJSON {
             let jsonObject: [String: Any] = [
@@ -316,7 +391,9 @@ struct DirWizCLI {
 
         let snap: TemporalSnapshot
         do {
-            guard let loaded = try TemporalSnapshot.load(for: path) else {
+            let store = SnapshotStore(rootPath: path)
+            _ = store.importLegacySnapshotIfPresent()
+            guard let loaded = try store.loadLatest() ?? TemporalSnapshot.load(for: path) else {
                 errPrint("No snapshot found for \(sanitizeForTerminal(path)). Run 'dirwiz-cli snapshot \(sanitizeForTerminal(path))' first.")
                 exit(1)
             }
@@ -482,7 +559,8 @@ struct DirWizCLI {
           dirwiz-cli scan <path> [--json] [--min-size <bytes>] [--max-depth <n>] [-q]
           dirwiz-cli duplicates <path> [--min-size <bytes>] [--json] [-q]
           dirwiz-cli info <path> [-q]
-          dirwiz-cli snapshot <path> [--json] [-q]
+          dirwiz-cli snapshot <path> [--name <label>] [--json] [-q]
+          dirwiz-cli snapshot list <path> [--json]
           dirwiz-cli diff <path> [--json] [-q]
           dirwiz-cli benchmark <path> [--iterations <n>] [--json] [-q]
 
@@ -490,7 +568,8 @@ struct DirWizCLI {
           scan         Scan a directory tree and output results
           duplicates   Find duplicate files
           info         Show space categories, file age, size distribution, and volume info
-          snapshot     Save a baseline snapshot of a directory tree for later comparison
+          snapshot     Record a checkpoint on the tree's timeline (--name pins it forever)
+          snapshot list  List recorded checkpoints, newest first
           diff         Compare current directory state against a saved snapshot
           benchmark    Repeatedly time scan, duplicates, hardlinks, and insights passes
 

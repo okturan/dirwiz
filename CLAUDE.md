@@ -66,7 +66,7 @@ Everything goes to Trash via `TreeActions` → `FileManager.trashItem` — never
 
 ## Temporal snapshots
 
-Binary `.tdiff` (v2, with v1/legacy-JSON decode support) under Application Support `DirWiz/Snapshots`, keyed by exact root-path string; `DIRWIZ_APP_SUPPORT_DIR` overrides the location (used by tests). GUI and CLI (`snapshot`/`diff` subcommands) share the same files.
+`SnapshotStore` keeps a per-volume TIMELINE of checkpoints (`DirWiz/Snapshots/v2-<volume-key>/`), replacing the old single `.tdiff` slot that every save overwrote; `DIRWIZ_APP_SUPPORT_DIR` overrides the location (tests), and GUI + CLI (`snapshot`, `snapshot list`, `diff`) share one store per root path. Each checkpoint is the existing `.tdiff` payload inside an LZFSE container (Apple's Compression framework — the zero-dependency rule holds); ~12% of raw, 350k dirs ≈ 2 MB. **The container has a stored-uncompressed mode byte and it is load-bearing**: LZFSE expands small/high-entropy input and `compression_encode_buffer` then returns 0, so without it small snapshots cannot be written at all. **`index.json` is a cache, never the truth** — it is rebuilt from the `.dwcp` files when missing or corrupt, and recovered entries are marked pinned since the store cannot tell which mattered. Anything that lists the store before writing to it must read the index FIRST: `list()` self-heals by adopting every `.dwcp` on disk, so listing after a write re-adopts the file being written. Retention thins unpinned checkpoints (30 dailies / 12 weeklies / 12 monthlies, 500 MB budget) and NEVER evicts a pin. Auto-checkpoints happen on scan completion behind a 6h/1%-growth throttle; the camera action pins.
 
 ## Website (docs/)
 

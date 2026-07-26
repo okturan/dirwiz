@@ -38,7 +38,12 @@ extension AppState {
     /// Build a snapshot from the current scan and persist it to disk.
     /// Captures the current scanToken to discard results from a stale tree
     /// if a rescan occurs while the snapshot is being built.
-    public func takeSnapshot() {
+    /// "Pin this moment": records a checkpoint on the volume's timeline.
+    ///
+    /// A `name` pins the checkpoint permanently — retention never thins a named one, because
+    /// naming it is the user saying "keep this". Unnamed checkpoints are ordinary
+    /// auto-checkpoints subject to thinning.
+    public func takeSnapshot(name: String? = nil) {
         guard !temporalDiff.isSnapshotBuilding, let tree = fileTree else { return }
         temporalDiff.isSnapshotBuilding = true
         let token = scanToken
@@ -46,7 +51,8 @@ extension AppState {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
             let saveError: String? = {
                 do {
-                    try snapshot.save()
+                    let store = SnapshotStore(rootPath: snapshot.meta.rootPath)
+                    _ = try store.createCheckpoint(from: snapshot, name: name, pinned: name != nil)
                     return nil
                 } catch {
                     let msg = "Failed to save snapshot: \(error.localizedDescription)"
@@ -69,6 +75,40 @@ extension AppState {
         }
     }
 
+    /// Records an automatic checkpoint if the throttle allows, so the timeline fills in
+    /// without the user ever pressing the camera. Never pinned — these are the entries
+    /// retention is allowed to thin.
+    public func autoCheckpointIfDue() {
+        guard let tree = fileTree, tree.count > 0 else { return }
+        let rootPath = tree.path(at: 0)
+        let totalBytes = tree.rootDisplaySize
+        let token = scanToken
+
+        Task.detached(priority: .background) {
+            let store = SnapshotStore(rootPath: rootPath)
+            _ = store.importLegacySnapshotIfPresent()
+            guard AutoCheckpointPolicy.shouldCheckpoint(
+                latest: store.list().first, now: Date(), currentTotalBytes: totalBytes
+            ) else { return }
+
+            let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
+            // A new scan started while this was building: its tree, not ours, is current.
+            guard await MainActor.run(body: { self.scanToken == token }) else { return }
+            do {
+                _ = try store.createCheckpoint(from: snapshot)
+            } catch {
+                // An auto-checkpoint is best-effort; failing it must never disturb a scan.
+                log.error("Auto-checkpoint failed: \(error.localizedDescription)")
+                return
+            }
+            let listed = store.list()
+            await MainActor.run {
+                guard self.scanToken == token else { return }
+                self.temporalDiff.availableCheckpoints = listed
+            }
+        }
+    }
+
     /// Try to load a persisted snapshot matching the current scan root.
     public func loadSnapshotIfAvailable() {
         guard let tree = fileTree else {
@@ -78,11 +118,16 @@ extension AppState {
         let token = scanToken
         Task.detached(priority: .background) {
             let rootPath = tree.path(at: 0)
-            let snapshot = try? TemporalSnapshot.load(for: rootPath)
+            let store = SnapshotStore(rootPath: rootPath)
+            // One-time adoption of the pre-store single-slot file, so an existing baseline
+            // is not silently lost on upgrade. No-op once the store has content.
+            _ = store.importLegacySnapshotIfPresent()
+            let snapshot = store.loadLatest()
             await MainActor.run {
                 // Discard stale load if another scan started while I/O was running.
                 guard self.scanToken == token else { return }
                 self.temporalDiff.temporalSnapshot = snapshot
+                self.temporalDiff.availableCheckpoints = store.list()
                 if snapshot == nil {
                     self.temporalDiff.isTemporalDiffEnabled = false
                 }

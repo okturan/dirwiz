@@ -29,6 +29,13 @@ public final class TemporalDiffState {
     /// Surviving ancestors → count/bytes of deleted descendants (for tooltips).
     public var temporalDiffDeletedCounts: [UInt32: DeletedSummary] = [:]
 
+    /// The volume's recorded timeline, newest first. Listed from the index, so no
+    /// checkpoint is decompressed to populate this.
+    public var availableCheckpoints: [SnapshotCheckpoint] = []
+
+    /// Checkpoint the diff overlay compares against; nil means "the latest".
+    public var selectedBaselineID: UUID? = nil
+
     public init() {}
 
     /// Reset temporal diff state for a new scan.

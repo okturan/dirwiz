@@ -8,7 +8,10 @@ public struct CLIArguments: Sendable {
     public let values: [String: String]
 
     /// Flags that consume the following token as a value.
-    public static let valueFlags: Set<String> = ["--min-size", "--max-depth", "--iterations"]
+    /// `--name` MUST be here: otherwise `snapshot /path --name foo` parses "foo" as a
+    /// second positional, and a subcommand reading `positionals.first` would silently take
+    /// the wrong path.
+    public static let valueFlags: Set<String> = ["--min-size", "--max-depth", "--iterations", "--name"]
 
     public init(_ args: [String], valueFlags: Set<String> = CLIArguments.valueFlags) {
         var positionals: [String] = []
@@ -45,6 +48,7 @@ public struct CLIArguments: Sendable {
     public func uint64(_ flag: String) -> UInt64? { values[flag].flatMap(UInt64.init) }
     public func int(_ flag: String) -> Int? { values[flag].flatMap(Int.init) }
     public func has(_ flag: String) -> Bool { flags.contains(flag) }
+    public func string(_ flag: String) -> String? { values[flag] }
 }
 
 /// Replace C0/C1 control bytes and DEL in a filename/path with U+FFFD so

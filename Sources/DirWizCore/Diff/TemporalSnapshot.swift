@@ -134,6 +134,25 @@ public struct TemporalSnapshot: Sendable {
         return hash
     }
 
+    /// The uncompressed `.tdiff` payload, so a caller can wrap it in another container
+    /// (the checkpoint store) without duplicating the encoder.
+    public func encodedPayload() throws -> Data {
+        let entries = byPath
+            .map { SnapshotEntry(path: $0.key, size: $0.value) }
+            .sorted { $0.path < $1.path }
+        return try binaryData(entries: entries)
+    }
+
+    /// Decodes a payload produced by `encodedPayload()`.
+    public static func decodePayload(_ data: Data) throws -> TemporalSnapshot {
+        if data.starts(with: TemporalSnapshotBinary.magic) { return try loadBinary(data: data) }
+        if data.first == UInt8(ascii: "{") { return try loadLegacyJSON(data: data) }
+        throw TemporalSnapshotFormatError.unsupportedFormat
+    }
+
+    /// Per-directory totals, for computing a change summary against another snapshot.
+    public var pathTotals: [String: UInt64] { byPath }
+
     public func save() throws {
         let url = TemporalSnapshot.snapshotURL(for: meta.rootPath)
         try FileManager.default.createDirectory(
