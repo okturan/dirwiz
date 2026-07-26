@@ -19,5 +19,10 @@ jobs:
           restore-keys: spm-${{ runner.os }}-
       - name: Build
         run: swift build
-      - name: Test
+      # Correctness only. Heavy benchmarks (wall-clock gates, million-file fixtures)
+      # skip themselves whenever CI=true - Actions sets it automatically - because
+      # macOS runners bill at 10x on the free plan and a loaded shared runner produces
+      # timing numbers we don't trust anyway. Run them locally with plain `swift test`,
+      # or force them here with DIRWIZ_HEAVY_TESTS=1 on a self-hosted runner.
+      - name: Test (correctness only)
         run: swift test

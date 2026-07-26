@@ -56,7 +56,30 @@ func createTempTree(_ layout: [String: UInt64]) throws -> (path: String, cleanup
 ///
 /// Rule: a suite that MEASURES time, or that builds a fixture big enough to steal cores
 /// from one that does, belongs here - `extension PerformanceSensitiveSuites { @Suite(...) }`.
-@Suite(.serialized) enum PerformanceSensitiveSuites {}
+/// Whether heavy benchmarks (wall-clock gates, million-file fixtures) should run.
+///
+/// Policy: heavy machinery runs LOCALLY, where the numbers are meaningful and the minutes
+/// are free. GitHub's macOS runners bill at 10x on the free plan, and a loaded shared
+/// runner produces timing numbers we explicitly do not trust (both CI flake hunts this
+/// repo has done came down to exactly that). So CI runs correctness only.
+///
+/// - Local `swift test`: heavy suites run (CI env var is unset).
+/// - GitHub Actions: skipped automatically (Actions always sets `CI=true`).
+/// - `DIRWIZ_HEAVY_TESTS=1` forces them on anywhere (e.g. a self-hosted runner);
+///   `DIRWIZ_HEAVY_TESTS=0` forces them off anywhere (e.g. a quick local iteration).
+var runHeavyBenchmarks: Bool {
+    let env = ProcessInfo.processInfo.environment
+    switch env["DIRWIZ_HEAVY_TESTS"] {
+    case "1": return true
+    case "0": return false
+    default: return env["CI"] == nil
+    }
+}
+
+@Suite(.serialized,
+       .enabled(if: runHeavyBenchmarks,
+                "Heavy benchmarks run locally; CI is correctness-only (set DIRWIZ_HEAVY_TESTS=1 to force)"))
+enum PerformanceSensitiveSuites {}
 
 /// Waits until the FSEvents daemon has actually journaled a change at or below `root`
 /// since `sinceId`, rather than sleeping a fixed interval and hoping it was long enough.

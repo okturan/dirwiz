@@ -488,7 +488,9 @@ struct SnapshotCLIArgumentTests {
 /// Sizing gate for the store: the point of compressing is that a timeline of checkpoints
 /// fits in a sane budget. This measures a realistically shaped dir map.
 extension AppSupportEnvSuites {
-    @Suite("Snapshot Store Sizing Tests")
+    @Suite("Snapshot Store Sizing Tests",
+           .enabled(if: runHeavyBenchmarks,
+                    "Heavy benchmarks run locally; CI is correctness-only"))
     struct SnapshotStoreSizingTests {
 
         @Test("A large directory map compresses to a workable checkpoint size")
