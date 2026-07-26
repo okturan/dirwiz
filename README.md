@@ -11,7 +11,7 @@ macOS disk usage analyzer with a Metal cushion treemap, fast filesystem scans, d
 
 ![DirWiz tree table and Metal treemap after scanning a Mac boot volume](docs/assets/dirwiz-showcase.webp)
 
-<p align="center"><em>An actual scan of a Mac boot volume: 4,454,141 files and 991 GB, mapped in 23 seconds. Every rectangle is sized by the space it really occupies on disk.</em></p>
+<p align="center"><em>An actual scan of a Mac boot volume — 4,454,141 files in 23 seconds. Every rectangle is sized by the blocks it occupies on disk, not its logical length.</em></p>
 
 ## What It Does
 
