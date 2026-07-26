@@ -239,6 +239,25 @@ public final class FileTree: @unchecked Sendable {
 
     /// Build a path lock-free from pre-snapshotted data.
     /// Avoids per-call lock acquisition when building many paths (e.g., RecencyQueryService).
+    /// A single node's own name from a snapshot, without walking to the root.
+    ///
+    /// `pathFromSnapshot` is O(depth); analyzers that only need the leaf name were paying
+    /// that per file. Returns "" when the entry is out of the pool's bounds rather than
+    /// trapping, matching how the rest of the snapshot readers fail.
+    public static func nameFromSnapshot(
+        at index: UInt32,
+        nodes: [FileNode],
+        stringPool: Data
+    ) -> String {
+        let i = Int(index)
+        guard i < nodes.count else { return "" }
+        let node = nodes[i]
+        let start = Int(node.nameOffset)
+        let end = start + Int(node.nameLength)
+        guard end <= stringPool.count, start <= end else { return "" }
+        return String(data: stringPool[start..<end], encoding: .utf8) ?? ""
+    }
+
     public static func pathFromSnapshot(
         at index: UInt32,
         nodes: [FileNode],

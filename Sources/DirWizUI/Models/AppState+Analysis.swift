@@ -382,6 +382,70 @@ extension AppState {
 
         scanProgress.publishCounters(forceLayoutRevision: true)
         refreshHardlinkGroups()
+
+        // Candidate paths may have just been trashed. A stale candidate offering to verify
+        // a file that no longer exists is worse than showing none, so drop and recompute.
+        duplicate.resetInstant()
+        refreshInstantDuplicates()
+    }
+
+    /// Recomputes the name+size duplicate candidates from the current tree.
+    ///
+    /// Pure in-memory over a snapshot — no file content is read — so it is cheap enough to
+    /// run on tab open and after mutations without asking the user to press anything.
+    public func refreshInstantDuplicates() {
+        guard let tree = fileTree, !scanProgress.isScanning else { return }
+        duplicate.instantToken &+= 1
+        let token = duplicate.instantToken
+        let minimumSize = duplicate.lastDuplicateScanMinimumSize
+        duplicate.isInstantGroupingRunning = true
+
+        Task.detached(priority: .userInitiated) {
+            let report = InstantDuplicateFinder(minimumFileSize: minimumSize)
+                .findCandidates(in: tree)
+            await MainActor.run {
+                // A newer pass (or a new scan) started while this one ran.
+                guard token == self.duplicate.instantToken else { return }
+                self.duplicate.isInstantGroupingRunning = false
+                guard report.completed else { return }
+                self.duplicate.instantCandidates = report.candidates
+                self.duplicate.instantFilesConsidered = report.filesConsidered
+                self.duplicate.instantElapsedMs = report.elapsedTime * 1000
+                self.duplicate.pruneVerifiedCandidates()
+            }
+        }
+    }
+
+    /// Byte-verifies one candidate and promotes whatever is genuinely identical.
+    public func verifyInstantCandidate(_ candidate: InstantDuplicateCandidate) {
+        guard !duplicate.verifyingCandidateIDs.contains(candidate.id) else { return }
+        duplicate.verifyingCandidateIDs.insert(candidate.id)
+        duplicate.rejectedCandidateIDs.remove(candidate.id)
+
+        Task.detached(priority: .userInitiated) {
+            let confirmed = InstantDuplicateVerifier.verify(candidate)
+            await MainActor.run {
+                self.duplicate.verifyingCandidateIDs.remove(candidate.id)
+                if confirmed.isEmpty {
+                    // Same name, same size, different bytes — a real answer, so say so
+                    // instead of leaving a button that appears to have done nothing.
+                    self.duplicate.rejectedCandidateIDs.insert(candidate.id)
+                    return
+                }
+                self.duplicate.duplicateGroups.append(contentsOf: confirmed)
+                self.duplicate.duplicateGroups.sort { $0.wastedSpace > $1.wastedSpace }
+                self.duplicate.instantCandidates.removeAll { $0.id == candidate.id }
+            }
+        }
+    }
+
+    /// Verifies every candidate. Cancellable, and results land as they are confirmed.
+    public func verifyAllInstantCandidates() {
+        let candidates = duplicate.instantCandidates
+        guard !candidates.isEmpty else { return }
+        for candidate in candidates {
+            verifyInstantCandidate(candidate)
+        }
     }
 
     // MARK: - JSON Export

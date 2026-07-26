@@ -60,6 +60,8 @@ Tree-table column geometry comes from the shared `TreeTableColumns` constants (T
 
 ## Destructive actions
 
+The Duplicates tab is two-tier: `InstantDuplicateFinder` groups by `(size, case-folded name)` purely in memory (no content reads, ~456 ms release for 1M files) and auto-runs on tab open / scan completion / tree mutation, while the exhaustive `DuplicateFinder` content scan stays behind its button. Instant results are `InstantDuplicateCandidate`, a DIFFERENT TYPE from `DuplicateGroup` — every cleanup/trash path takes the latter, so an unverified heuristic result cannot reach deletion; `InstantDuplicateVerifier` (which delegates to `DuplicateContentVerifier.exactGroups`) is the only bridge. Keep that type separation: a `isVerified` boolean would move the guarantee from the compiler to reviewer discipline.
+
 Everything goes to Trash via `TreeActions` → `FileManager.trashItem` — never delete. Duplicate cleanup byte-verifies before trashing (`DuplicateContentVerifier`, opens with `O_NOFOLLOW`) and only proceeds when an unselected byte-identical copy survives. `applyPreset` fails closed: `[]` means "do nothing", and callers must treat it that way. When touching `trashItem` bridging: use the compiler-managed `&nsurlVar` writeback in a synchronous helper — a hand-built `AutoreleasingUnsafeMutablePointer` over strong storage over-releases at pool pop in async contexts (this crashed in production once already; see `performTrash`).
 
 ## Temporal snapshots

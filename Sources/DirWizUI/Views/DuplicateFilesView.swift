@@ -38,16 +38,31 @@ public struct DuplicateFilesView: View {
 
             if appState.duplicate.isDuplicateScanRunning {
                 duplicateScanProgress
-            } else if filteredGroups.isEmpty {
+            } else if filteredGroups.isEmpty && visibleCandidates.isEmpty {
                 emptyState
                     .frame(maxHeight: .infinity)
             } else {
-                duplicateList
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        candidateSection
+                        if !filteredGroups.isEmpty {
+                            duplicateList
+                        }
+                    }
+                }
             }
+        }
+        // Instant grouping is in-memory and cheap, so it just happens — no button.
+        .onAppear { appState.refreshInstantDuplicates() }
+        .onChange(of: appState.scanToken) { _, _ in appState.refreshInstantDuplicates() }
+        .onChange(of: scanMinimumSize) { _, newValue in
+            appState.duplicate.lastDuplicateScanMinimumSize = newValue
+            appState.refreshInstantDuplicates()
         }
         .onChange(of: appState.duplicate.isDuplicateScanRunning) { wasRunning, isRunning in
             if wasRunning && !isRunning {
                 visibleGroupCap = 300
+                appState.duplicate.pruneVerifiedCandidates()
             }
         }
         .onChange(of: resultMinimumSize) { _, _ in
@@ -203,14 +218,133 @@ public struct DuplicateFilesView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Instant Candidates
+
+    private var visibleCandidates: [InstantDuplicateCandidate] {
+        appState.duplicate.instantCandidates.filter { $0.fileSize >= resultMinimumSize }
+    }
+
+    /// Heuristic candidates. Deliberately has NO checkboxes and no trash affordance: these
+    /// are unverified, and the only action offered is the one that makes them trustworthy.
+    @ViewBuilder
+    private var candidateSection: some View {
+        if !visibleCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Likely duplicates — same name & size, not content-verified")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("\(visibleCandidates.count) groups · up to "
+                             + SizeFormatter.shared.format(
+                                 visibleCandidates.reduce(0) { $0 + $1.potentialWaste })
+                             + " reclaimable if identical")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if appState.duplicate.isInstantGroupingRunning {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button("Verify All") { appState.verifyAllInstantCandidates() }
+                        .font(.system(size: 11))
+                        .disabled(!appState.duplicate.verifyingCandidateIDs.isEmpty)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(visibleCandidates.prefix(200)) { candidate in
+                        candidateRow(candidate)
+                    }
+                    if visibleCandidates.count > 200 {
+                        Text("… and \(visibleCandidates.count - 200) more groups")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal, 8)
+
+                Divider().padding(.top, 6)
+            }
+            .background(Color.orange.opacity(0.05))
+        }
+    }
+
+    private func candidateRow(_ candidate: InstantDuplicateCandidate) -> some View {
+        let isVerifying = appState.duplicate.verifyingCandidateIDs.contains(candidate.id)
+        let wasRejected = appState.duplicate.rejectedCandidateIDs.contains(candidate.id)
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                Text(candidate.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text("×\(candidate.paths.count)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text("up to " + SizeFormatter.shared.format(candidate.potentialWaste))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+
+                if isVerifying {
+                    ProgressView().controlSize(.small)
+                } else if wasRejected {
+                    // A checked answer, not a no-op: the files differ despite matching.
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                        Text("Different content").font(.system(size: 10))
+                    }
+                    .foregroundStyle(.secondary)
+                } else {
+                    Button("Verify") { appState.verifyInstantCandidate(candidate) }
+                        .font(.system(size: 11))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(candidate.paths.prefix(3), id: \.self) { path in
+                    Text(path)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if candidate.paths.count > 3 {
+                    Text("… and \(candidate.paths.count - 3) more")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
+                }
+            }
+            .padding(.leading, 19)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.04)))
+    }
+
     // MARK: - Empty State
 
     private var emptyState: some View {
         ContentUnavailableView {
             Label("No Duplicates Found", systemImage: "doc.on.doc")
         } description: {
-            if appState.duplicate.duplicateGroups.isEmpty {
-                Text("Click \"Scan for Duplicates\" to search for duplicate files.")
+            if appState.duplicate.isInstantGroupingRunning {
+                Text("Looking for likely duplicates…")
+            } else if appState.duplicate.duplicateGroups.isEmpty {
+                Text("No files share a name and size. Run a full content scan to compare bytes.")
             } else {
                 Text("No duplicate groups match the current result filter.")
             }
@@ -275,7 +409,9 @@ public struct DuplicateFilesView: View {
         let clones = cloneMap // one dictionary build
         let systemGroupIDs = systemGroupIDs(for: groups) // one classification pass
         let visibleGroups = groups.prefix(visibleGroupCap)
-        return ScrollView {
+        // No ScrollView here: the caller owns scrolling so candidates and confirmed groups
+        // scroll as one list. Nesting scroll views collapses this to zero height.
+        return Group {
             LazyVStack(spacing: 2) {
                 ForEach(visibleGroups) { group in
                     DuplicateGroupRow(
