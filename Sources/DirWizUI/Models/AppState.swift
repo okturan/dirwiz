@@ -383,6 +383,27 @@ public final class AppState {
 
 // MARK: - Supporting Types
 
+extension AppState {
+    /// The single drill-down seam shared by the Extensions tab and the sidebar legend.
+    ///
+    /// It lived as a closure inside ContentView, which put it in the app executable where
+    /// the test target cannot reach it — and meant the legend could not reuse it without
+    /// copying. Both surfaces now call this, so "clicking a file type" means one thing.
+    public func drillDownToExtension(hash: UInt32, displayName: String) {
+        // "Other" aggregates many extensions, so there is no single filter to apply.
+        // Send the user to the full table instead of a search that cannot be expressed.
+        guard hash != ExtensionRowModel.otherID else {
+            activeTab = .extensions
+            return
+        }
+        search.extensionFilter = hash
+        search.extensionFilterName = displayName
+        // A stale query would silently AND with the new filter and look like "no results".
+        search.searchQuery = ""
+        activeTab = .search
+    }
+}
+
 public enum DetailTab: String, CaseIterable, Identifiable {
     case treeView = "Tree View"
     case extensions = "Extensions"

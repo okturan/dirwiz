@@ -527,12 +527,14 @@ struct ContentView: View {
                                         totalSize: appState.fileTree?.rootDisplaySize ?? 0,
                                         extensionPalette: appState.extensionPalette,
                                         onDrillDown: { stat in
-                                            appState.search.extensionFilter = stat.extensionHash
-                                            appState.search.extensionFilterName = stat.extensionName.isEmpty
-                                                ? "(no ext)"
-                                                : ".\(stat.extensionName)"
-                                            appState.search.searchQuery = ""
-                                            appState.activeTab = .search
+                                            let model = ExtensionRowModel(
+                                                id: stat.extensionHash,
+                                                rawName: stat.extensionName,
+                                                color: .zero, totalSize: 0, fileCount: 0
+                                            )
+                                            appState.drillDownToExtension(
+                                                hash: model.id, displayName: model.displayName
+                                            )
                                         }
                                     )
                                 case .duplicates:
@@ -573,7 +575,11 @@ struct ContentView: View {
                 Divider()
                 ExtensionLegend(
                     palette: appState.extensionPalette,
-                    totalSize: appState.fileTree?.rootDisplaySize ?? 0
+                    totalSize: appState.fileTree?.rootDisplaySize ?? 0,
+                    onSelect: { model in
+                        appState.drillDownToExtension(hash: model.id, displayName: model.displayName)
+                    },
+                    onSeeAll: { appState.activeTab = .extensions }
                 )
                 .frame(width: 220)
             }

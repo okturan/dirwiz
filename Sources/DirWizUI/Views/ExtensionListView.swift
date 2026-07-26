@@ -61,7 +61,7 @@ public struct ExtensionListView: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture { onDrillDown?(stat) }
                                 .help(onDrillDown != nil
-                                      ? "Show \(stat.extensionName.isEmpty ? "files with no extension" : ".\(stat.extensionName) files") in Search"
+                                      ? "Show \(ExtensionRowModel(id: stat.extensionHash, rawName: stat.extensionName, color: .zero, totalSize: 0, fileCount: 0).displayName) files in Search"
                                       : "")
                             Divider().padding(.leading, 8)
                         }
@@ -163,7 +163,9 @@ public struct ExtensionListView: View {
                 Circle()
                     .fill(paletteColor)
                     .frame(width: 8, height: 8)
-                Text(stat.extensionName.isEmpty ? "(no ext)" : ".\(stat.extensionName)")
+                // Same spelling as the sidebar legend — one source of truth for naming.
+                Text(ExtensionRowModel(id: stat.extensionHash, rawName: stat.extensionName,
+                                       color: .zero, totalSize: 0, fileCount: 0).displayName)
                     .font(.system(size: 12, design: .monospaced))
                     .lineLimit(1)
             }

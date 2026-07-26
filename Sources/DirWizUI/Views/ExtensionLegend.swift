@@ -2,13 +2,31 @@ import SwiftUI
 import DirWizCore
 
 /// Right sidebar showing top extensions by size with WinDirStat-style palette colors.
+///
+/// This is the treemap's color key, and it is always on screen — so it is also the most
+/// natural place to say "show me these files". Rows share `ExtensionLegendRow` with the
+/// Extensions tab and perform the same drill-down, rather than being an inert twin of it.
 public struct ExtensionLegend: View {
     let palette: ExtensionPalette
     let totalSize: UInt64
+    /// Invoked with the tapped row; "Other" is handled by the shared seam.
+    let onSelect: ((ExtensionRowModel) -> Void)?
+    let onSeeAll: (() -> Void)?
 
-    public init(palette: ExtensionPalette, totalSize: UInt64) {
+    public init(
+        palette: ExtensionPalette,
+        totalSize: UInt64,
+        onSelect: ((ExtensionRowModel) -> Void)? = nil,
+        onSeeAll: (() -> Void)? = nil
+    ) {
         self.palette = palette
         self.totalSize = totalSize
+        self.onSelect = onSelect
+        self.onSeeAll = onSeeAll
+    }
+
+    private var models: [ExtensionRowModel] {
+        palette.entries.map(ExtensionRowModel.init)
     }
 
     public var body: some View {
@@ -29,87 +47,35 @@ public struct ExtensionLegend: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(palette.entries) { entry in
-                            ExtensionRow(entry: entry, totalSize: totalSize)
+                        ForEach(models) { model in
+                            ExtensionLegendRow(model: model, totalSize: totalSize) {
+                                onSelect?(model)
+                            }
                         }
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                 }
+
+                if onSeeAll != nil {
+                    Divider()
+                    Button(action: { onSeeAll?() }) {
+                        HStack(spacing: 4) {
+                            Text("See all file types")
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.system(size: 11))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                }
             }
         }
         .frame(minWidth: 180, idealWidth: 220)
-    }
-}
-
-// MARK: - ExtensionRow
-
-private struct ExtensionRow: View {
-    let entry: PaletteEntry
-    let totalSize: UInt64
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                // Color swatch.
-                Circle()
-                    .fill(entry.swiftUIColor)
-                    .frame(width: 10, height: 10)
-
-                Text(displayName)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .lineLimit(1)
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(SizeFormatter.shared.format(entry.totalSize))
-                        .font(.system(size: 11, design: .monospaced))
-
-                    Text(SizeFormatter.shared.formatCount(entry.fileCount) + " files")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            // Percentage bar.
-            percentageBar
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-    }
-
-    private var percentageBar: some View {
-        let fraction = totalSize > 0 ? CGFloat(entry.totalSize) / CGFloat(totalSize) : 0
-        let pctText = SizeFormatter.shared.percentage(entry.totalSize, of: totalSize)
-
-        return HStack(spacing: 6) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.secondary.opacity(0.12))
-
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(entry.swiftUIColor.opacity(0.7))
-                        .frame(width: max(0, geo.size.width * fraction))
-                }
-            }
-            .frame(height: 6)
-
-            Text(pctText)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 48, alignment: .trailing)
-        }
-    }
-
-    private var displayName: String {
-        if entry.extensionName == "Other" {
-            return "Other"
-        }
-        if entry.extensionName.isEmpty {
-            return "(no ext)"
-        }
-        return ".\(entry.extensionName)"
     }
 }
