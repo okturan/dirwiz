@@ -492,7 +492,12 @@ struct FSEventsJournalTests {
         // FSEventsMonitor was live in between.
         try Data(count: 50).write(to: URL(fileURLWithPath: root).appendingPathComponent("docs/added.txt"))
         try FileManager.default.createDirectory(atPath: root + "/newdir", withIntermediateDirectories: true)
-        try await settleFSEventsJournal()
+
+        // Wait for the daemon to have journaled SOMETHING, rather than sleeping a fixed
+        // interval and hoping. On a loaded runner the fixed sleep expired first and the
+        // replay came back empty, failing as though the mutation never happened.
+        let landed = await waitForJournalChanges(root: root, since: savedId)
+        #expect(landed, "FSEvents never journaled the mutations within the timeout")
 
         let replay = await FSEventsJournal.replay(root: root, since: savedId, timeout: 10)
 

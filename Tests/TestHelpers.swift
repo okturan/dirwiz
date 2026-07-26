@@ -58,6 +58,34 @@ func createTempTree(_ layout: [String: UInt64]) throws -> (path: String, cleanup
 /// from one that does, belongs here - `extension PerformanceSensitiveSuites { @Suite(...) }`.
 @Suite(.serialized) enum PerformanceSensitiveSuites {}
 
+/// Waits until the FSEvents daemon has actually journaled a change at or below `root`
+/// since `sinceId`, rather than sleeping a fixed interval and hoping it was long enough.
+///
+/// A fixed `settleFSEventsJournal()` sleep is a guess about daemon latency, and on a loaded
+/// CI runner the guess is wrong: the replay comes back with an EMPTY change set and the
+/// test fails claiming the mutation never happened. Waiting on the condition instead of on
+/// the clock removes the whole flake class, and it is faster in the common case because it
+/// returns as soon as the event lands.
+///
+/// Returns false on timeout so a caller can report a clear failure instead of proceeding
+/// with an empty journal and asserting something confusing downstream.
+@discardableResult
+func waitForJournalChanges(
+    root: String,
+    since sinceId: UInt64,
+    timeout: TimeInterval = 20
+) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        let replay = await FSEventsJournal.replay(root: root, since: sinceId, timeout: 5)
+        if case .changes(let paths) = replay.outcome, !paths.isEmpty { return true }
+        // A poisoned journal will never become clean by waiting, so stop rather than spin.
+        if case .poisoned = replay.outcome { return false }
+        try? await Task.sleep(for: .milliseconds(150))
+    }
+    return false
+}
+
 /// Point DIRWIZ_APP_SUPPORT_DIR at a scratch directory for the duration of a test,
 /// restoring the previous value (or unsetting it) afterward. Shared by `TreeCacheTests`,
 /// `WarmStartComposedPipelineTests`, and `TemporalDiffTests` - all nested under

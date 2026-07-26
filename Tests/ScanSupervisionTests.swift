@@ -233,6 +233,7 @@ struct ScanSupervisionTests {
         defer { cleanup() }
         let root = realDirectoryPath(rawRoot)
         try await settleFSEventsJournal()  // let the fixture's own creation land first
+        let idBeforeChurn = FSEventsJournal.currentEventId()
 
         let savedEventId = FSEventsJournal.currentEventId()
         let tree = await scanFixture(at: root)
@@ -245,10 +246,15 @@ struct ScanSupervisionTests {
         // `commitWarmStart` abandons the patch for a cold fallback (028/040's documented
         // "prefer a full rescan over patching the whole tree through the splice path it
         // wasn't designed to replace wholesale" rule).
+        let idBeforeMutation = FSEventsJournal.currentEventId()
         let newDir = URL(fileURLWithPath: root).appendingPathComponent("brandnew")
         try FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
         try Data(count: 77).write(to: newDir.appendingPathComponent("f.txt"))
-        try await settleFSEventsJournal()
+        // Warm start below replays the journal; if the daemon has not flushed yet it sees
+        // no changes, patches nothing, and the abandonment this test is about never
+        // happens. Wait for the event rather than for a fixed 500ms.
+        #expect(await waitForJournalChanges(root: root, since: idBeforeMutation),
+                "FSEvents never journaled the new directory within the timeout")
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
@@ -393,6 +399,7 @@ struct ScanSupervisionTests {
         let link = URL(fileURLWithPath: root).appendingPathComponent("pad0/hardlink.txt")
         try FileManager.default.linkItem(at: original, to: link)
         try await settleFSEventsJournal()
+        let idBeforeChurn = FSEventsJournal.currentEventId()
 
         let savedEventId = FSEventsJournal.currentEventId()
         let tree = await scanFixture(at: root)
@@ -408,7 +415,8 @@ struct ScanSupervisionTests {
                 try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
             }
         }
-        try await settleFSEventsJournal()
+        #expect(await waitForJournalChanges(root: root, since: idBeforeChurn),
+                "FSEvents never journaled the churn within the timeout")
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
@@ -567,6 +575,7 @@ struct ScanSupervisionTests {
         defer { cleanup() }
         let root = realDirectoryPath(rawRoot)
         try await settleFSEventsJournal()
+        let idBeforeChurn = FSEventsJournal.currentEventId()
 
         let savedEventId = FSEventsJournal.currentEventId()
         let tree = await scanFixture(at: root)
@@ -581,7 +590,8 @@ struct ScanSupervisionTests {
                 try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
             }
         }
-        try await settleFSEventsJournal()
+        #expect(await waitForJournalChanges(root: root, since: idBeforeChurn),
+                "FSEvents never journaled the churn within the timeout")
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
