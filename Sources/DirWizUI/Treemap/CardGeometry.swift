@@ -57,6 +57,36 @@ public enum CardGeometry {
     public static func headerHeight(width: Float, height: Float) -> Float {
         (width >= minWidthForHeader && height >= minHeightForHeader) ? headerHeight : 0
     }
+
+    /// Padding a directory container keeps around its children so its own fill stays
+    /// visible as a border. Scales with the container and reaches zero, for the same
+    /// reason `radius`/`gap` do: a small container must not spend all its pixels on frame.
+    public static let maxContainerPad: Float = 3
+
+    public static func containerPad(width: Float, height: Float) -> Float {
+        let minSide = min(width, height)
+        guard minSide >= minSideForDecoration * 3 else { return 0 }
+        return min(maxContainerPad, minSide * 0.02)
+    }
+
+    /// The region a container's children are remapped into: its own rect, minus the
+    /// padding on every side, minus a header strip on top when one is legible.
+    ///
+    /// Returns nil when the container is too small to give up anything — the children then
+    /// fill it edge to edge exactly as they do in cushion style. That is the degradation
+    /// floor: nesting decoration is the first thing sacrificed, never the child itself.
+    public static func innerRect(
+        x: Float, y: Float, width: Float, height: Float
+    ) -> (x: Float, y: Float, width: Float, height: Float)? {
+        let pad = containerPad(width: width, height: height)
+        let header = headerHeight(width: width, height: height)
+        guard pad > 0 || header > 0 else { return nil }
+        let innerW = width - 2 * pad
+        let innerH = height - 2 * pad - header
+        // Never hand back a degenerate or inverted region.
+        guard innerW >= minSideForDecoration, innerH >= minSideForDecoration else { return nil }
+        return (x: x + pad, y: y + pad + header, width: innerW, height: innerH)
+    }
 }
 
 /// Decides whether card style can honestly draw a given view.
@@ -84,5 +114,66 @@ public enum CardBudget {
         if nodeCount > fallbackNodeThreshold { return .fallbackToCushion }
         if nodeCount > maxDrawnNodes { return .aggregate(limit: maxDrawnNodes) }
         return .drawAll
+    }
+}
+
+
+/// The card-style nesting transform, kept pure so it can be tested without a GPU.
+///
+/// Children are remapped into their parent container's padded interior, which is what makes
+/// a directory read as a card holding other cards. It composes to any depth because the
+/// layout always emits a parent before its children, so one forward pass suffices.
+///
+/// This is a DRAWING transform. It must never be fed back into `SquarifyLayout` or into
+/// `SpatialGrid` — hit testing stays on untransformed layout rects, or clicks near a card's
+/// edge would land on the wrong node.
+public enum CardNesting {
+    public struct Item: Sendable, Equatable {
+        public var nodeIndex: UInt32
+        public var parentIndex: UInt32
+        public var x: Float, y: Float, width: Float, height: Float
+        public var isContainer: Bool
+
+        public init(nodeIndex: UInt32, parentIndex: UInt32,
+                    x: Float, y: Float, width: Float, height: Float, isContainer: Bool) {
+            self.nodeIndex = nodeIndex; self.parentIndex = parentIndex
+            self.x = x; self.y = y; self.width = width; self.height = height
+            self.isContainer = isContainer
+        }
+    }
+
+    public struct Placed: Sendable, Equatable {
+        public var nodeIndex: UInt32
+        public var x: Float, y: Float, width: Float, height: Float
+    }
+
+    /// `items` must be in layout order (parents before their children).
+    public static func place(_ items: [Item]) -> [Placed] {
+        // container node -> (rect it originally occupied, interior its children get)
+        var boxes: [UInt32: (outer: Item, inner: (x: Float, y: Float, width: Float, height: Float))] = [:]
+        var out: [Placed] = []
+        out.reserveCapacity(items.count)
+
+        for item in items {
+            var x = item.x, y = item.y, w = item.width, h = item.height
+            if item.parentIndex != item.nodeIndex,
+               let box = boxes[item.parentIndex], box.outer.width > 0, box.outer.height > 0 {
+                let sx = box.inner.width / box.outer.width
+                let sy = box.inner.height / box.outer.height
+                x = box.inner.x + (x - box.outer.x) * sx
+                y = box.inner.y + (y - box.outer.y) * sy
+                w *= sx
+                h *= sy
+            }
+            if item.isContainer,
+               let inner = CardGeometry.innerRect(x: x, y: y, width: w, height: h) {
+                // Keyed on the ORIGINAL rect: children arrive in original coordinates, so
+                // mapping original -> inner is what composes. Using the remapped rect as
+                // `outer` would apply the parent's own inset twice to every child.
+                boxes[item.nodeIndex] = (outer: item, inner: inner)
+            }
+            out.append(Placed(nodeIndex: item.nodeIndex, x: x, y: y, width: w, height: h))
+        }
+        return out
     }
 }

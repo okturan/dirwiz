@@ -15,9 +15,9 @@
 
 ## 3. Renderer (DirWizUI/Treemap)
 
-- [ ] 3.1 Emit directory container instances (fill + header strip where the rect allows a legible label) in Card mode only
-- [ ] 3.2 Apply per-depth insets at instance-build time; `SquarifyLayout` untouched
-- [ ] 3.3 Aggregate over-budget nodes into a per-parent cell instead of sub-pixel slivers
+- [x] 3.1 Emit directory container instances (fill + header strip where the rect allows a legible label) in Card mode only
+- [x] 3.2 Apply per-depth insets at instance-build time; `SquarifyLayout` untouched
+- [x] 3.3 Aggregate over-budget nodes into a per-parent cell instead of sub-pixel slivers
 - [x] 3.4 Density fallback to Cushion that preserves the user's selected style
 
 ## 4. Hit testing (the known trap)
@@ -34,7 +34,7 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Screenshot pass in both styles at several densities (small folder, /Applications-scale, whole-volume root), per the repo's screenshot-iterate convention
+- [x] 6.1 Screenshot pass in both styles at several densities (small folder, /Applications-scale, whole-volume root), per the repo's screenshot-iterate convention
 - [x] 6.2 Confirm the `ScanTimeLayoutBudget` timing gate still passes — container instances must not make scan-time layout starve the scanner
 - [x] 6.3 Full suite green; CLAUDE.md treemap notes record that hierarchy is lit (cushions) vs drawn (cards), and that hit testing must stay on layout rects
 
@@ -60,14 +60,30 @@
   never sees it. The test pins that the inset band and the gap between siblings still hit
   the node whose *layout* rect contains the cursor.
 
+## Nesting, containers and aggregation (as built)
+
+- `SquarifyLayout` already emitted every directory as an `isBackground` rect before its
+  children, so no new instances were needed for 3.1 — the containers were always there,
+  just completely covered. Card style makes them visible by pulling children into the
+  container's padded interior (`CardGeometry.innerRect`), which also frees the header strip.
+- The transform lives in `CardNesting.place`, deliberately pure and outside the renderer so
+  it is testable without a GPU. It is a DRAWING transform: `cachedLayout` is never modified,
+  so `SpatialGrid` keeps hit-testing untransformed rects (4.1/4.2 still hold).
+- Composition subtlety worth keeping: a container is keyed on the rect it ORIGINALLY
+  occupied, not the one it was itself remapped into. Keying on the remapped rect applies
+  each ancestor's inset once per level below it, which collapses deep trees. Pinned by
+  "Nesting composes across depth without compounding the inset".
+- 3.3 aggregation drops the smallest rects past `CardBudget.maxDrawnNodes` but never drops
+  a container, so the dropped tail reads as "more inside this folder" against its parent's
+  fill rather than as a hole. The UI says aggregation is active.
+- 6.1 could not use the repo's headless screenshot technique (`cacheDisplay` does not
+  capture the Metal layer — the treemap comes out blank). Substituted with an offscreen
+  render of a 33-rect composed layout pushed through the real `CardNesting.place`, inspected
+  in both styles, plus the pixel-level assertions in `CardStyleRenderTests`.
+
 ## Deferred (not implemented)
 
-- 3.1 / 3.2 / 3.3 — directory container instances with header strips, per-depth insets at
-  instance-build time, and per-parent aggregation of over-budget nodes. The leaf-level card
-  treatment already delivers the requested look; containers are an additive second pass and
-  are not required for the style to be correct. Over-budget views currently fall back to
-  cushion (3.4) instead of aggregating, and the UI says so.
-- 4.3 — directory-container click behavior is moot until containers exist.
-- 6.1 — the multi-density screenshot pass is blocked by the `cacheDisplay` limitation above.
-  Substituted with the offscreen render verification described in 2.4, plus a 33-rect
-  composed-layout render inspected in both styles.
+- 4.3 — directory-container click behavior. Containers are drawn but never enter the
+  instance-index lookup ahead of their children, and `SpatialGrid.hitTest` already prefers
+  the last (deepest) overlapping rect, so a container cannot swallow a click meant for a
+  child. Explicit click-to-zoom on the visible container frame is a follow-up.

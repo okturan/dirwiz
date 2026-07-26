@@ -274,3 +274,107 @@ struct CardStyleRenderTests {
         }
     }
 }
+
+/// The card nesting transform: children remapped into their parent's padded interior.
+/// Pure, so it is tested directly rather than through the renderer.
+@Suite("Card Nesting Tests")
+struct CardNestingTests {
+
+    private func item(_ node: UInt32, parent: UInt32, _ x: Float, _ y: Float,
+                      _ w: Float, _ h: Float, container: Bool = false) -> CardNesting.Item {
+        CardNesting.Item(nodeIndex: node, parentIndex: parent,
+                         x: x, y: y, width: w, height: h, isContainer: container)
+    }
+
+    private func placed(_ out: [CardNesting.Placed], _ node: UInt32) -> CardNesting.Placed? {
+        out.first { $0.nodeIndex == node }
+    }
+
+    /// The point of the whole transform: a child must end up strictly inside its parent,
+    /// leaving the container's own fill visible as a frame.
+    @Test("Children are inset inside their parent container")
+    func childrenAreInsetInsideParent() throws {
+        let items = [
+            item(0, parent: 0, 0, 0, 400, 300, container: true),
+            item(1, parent: 0, 0, 0, 200, 300),
+            item(2, parent: 0, 200, 0, 200, 300),
+        ]
+        let out = CardNesting.place(items)
+        let parent = try #require(placed(out, 0))
+        let a = try #require(placed(out, 1))
+        let b = try #require(placed(out, 2))
+
+        // The container itself is not moved — only its children are pulled inward.
+        #expect(parent.x == 0 && parent.y == 0 && parent.width == 400 && parent.height == 300)
+
+        for child in [a, b] {
+            #expect(child.x > parent.x, "child must not touch the container's left edge")
+            #expect(child.y > parent.y, "the header strip must push children down")
+            #expect(child.x + child.width < parent.x + parent.width)
+            #expect(child.y + child.height < parent.y + parent.height)
+        }
+        // Siblings stay adjacent and in order — nesting must not reshuffle the layout.
+        #expect(a.x < b.x)
+        #expect(abs((a.x + a.width) - b.x) < 0.01, "siblings stay flush with each other")
+    }
+
+    /// Nesting composes: a grandchild sits inside the child, which sits inside the parent.
+    /// A naive implementation that remaps against already-remapped parents applies the
+    /// inset twice per level and collapses deep trees.
+    @Test("Nesting composes across depth without compounding the inset")
+    func nestingComposesAcrossDepth() throws {
+        let items = [
+            item(0, parent: 0, 0, 0, 400, 400, container: true),
+            item(1, parent: 0, 0, 0, 400, 400, container: true),
+            item(2, parent: 1, 0, 0, 400, 400),
+        ]
+        let out = CardNesting.place(items)
+        let root = try #require(placed(out, 0))
+        let mid = try #require(placed(out, 1))
+        let leaf = try #require(placed(out, 2))
+
+        // Strictly increasing containment, each level giving up a bounded amount.
+        #expect(mid.x > root.x && mid.width < root.width)
+        #expect(leaf.x > mid.x && leaf.width < mid.width)
+        #expect(leaf.width > root.width * 0.75,
+                "two levels of nesting must not eat most of the rect, got \(leaf.width) of \(root.width)")
+    }
+
+    /// The degradation floor. A container too small to give up padding hands its children
+    /// the full rect, exactly as cushion does — the child stays visible.
+    @Test("A container too small to inset leaves its child untouched")
+    func tinyContainerDoesNotShrinkChildren() throws {
+        let items = [
+            item(0, parent: 0, 0, 0, 12, 12, container: true),
+            item(1, parent: 0, 0, 0, 12, 12),
+        ]
+        let out = CardNesting.place(items)
+        let child = try #require(placed(out, 1))
+        #expect(child.x == 0 && child.y == 0 && child.width == 12 && child.height == 12)
+    }
+
+    /// A node whose parent was never emitted as a container (culled, or out of the visible
+    /// subtree) must render at its layout position rather than vanish or jump.
+    @Test("A node with no drawn container is left where the layout put it")
+    func orphanKeepsLayoutRect() throws {
+        let out = CardNesting.place([item(7, parent: 99, 10, 20, 30, 40)])
+        let p = try #require(placed(out, 7))
+        #expect(p.x == 10 && p.y == 20 && p.width == 30 && p.height == 40)
+    }
+
+    /// Every input produces exactly one output, in order — the transform places, it never
+    /// filters. Culling decisions belong to the renderer.
+    @Test("Placement is total and order-preserving")
+    func placementIsTotal() {
+        var items: [CardNesting.Item] = []
+        for i in 0..<20 {
+            let x = Float(i) * 5
+            items.append(item(UInt32(i), parent: 0, x, 0, 5, 100, container: i == 0))
+        }
+        let out = CardNesting.place(items)
+        #expect(out.count == items.count)
+        let outIDs: [UInt32] = out.map { $0.nodeIndex }
+        let inIDs: [UInt32] = items.map { $0.nodeIndex }
+        #expect(outIDs == inIDs)
+    }
+}

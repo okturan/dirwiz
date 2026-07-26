@@ -311,6 +311,51 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         var lookup: [UInt32: Int32] = [:]
         lookup.reserveCapacity(visibleCount)
 
+        // Card style nests children inside their parent's padded interior so the directory
+        // container shows as a frame (and a header strip where a label fits). This is a
+        // DRAWING transform applied here at instance-build time — `cachedLayout` is left
+        // untouched, so `SpatialGrid` keeps hit-testing full layout rects and the gaps
+        // between cards stay clickable. Cushion style does none of this.
+        let nestCards = (renderStyle == .cards)
+            && CardBudget.decide(nodeCount: visibleCount) != .fallbackToCushion
+
+        // Precomputed by the pure `CardNesting` transform, keyed by node index.
+        var nestedRect: [UInt32: CardNesting.Placed] = [:]
+        if nestCards {
+            var items: [CardNesting.Item] = []
+            items.reserveCapacity(visibleCount)
+            for i in 0..<layoutCount {
+                let r = cachedLayout[i]
+                guard r.width >= 0.5, r.height >= 0.5, Int(r.nodeIndex) < nodes.count else { continue }
+                items.append(CardNesting.Item(
+                    nodeIndex: r.nodeIndex,
+                    parentIndex: nodes[Int(r.nodeIndex)].parentIndex,
+                    x: r.x, y: r.y, width: r.width, height: r.height,
+                    isContainer: r.isBackground
+                ))
+            }
+            nestedRect.reserveCapacity(items.count)
+            for placed in CardNesting.place(items) { nestedRect[placed.nodeIndex] = placed }
+        }
+
+        // Above the draw budget, card style keeps the largest rects and drops the tail.
+        // The dropped nodes are not blanks: their parent container is drawn behind them,
+        // so the space reads as "more inside this folder" rather than as empty canvas.
+        var areaFloor: Float = 0
+        if renderStyle == .cards, case .aggregate(let limit) = CardBudget.decide(nodeCount: visibleCount) {
+            var areas: [Float] = []
+            areas.reserveCapacity(visibleCount)
+            for i in 0..<layoutCount {
+                let r = cachedLayout[i]
+                guard r.width >= 0.5, r.height >= 0.5, !r.isBackground else { continue }
+                areas.append(r.width * r.height)
+            }
+            if areas.count > limit {
+                areas.sort(by: >)
+                areaFloor = areas[limit - 1]
+            }
+        }
+
         var writeIdx: Int32 = 0
         for i in 0..<layoutCount {
             let tmRect = cachedLayout[i]
@@ -321,13 +366,26 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             let nodeIdx = Int(tmRect.nodeIndex)
             guard nodeIdx < nodes.count else { continue }
 
+            // Containers are always kept — dropping one would erase the backdrop that makes
+            // its aggregated children read as contents rather than as a hole.
+            if areaFloor > 0, !tmRect.isBackground, tmRect.width * tmRect.height < areaFloor {
+                continue
+            }
+
+            var x = tmRect.x, y = tmRect.y, w = tmRect.width, h = tmRect.height
+            if nestCards, let placed = nestedRect[tmRect.nodeIndex] {
+                x = placed.x; y = placed.y; w = placed.width; h = placed.height
+                // Re-cull: nesting insets can push a rect below drawable size.
+                guard w >= 0.5, h >= 0.5 else { continue }
+            }
+
             let baseColor = resolver.resolveColor(for: tmRect, nodes: nodes, scratchSizeByExt: &scratchSizeByExt)
 
             // Use cached coefficients instead of recomputing.
             let coefs = tmRect.cachedCoefs
 
             instances.append(CushionInstance(
-                rect: SIMD4<Float>(tmRect.x, tmRect.y, tmRect.width, tmRect.height),
+                rect: SIMD4<Float>(x, y, w, h),
                 coefs: coefs,
                 color: baseColor
             ))
