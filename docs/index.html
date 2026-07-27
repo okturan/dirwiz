@@ -420,24 +420,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
   </div>
 </section>
 
-  <figure class="hero-shot hero-bleed rv" style="--d:.3s">
-    <img src="assets/dirwiz-showcase.webp"
-         alt="DirWiz after scanning a Mac boot volume: a sortable file tree above a colorful cushion treemap, with a file type legend on the right"
-         width="2200" height="1580">
-    <figcaption>An actual scan of this Mac’s boot volume - 4,454,141 files in 23 seconds.
-    Every rectangle is sized by the blocks it occupies on disk, not its logical length.</figcaption>
-  </figure>
-
-<div class="stats" aria-label="Technical highlights">
-  <div class="wrap">
-    <div class="stat rv"><div class="k">4.45M items · 23 s</div><div class="v">Cold scan of a full 926 GB boot volume, via <span class="mono">getattrlistbulk</span> bulk kernel reads.</div></div>
-    <div class="stat rv" style="--d:.06s"><div class="k">on-disk truth</div><div class="v">Sizes are allocated blocks, not logical lengths. Sparse files don’t lie.</div></div>
-    <div class="stat rv" style="--d:.12s"><div class="k">0 dependencies</div><div class="v">Native Swift and Metal. Nothing else ships in the bundle.</div></div>
-    <div class="stat rv" style="--d:.18s"><div class="k">Trash-only</div><div class="v">Every removal goes through the Trash. A delete code path doesn’t exist.</div></div>
-  </div>
-</div>
-
-<section class="band" id="demo">
+  <section class="band" id="demo">
   <div class="wrap">
     <div class="center-head">
       <h2 class="sec rv" style="--d:.05s">Have a play before you download</h2>
@@ -462,6 +445,27 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
     sizes drift every few seconds, the layout glides to follow</p>
   </div>
 </section>
+
+<section class="wrap" style="padding-bottom:0">
+  <h2 class="sec rv" style="text-align:center">The whole volume, one window.</h2>
+</section>
+<figure class="hero-shot hero-bleed rv" style="--d:.3s">
+    <img src="assets/dirwiz-showcase.webp"
+         alt="DirWiz after scanning a Mac boot volume: a sortable file tree above a colorful cushion treemap, with a file type legend on the right"
+         width="2200" height="1580">
+    <figcaption>An actual scan of this Mac’s boot volume - 4,454,141 files in 23 seconds.
+    Every rectangle is sized by the blocks it occupies on disk, not its logical length.</figcaption>
+  </figure>
+
+<div class="stats" aria-label="Technical highlights">
+  <div class="wrap">
+    <div class="stat rv"><div class="k">4.45M items · 23 s</div><div class="v">Cold scan of a full 926 GB boot volume, via <span class="mono">getattrlistbulk</span> bulk kernel reads.</div></div>
+    <div class="stat rv" style="--d:.06s"><div class="k">on-disk truth</div><div class="v">Sizes are allocated blocks, not logical lengths. Sparse files don’t lie.</div></div>
+    <div class="stat rv" style="--d:.12s"><div class="k">0 dependencies</div><div class="v">Native Swift and Metal. Nothing else ships in the bundle.</div></div>
+    <div class="stat rv" style="--d:.18s"><div class="k">Trash-only</div><div class="v">Every removal goes through the Trash. A delete code path doesn’t exist.</div></div>
+  </div>
+</div>
+
 
 <section class="wrap" id="duplicates">
   <div class="split">
@@ -1383,18 +1387,20 @@ for (const [name, fn] of boot){
     /* draft left-to-right like a plotter, so the drawing visibly begins at nothing */
   }
 
-  function draw(T, flood){
+  function draw(T, flood, hold){
     ctx.clearRect(0,0,W,H);
+    ctx.globalAlpha = hold===undefined?1:hold;
     ctx.strokeStyle = "rgba(22,48,94,.62)"; ctx.lineWidth = 1;
-    const u = Math.min(1, Math.max(0,(T-0.25)/3.2));
-    const upto = Math.floor(leaves.length*(1-Math.pow(1-u,2)));
+    const drawn = Math.min(1, Math.max(0,(T-0.25)/4.5));   /* v7: linear, DFS order */
+    const upto = Math.floor(leaves.length*drawn);
     for(let i=0;i<upto;i++){const e=leaves[i];ctx.strokeRect(e.x+.5,e.y+.5,e.w-1,e.h-1)}
     if(flood>0){
-      ctx.globalAlpha = .28*flood;
+      ctx.globalAlpha = (hold===undefined?1:hold)*.35*flood;
       for(const e of leaves){const c=e.rgb;ctx.fillStyle=`rgb(${c[0]},${c[1]},${c[2]})`;
         ctx.fillRect(e.x,e.y,e.w,e.h)}
       ctx.globalAlpha = 1;
     }
+    ctx.globalAlpha = 1;
     /* soft veil so the headline always wins */
     const v = ctx.createRadialGradient(W/2,H*.52,60,W/2,H*.52,Math.max(W,H)*.5);
     v.addColorStop(0,"rgba(253,253,251,.86)"); v.addColorStop(1,"rgba(253,253,251,.05)");
@@ -1410,16 +1416,17 @@ for (const [name, fn] of boot){
   }
 
   layout();
-  if (RM){ draw(99,1); addEventListener("resize",()=>{layout();draw(99,1)}); return; }
-  let t0 = 0, settled = false;
+  if (RM){ draw(99,1,1); addEventListener("resize",()=>{layout();draw(99,1,1)}); return; }
+  let t0 = 0;
   (function loop(now){
     if (!t0) t0 = now;                     /* clock starts at the first painted frame */
-    const T = (now-t0)/1000;
-    const flood = Math.min(1, Math.max(0,(T-3.6)/2.2));
-    draw(T, flood);
-    if (T < 6.4) requestAnimationFrame(loop); else settled = true;
+    const T = ((now-t0)/1000) % 13;        /* v7: draft, flood, hold, fade, draw again */
+    const flood = Math.min(1, Math.max(0,(T-4.8)/2.5));
+    const hold = T>11.5 ? Math.max(0, 1-(T-11.5)/1.2) : 1;
+    draw(T, flood, hold);
+    requestAnimationFrame(loop);
   })(performance.now());
-  addEventListener("resize",()=>{layout(); if(settled) draw(99,1)});
+  addEventListener("resize",()=>layout());
 })();
 })();
 </script>
