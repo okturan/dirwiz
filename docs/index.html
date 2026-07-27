@@ -106,7 +106,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 
 /* ----- hero ----- */
 .hero{padding:clamp(116px,15vh,160px) 0 0;text-align:center;position:relative;overflow:hidden}
-#bp{position:absolute;top:0;left:0;width:100%;height:660px;pointer-events:none;z-index:0}
+#bp{position:absolute;top:0;left:0;width:100%;height:780px;pointer-events:none;z-index:0}
 .hero .wrap{position:relative;z-index:1}
 .hero-icon{width:120px;height:120px;margin:0 auto 20px;
   filter:drop-shadow(0 10px 22px rgba(22,48,94,.18))}
@@ -115,7 +115,7 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .hero h1 em{font-family:var(--serif);font-style:italic;font-weight:600;color:var(--accent)}
 .hero p.sub{font-size:clamp(16.5px,2vw,19px);max-width:52ch;margin:0 auto 30px;color:var(--body)}
 .hero-ctas{display:flex;gap:22px;justify-content:center;align-items:center;flex-wrap:wrap}
-.hero-fine{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+.hero-fine{margin-top:26px;font-family:var(--mono);font-size:12px;color:var(--faint)}
 .hero-shot{margin:58px auto 0;max-width:1080px;padding:0 clamp(14px,3vw,28px)}
 .hero-shot img{border-radius:10px;border:1px solid var(--line);
   box-shadow:0 1px 2px rgba(22,48,94,.06),0 12px 32px -12px rgba(22,48,94,.18),
@@ -1371,7 +1371,7 @@ for (const [name, fn] of boot){
       const kids = node.children.map(c=>({node:c,_sz:nodeSize(c)})).filter(k=>k._sz>0);
       const out = []; squarify(kids,x+g,y+g,w-2*g,h-2*g,out);
       for(const r of out) rec(r.it.node,r.x,r.y,r.w,r.h,depth+1);
-    })(data,0,0,W,H,0);
+    })(data,-3,-3,W+6,H+6,0);   /* overscan: no naked margin at the page edges */
     /* draft left-to-right like a plotter, so the drawing visibly begins at nothing */
     leaves.sort((a,b)=>(a.x+a.y*.35)-(b.x+b.y*.35));
   }
@@ -1391,6 +1391,14 @@ for (const [name, fn] of boot){
     const v = ctx.createRadialGradient(W/2,H*.52,60,W/2,H*.52,Math.max(W,H)*.5);
     v.addColorStop(0,"rgba(253,253,251,.92)"); v.addColorStop(1,"rgba(253,253,251,.15)");
     ctx.fillStyle = v; ctx.fillRect(0,0,W,H);
+    /* dissolve to nothing at the bottom: the canvas is a positioned layer, so without
+       this it would paint over the screenshot figure below the hero copy */
+    ctx.globalCompositeOperation = "destination-out";
+    const fadeH = 170;
+    const f = ctx.createLinearGradient(0,H-fadeH,0,H);
+    f.addColorStop(0,"rgba(0,0,0,0)"); f.addColorStop(1,"rgba(0,0,0,1)");
+    ctx.fillStyle = f; ctx.fillRect(0,H-fadeH,W,fadeH);
+    ctx.globalCompositeOperation = "source-over";
   }
 
   layout();
