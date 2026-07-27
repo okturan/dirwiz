@@ -723,9 +723,163 @@ function worstRatio(row,rowArea,side){
   return worst;
 }
 
+
+/* =====================================================================
+   The ORIGINAL DirWiz engine, in the browser.
+   - computeCoefs/addRidge: ported line-for-line from CushionTypes.swift
+     (H = 0.40, F = 0.90 - the app's exact cushion constants).
+   - The fragment shader is the app's CushionShaderSource.swift translated
+     Metal -> GLSL ES 3.0, both branches: cushion lighting AND card SDF,
+     plus the same hover glow, selection brighten and sRGB curve.
+   Nothing here imitates the app; it runs the app's math.
+   ===================================================================== */
+const CUSH_H = 0.40, CUSH_F = 0.90;
+function addRidge(c, rx,ry,rw,rh, ax,ay,aw,ah, h){
+  if (rw<=0 || rh<=0) return;
+  const x1=(ax-rx)/rw, x2=(ax+aw-rx)/rw, y1=(ay-ry)/rh, y2=(ay+ah-ry)/rh;
+  const dx=x2-x1, dy=y2-y1;
+  if (dx<=0 || dy<=0) return;
+  const ix=1/(dx*dx); c[0]+=-4*h*ix; c[1]+=4*h*(x1+x2)*ix;
+  const iy=1/(dy*dy); c[2]+=-4*h*iy; c[3]+=4*h*(y1+y2)*iy;
+}
+function computeCoefs(rx,ry,rw,rh, ancestors){
+  const c=[0,0,0,0];
+  for (let l=0;l<ancestors.length;l++){
+    const a=ancestors[l];
+    addRidge(c, rx,ry,rw,rh, a.x,a.y,a.w,a.h, CUSH_H*Math.pow(CUSH_F,l));
+  }
+  return c;
+}
+
+function makeCushionGL(){
+  const cv = document.createElement("canvas");
+  const gl = cv.getContext("webgl2", {antialias:true, premultipliedAlpha:false});
+  if (!gl) return {ok:false};
+  const VS = `#version 300 es
+  layout(location=0) in vec4 aRect;
+  layout(location=1) in vec4 aCoefs;
+  layout(location=2) in vec4 aColor;
+  layout(location=3) in float aIndex;
+  uniform vec2 uVP;
+  out vec2 vRectPos;
+  flat out vec4 vCoefs; flat out vec4 vColor; flat out vec2 vRectSize; flat out float vIndex;
+  void main(){
+    vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
+    vec2 p = aRect.xy + corner * aRect.zw;
+    gl_Position = vec4(p.x/uVP.x*2.0-1.0, 1.0-p.y/uVP.y*2.0, 0.0, 1.0);
+    vRectPos = corner; vCoefs = aCoefs; vColor = aColor;
+    vRectSize = aRect.zw; vIndex = aIndex;
+  }`;
+  const FS = `#version 300 es
+  precision highp float;
+  in vec2 vRectPos;
+  flat in vec4 vCoefs; flat in vec4 vColor; flat in vec2 vRectSize; flat in float vIndex;
+  uniform float uAmbient; uniform vec3 uLight;
+  uniform float uHovered; uniform float uSelected; uniform float uStyle;
+  out vec4 frag;
+  vec3 srgbToLinear(vec3 c){ return pow(c, vec3(2.2)); }
+  vec3 linearToSrgb(vec3 c){ return pow(c, vec3(1.0/2.2)); }
+  void main(){
+    float px = vRectPos.x, py = vRectPos.y;
+    vec3 baseLinear = srgbToLinear(vColor.rgb);
+    vec3 litColor; float edgeDist;
+    if (uStyle > 0.5) {
+      float grad = clamp((px+py)*0.5, 0.0, 1.0);
+      litColor = baseLinear * mix(1.06, 0.88, grad);
+      vec2 halfSize = vRectSize*0.5;
+      float minSide = min(vRectSize.x, vRectSize.y);
+      float decorate = step(6.0, minSide);
+      float radius = decorate*min(6.0, minSide*0.12);
+      float inset  = decorate*min(2.0, minSide*0.06);
+      vec2 p = (vRectPos-0.5)*vRectSize;
+      vec2 b = max(halfSize-inset-radius, vec2(0.0));
+      vec2 d = abs(p)-b;
+      float sdf = length(max(d, vec2(0.0))) + min(max(d.x,d.y), 0.0) - radius;
+      if (sdf > 0.0) discard;
+      edgeDist = -sdf;
+    } else {
+      float nx = -(2.0*vCoefs.x*px + vCoefs.y);
+      float ny = -(2.0*vCoefs.z*py + vCoefs.w);
+      vec3 N = normalize(vec3(nx, ny, 1.0));
+      vec3 lightDir = normalize(uLight);
+      vec3 viewDir = vec3(0.0, 0.0, 1.0);
+      float diffuse = max(0.0, dot(N, lightDir));
+      vec3 H = normalize(lightDir + viewDir);
+      float spec = pow(max(dot(N, H), 0.0), 48.0);
+      float intensity = uAmbient + (1.0-uAmbient)*diffuse;
+      litColor = baseLinear*intensity + vec3(0.15*spec);
+      float edgeX = min(px*vRectSize.x, (1.0-px)*vRectSize.x);
+      float edgeY = min(py*vRectSize.y, (1.0-py)*vRectSize.y);
+      edgeDist = min(edgeX, edgeY);
+      litColor *= mix(0.25, 1.0, smoothstep(0.0, 1.5, edgeDist));
+    }
+    if (abs(vIndex-uSelected) < 0.5) litColor += vec3(0.15);
+    if (abs(vIndex-uHovered) < 0.5) {
+      if (edgeDist < 2.0) {
+        float oa = 1.0-smoothstep(0.5, 2.0, edgeDist);
+        litColor = mix(litColor, vec3(1.0), oa*0.6);
+      }
+      litColor += vec3(0.12);
+    }
+    float recency = vColor.a;
+    if (recency < 0.99) {
+      float luma = dot(litColor, vec3(0.299, 0.587, 0.114));
+      litColor = mix(vec3(luma)*0.30, litColor, recency);
+    }
+    frag = vec4(linearToSrgb(clamp(litColor, 0.0, 1.0)), 1.0);
+  }`;
+  function sh(type, src){
+    const h = gl.createShader(type); gl.shaderSource(h, src); gl.compileShader(h);
+    if (!gl.getShaderParameter(h, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(h);
+    return h;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return {ok:false};
+  gl.useProgram(prog);
+  const U = n => gl.getUniformLocation(prog, n);
+  const uVP=U("uVP"), uAmb=U("uAmbient"), uLight=U("uLight"),
+        uHov=U("uHovered"), uSel=U("uSelected"), uStyle=U("uStyle");
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  const STRIDE = 13*4;
+  const attrs = [[0,4,0],[1,4,16],[2,4,32],[3,1,48]];
+  for (const [loc,size,off] of attrs){
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, STRIDE, off);
+    gl.vertexAttribDivisor(loc, 1);
+  }
+  /* the app's exact frame constants: ambient 0.25, light (0.5,0.5,1), clear 0.12/0.12/0.14 */
+  gl.uniform1f(uAmb, 0.25);
+  const len = Math.hypot(0.5,0.5,1);
+  gl.uniform3f(uLight, 0.5/len, 0.5/len, 1/len);
+  return {
+    ok:true, canvas:cv,
+    resize(Wcss,Hcss,dpr){
+      cv.width = Math.round(Wcss*dpr); cv.height = Math.round(Hcss*dpr);
+      gl.viewport(0,0,cv.width,cv.height);
+      gl.useProgram(prog); gl.uniform2f(uVP, Wcss, Hcss);
+    },
+    render(data, count, hoveredIdx, style){
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, count*13), gl.DYNAMIC_DRAW);
+      gl.uniform1f(uHov, hoveredIdx); gl.uniform1f(uSel, -1);
+      gl.uniform1f(uStyle, style);
+      gl.clearColor(0.12, 0.12, 0.14, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
+    }
+  };
+}
+
 /* ----- treemap widget (light chrome) ----- */
 function makeTreemap(cfg){
   const canvas = cfg.canvas, ctx = canvas.getContext("2d");
+  const glr = makeCushionGL();          /* the app's own renderer, or 2d fallback */
+  let mapStyle = 0;                     /* 0 cushion, 1 cards - both are the real shader */
   const tip = cfg.tip;
   const data = cfg.data;
   const {map: extMap, ranked} = assignPalette(data);
@@ -736,6 +890,7 @@ function makeTreemap(cfg){
   let hovered = null, inView = !("IntersectionObserver" in window);
   let born = new Map();
   let dpr = 1, W = 0, H = 0;
+  let rootRect = {x:0,y:0,w:0,h:0};
   const rnd = Math.random;
 
   function resize(){
@@ -745,14 +900,16 @@ function makeTreemap(cfg){
     W = r.width; H = r.height;
     canvas.width = Math.round(W*dpr); canvas.height = Math.round(H*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    if (glr.ok) glr.resize(W,H,dpr);
     layout(false); needsDraw = true;
   }
 
   function layout(tween){
     const old = new Map(entries.map(e=>[e.id,e]));
     entries = [];
-    const pad = 6;
-    place(root, pad, pad, W-pad*2, H-pad*2, 0);
+    const pad = glr.ok ? 0 : 6;
+    rootRect = {x:pad, y:pad, w:W-pad*2, h:H-pad*2};
+    place(root, rootRect.x, rootRect.y, rootRect.w, rootRect.h, 0, []);
     if (tween && !RM){
       prev = new Map();
       for (const e of entries){
@@ -765,31 +922,104 @@ function makeTreemap(cfg){
     needsDraw = true;
   }
 
-  function place(node, x, y, w, h, depth){
+  function place(node, x, y, w, h, depth, anc){
     const kids = (node.children||[]).map(c=>({...c, _ref:c, _sz:nodeSize(c)})).filter(k=>k._sz>0);
     const rects = [];
     squarify(kids, x, y, w, h, rects);
     for (const r of rects){
       const n = r.it._ref;
-      const g = 1.2;
+      const g = glr.ok ? 0 : 1.2;
       const rx = r.x+g, ry = r.y+g, rw = r.w-g*2, rh = r.h-g*2;
       if (rw<2 || rh<2) continue;
       if (n.children && rw>34 && rh>26 && depth<4){
-        const labelH = (depth<1 && rw>100 && rh>68) ? 18 : 0;
+        const labelH = (!glr.ok && depth<1 && rw>100 && rh>68) ? 18 : 0;
         entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:false,
-          col:dirColor(n,extMap), label: labelH?n.name:null, labelH});
-        place(n, rx+2, ry+2+labelH, rw-4, rh-4-labelH, depth+1);
+          col:dirColor(n,extMap), label: labelH?n.name:null, labelH, anc});
+        const inner = glr.ok ? 0 : 2;
+        place(n, rx+inner, ry+inner+labelH, rw-inner*2, rh-inner*2-labelH, depth+1,
+              anc.concat(n.id));
       } else {
         const col = n.children ? dirColor(n,extMap) : hexRgb(extMap.get(n.ext)||FALLBACK);
         const v = ((n.id*2654435761)>>>16 & 255)/255*.14-.07;
-        entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:true, col:shade(col,v)});
+        entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:true,
+          col:shade(col,v), anc});
       }
     }
   }
 
   const easeOut = t => 1-Math.pow(1-t,3);
 
+  let glData = new Float32Array(13*2048);
+  function drawGL(now, t){
+    const disp = new Map();          /* id -> displayed rect this frame */
+    for (const e of entries){
+      let {x,y,w,h} = e;
+      if (tweening && prev && prev.has(e.id)){
+        const p = prev.get(e.id);
+        x=p.x+(x-p.x)*t; y=p.y+(y-p.y)*t; w=p.w+(w-p.w)*t; h=p.h+(h-p.h)*t;
+      }
+      if (!RM && born.has(e.id)){
+        const bt = (now-born.get(e.id))/420;
+        if (bt>=1){ born.delete(e.id); }
+        else {
+          const sK = bt<0?0:.82+.18*easeOut(bt);
+          const cx=x+w/2, cy=y+h/2; w*=sK; h*=sK; x=cx-w/2; y=cy-h/2;
+        }
+      }
+      disp.set(e.id, {x,y,w,h});
+    }
+    let n=0, hoveredIdx=-1;
+    const ancRects=[];
+    for (const e of entries){
+      if (!e.leaf) continue;
+      const d = disp.get(e.id);
+      if (d.w<0.5 || d.h<0.5) continue;
+      /* the app's cushion: one ridge per enclosing level, then the leaf's own */
+      ancRects.length = 0; ancRects.push(rootRect);
+      for (const aid of e.anc){ const a=disp.get(aid); if (a) ancRects.push(a); }
+      ancRects.push(d);
+      const c = computeCoefs(d.x,d.y,d.w,d.h, ancRects);
+      if ((n+1)*13 > glData.length){
+        const bigger=new Float32Array(glData.length*2); bigger.set(glData); glData=bigger;
+      }
+      const o=n*13;
+      glData[o]=d.x; glData[o+1]=d.y; glData[o+2]=d.w; glData[o+3]=d.h;
+      glData[o+4]=c[0]; glData[o+5]=c[1]; glData[o+6]=c[2]; glData[o+7]=c[3];
+      glData[o+8]=e.col[0]/255; glData[o+9]=e.col[1]/255; glData[o+10]=e.col[2]/255; glData[o+11]=1;
+      glData[o+12]=n;
+      if (hovered===e.id) hoveredIdx=n;
+      n++;
+    }
+    glr.render(glData, n, hoveredIdx, mapStyle);
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(glr.canvas, 0, 0, W, H);
+    /* app-style labels on tiles big enough to carry them */
+    for (const e of entries){
+      if (!e.leaf) continue;
+      const d = disp.get(e.id);
+      if (d.w<96 || d.h<44) continue;
+      ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,.95)";
+      ctx.shadowColor="rgba(0,0,0,.55)"; ctx.shadowBlur=3;
+      ctx.fillText(truncate(ctx, e.node.name, d.w-14), d.x+7, d.y+15);
+      ctx.font = "500 10px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillStyle = "rgba(255,255,255,.78)";
+      ctx.fillText(fmtGB(nodeSize(e.node)), d.x+7, d.y+28);
+      ctx.shadowBlur=0;
+    }
+  }
+
   function draw(now){
+    let tGL = 1;
+    if (glr.ok){
+      if (tweening){
+        tGL = clamp((now-tweenT0)/620, 0, 1);
+        if (tGL>=1) tweening = false;
+        tGL = easeOut(tGL);
+      }
+      drawGL(now, tGL);
+      return;
+    }
     ctx.clearRect(0,0,W,H);
     let t = 1;
     if (tweening){
@@ -883,6 +1113,30 @@ function makeTreemap(cfg){
     return chain;
   }
 
+  if (glr.ok && canvas.parentElement){
+    const sw = document.createElement("div");
+    sw.style.cssText = "position:absolute;top:10px;right:10px;z-index:5;display:flex;gap:4px;"+
+      "background:rgba(253,253,251,.85);backdrop-filter:blur(6px);padding:3px;border-radius:8px;"+
+      "border:1px solid rgba(22,48,94,.14);font:600 11px -apple-system,sans-serif";
+    const mk = (label, val) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.cssText = "border:0;padding:4px 10px;border-radius:6px;cursor:pointer;background:transparent;color:#3d4557";
+      b.onclick = () => { mapStyle = val; paint(); needsDraw = true; };
+      return b;
+    };
+    const b0 = mk("Cushions",0), b1 = mk("Cards",1);
+    const paint = () => {
+      b0.style.background = mapStyle===0 ? "#3568d4" : "transparent";
+      b0.style.color = mapStyle===0 ? "#fff" : "#3d4557";
+      b1.style.background = mapStyle===1 ? "#3568d4" : "transparent";
+      b1.style.color = mapStyle===1 ? "#fff" : "#3d4557";
+    };
+    paint();
+    sw.append(b0,b1);
+    canvas.parentElement.style.position = canvas.parentElement.style.position || "relative";
+    canvas.parentElement.appendChild(sw);
+  }
   canvas.addEventListener("pointermove", ev => {
     const r = canvas.getBoundingClientRect();
     const px = ev.clientX-r.left, py = ev.clientY-r.top;
@@ -1117,7 +1371,8 @@ for (const [name, fn] of boot){
       const out = []; squarify(kids,x+g,y+g,w-2*g,h-2*g,out);
       for(const r of out) rec(r.it.node,r.x,r.y,r.w,r.h,depth+1);
     })(data,0,0,W,H,0);
-    leaves.sort((a,b)=>b.w*b.h-a.w*a.h);
+    /* draft left-to-right like a plotter, so the drawing visibly begins at nothing */
+    leaves.sort((a,b)=>(a.x+a.y*.35)-(b.x+b.y*.35));
   }
 
   function draw(draft, flood){
@@ -1139,15 +1394,16 @@ for (const [name, fn] of boot){
 
   layout();
   if (RM){ draw(1,1); addEventListener("resize",()=>{layout();draw(1,1)}); return; }
-  const t0 = performance.now();
-  let settled = false;
-  (function loop(){
-    const T = (performance.now()-t0)/1000;
-    const draft = Math.min(1, T/3.2);
-    const flood = Math.min(1, Math.max(0,(T-3.4)/2.2));
-    draw(1-Math.pow(1-draft,2), flood);
-    if (T < 6.0) requestAnimationFrame(loop); else settled = true;
-  })();
+  let t0 = 0, settled = false;
+  (function loop(now){
+    if (!t0) t0 = now;                     /* clock starts at the first painted frame */
+    const T = (now-t0)/1000;
+    const u = Math.min(1, Math.max(0,(T-0.35)/4.2));   /* a blank beat, then draft */
+    const draft = u*u*(3-2*u);                          /* eases in from zero */
+    const flood = Math.min(1, Math.max(0,(T-4.8)/2.2));
+    draw(draft, flood);
+    if (T < 7.4) requestAnimationFrame(loop); else settled = true;
+  })(performance.now());
   addEventListener("resize",()=>{layout(); if(settled) draw(1,1)});
 })();
 })();
