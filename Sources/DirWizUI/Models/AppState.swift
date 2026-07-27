@@ -92,6 +92,18 @@ public final class AppState {
 
     static let renderStyleKey = "DirWizTreemapRenderStyle"
 
+    /// Whether the bottom treemap pane is collapsed to give the detail pane full height.
+    /// A layout preference like `treemapRenderStyle`: persisted, and NOT reset by
+    /// `resetForNewScan()` - a new scan must not spring the map back open.
+    public var isTreemapPaneCollapsed: Bool = false {
+        didSet {
+            guard isTreemapPaneCollapsed != oldValue else { return }
+            defaults.set(isTreemapPaneCollapsed, forKey: AppState.treemapCollapsedKey)
+        }
+    }
+
+    static let treemapCollapsedKey = "DirWizTreemapPaneCollapsed"
+
     static func loadRenderStyle(_ defaults: UserDefaults) -> TreemapRenderStyle {
         guard let raw = defaults.string(forKey: renderStyleKey),
               let style = TreemapRenderStyle(rawValue: raw) else { return .cushion }
@@ -279,6 +291,7 @@ public final class AppState {
         // in a property default is what keeps an isolated test suite from writing into the
         // user's real defaults domain (it did, once).
         self.treemapRenderStyle = AppState.loadRenderStyle(defaults)
+        self.isTreemapPaneCollapsed = defaults.bool(forKey: AppState.treemapCollapsedKey)
         self.liveRefreshPaused = defaults.bool(forKey: AppState.livePausedKey)
     }
 

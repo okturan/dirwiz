@@ -620,21 +620,29 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .frame(height: max(60, geo.size.height * splitRatio))
+                        .frame(height: appState.isTreemapPaneCollapsed
+                                        ? nil : max(60, geo.size.height * splitRatio))
+                        .frame(maxHeight: appState.isTreemapPaneCollapsed ? .infinity : nil)
                         .clipped()
 
-                        // Resizable drag divider.
+                        // Resizable drag divider; doubles as the collapse/restore control.
                         splitDivider(totalHeight: geo.size.height)
 
-                        // Temporal diff status banner.
+                        // Kept visible while collapsed: the Clear button - and the fact
+                        // that a diff overlay is active at all - must never be unreachable
+                        // just because the map it paints is hidden.
                         if appState.temporalDiff.isTemporalDiffEnabled,
                            let snap = appState.temporalDiff.temporalSnapshot {
                             diffStatusBanner(snapshot: snap)
                         }
 
-                        // Bottom: treemap.
-                        InteractiveTreemapView(appState: appState)
-                            .frame(minHeight: 100)
+                        // Bottom: treemap. Removed from the hierarchy entirely while
+                        // collapsed - the renderer relayouts on reappearance through its
+                        // normal change detection, so nothing special is needed here.
+                        if !appState.isTreemapPaneCollapsed {
+                            InteractiveTreemapView(appState: appState)
+                                .frame(minHeight: 100)
+                        }
                     }
                     .coordinateSpace(name: "splitView")
                 }
@@ -659,12 +667,16 @@ struct ContentView: View {
     // MARK: - Split Divider
 
     private func splitDivider(totalHeight: CGFloat) -> some View {
-        Rectangle()
+        let collapsed = appState.isTreemapPaneCollapsed
+        return Rectangle()
             .fill(Color(nsColor: .separatorColor))
             .frame(height: 6)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .onHover { hovering in
+                // No resize cursor while collapsed: there is nothing to resize, and the
+                // cursor would promise a drag that does nothing.
+                guard !collapsed else { return }
                 if hovering {
                     NSCursor.resizeUpDown.push()
                 } else {
@@ -674,10 +686,39 @@ struct ContentView: View {
             .gesture(
                 DragGesture(coordinateSpace: .named("splitView"))
                     .onChanged { value in
+                        guard !collapsed else { return }
                         let newRatio = value.location.y / totalHeight
                         splitRatio = max(0.1, min(0.85, newRatio))
                     }
             )
+            .onTapGesture(count: 2) { toggleTreemapPane() }
+            .overlay(
+                Button(action: toggleTreemapPane) {
+                    Image(systemName: collapsed ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(Color(nsColor: .windowBackgroundColor))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                                )
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(collapsed ? "Show treemap" : "Hide treemap (double-click the divider also toggles)")
+            )
+    }
+
+    /// Collapse keeps `splitRatio` untouched, so restoring returns to the layout the user
+    /// had tuned rather than to a default.
+    private func toggleTreemapPane() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            appState.isTreemapPaneCollapsed.toggle()
+        }
     }
 
     private static let diffDateFormatter: DateFormatter = {
