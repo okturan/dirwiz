@@ -57,6 +57,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 
 /* ----- nav ----- */
 .nav{position:fixed;top:0;left:0;right:0;z-index:50;height:56px;
+  background:rgba(253,253,251,.78);-webkit-backdrop-filter:blur(14px) saturate(160%);backdrop-filter:blur(14px) saturate(160%);
   display:flex;align-items:center;gap:18px;
   padding:0 clamp(18px,4vw,36px);
   transition:background .3s,border-color .3s;border-bottom:1px solid transparent}
@@ -65,7 +66,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .nav-brand{display:flex;align-items:center;gap:9px;font-weight:650;font-size:15px;
   letter-spacing:-.01em;color:var(--ink)}
 .nav-brand img{width:24px;height:24px}
-.nav-links{display:flex;gap:26px;font-size:13.5px;color:var(--mut);margin-left:auto}
+.nav-links{display:flex;gap:26px;font-size:13.5px;color:var(--body);font-weight:550;margin-left:auto}
 .nav-links a{transition:color .2s}
 .nav-links a:hover{color:var(--ink)}
 .nav-actions{display:flex;align-items:center;gap:10px}
@@ -267,11 +268,12 @@ h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;lin
 .dl h2{font-size:clamp(28px,4.2vw,42px);font-weight:750;letter-spacing:-.025em;
   line-height:1.1;margin-bottom:28px}
 .dl .hero-fine{margin-top:18px}
-.dl .notes{margin:30px auto 0;max-width:56ch;display:grid;gap:12px;text-align:left}
+.dl .notes{margin:14px auto 0;max-width:880px;display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:left}
+@media(max-width:720px){.dl .notes{grid-template-columns:1fr}}
 .dl .note{font-size:13.5px;color:var(--mut);line-height:1.6;background:var(--card);
   border:1px solid var(--line);border-radius:10px;padding:13px 16px}
 .dl .note b{color:var(--body);font-weight:600}
-.checksum{max-width:620px;margin:26px auto 0;text-align:left;
+.checksum{max-width:880px;margin:26px auto 0;text-align:left;
   border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
 .checksum-head{background:#fafbfd;border-bottom:1px solid var(--line);padding:8px 14px;
   font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.14em;color:var(--faint)}
@@ -423,12 +425,9 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
   <div class="wrap">
     <div class="center-head">
       <h2 class="sec rv" style="--d:.05s">Have a play before you download</h2>
-      <p class="lede rv" style="--d:.1s">Not a mockup. Real
-      <span class="mono">dirwiz-cli</span> scans of a Mac’s <span class="mono">/Applications</span>,
-      <span class="mono">/Library</span>, <span class="mono">/System/Library</span> and
-      <span class="mono">/opt/homebrew</span> - real names, real byte counts - rendered by the app's
-      own engine: its Metal cushion shader ported line for line to WebGL, on the same
-      squarified layout and palette. The Cards toggle is the real shader too.</p>
+      <p class="lede rv" style="--d:.1s">A <span class="mono">dirwiz-cli</span> scan of a Mac, drawn in your browser by the app's
+      own renderer. Click a folder to zoom in; Esc backs out. The Cushions/Cards toggle
+      is the same one the app has.</p>
     </div>
     <div class="demo-grid rv" style="--d:.15s">
       <div class="panel">
