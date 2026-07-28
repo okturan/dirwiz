@@ -455,14 +455,14 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
 <figure class="hero-shot hero-bleed rv" style="--d:.3s">
     <img src="assets/dirwiz-showcase.webp"
          alt="DirWiz after scanning a Mac boot volume: a sortable file tree above a colorful cushion treemap, with a file type legend on the right"
-         width="2200" height="1580">
-    <figcaption>An actual scan of this Mac’s boot volume - 4,454,141 files in 23 seconds.
+         width="2520" height="1702">
+    <figcaption>An actual scan of this Mac’s boot volume - 4,669,384 files in 21.8 seconds.
     Every rectangle is sized by the blocks it occupies on disk, not its logical length.</figcaption>
   </figure>
 
 <div class="stats" aria-label="Technical highlights">
   <div class="wrap">
-    <div class="stat rv"><div class="k">4.45M items · 23 s</div><div class="v">Cold scan of a full 926 GB boot volume, via <span class="mono">getattrlistbulk</span> bulk kernel reads.</div></div>
+    <div class="stat rv"><div class="k">4.67M items · 22 s</div><div class="v">Cold scan of a full 926 GB boot volume, via <span class="mono">getattrlistbulk</span> bulk kernel reads.</div></div>
     <div class="stat rv" style="--d:.06s"><div class="k">on-disk truth</div><div class="v">Sizes are allocated blocks, not logical lengths. Sparse files don’t lie.</div></div>
     <div class="stat rv" style="--d:.12s"><div class="k">0 dependencies</div><div class="v">Native Swift and Metal. Nothing else ships in the bundle.</div></div>
     <div class="stat rv" style="--d:.18s"><div class="k">Trash-only</div><div class="v">Every removal goes through the Trash. A delete code path doesn’t exist.</div></div>
