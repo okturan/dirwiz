@@ -284,6 +284,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             return
         }
 
+        let rebuildStart = CFAbsoluteTimeGetCurrent()
         let nodes = cachedSnapshot
         let layoutCount = cachedLayout.count
 
@@ -395,6 +396,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
         instanceCount = instances.count
         nodeToInstanceIndex = lookup
+
+        // Freeze forensics: a reported occasional stall on the style toggle could not be
+        // reproduced on demand, so the suspect span reports itself. .notice persists to
+        // the log store, so `log show` can answer "where did it hang" after the fact.
+        let rebuildElapsed = CFAbsoluteTimeGetCurrent() - rebuildStart
+        if rebuildElapsed > 0.1 {
+            log.notice("Instance rebuild took \(Int(rebuildElapsed * 1000))ms: \(self.instanceCount) instances, style=\(self.renderStyle == .cards ? "cards" : "cushion", privacy: .public)")
+        }
 
         guard instanceCount > 0 else {
             instanceBufferDirty = false

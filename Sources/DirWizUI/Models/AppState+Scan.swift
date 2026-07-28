@@ -104,7 +104,8 @@ extension AppState {
     /// stale (e.g. Full Disk Access changed between sessions).
     public func startFullRescan() {
         guard let volumeURL = selectedVolume else { return }
-        startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: true)
+        startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: true,
+                  forceColdReason: "full rescan requested")
     }
 
     public func cancelScan() {
@@ -135,7 +136,8 @@ extension AppState {
     /// start's "what changed since the cache" question doesn't apply here.
     public func rescanVolume() {
         guard let volumeURL = selectedVolume else { return }
-        startScan(volumeURL: volumeURL, runPostScanAnalyses: false, forceCold: true)
+        startScan(volumeURL: volumeURL, runPostScanAnalyses: false, forceCold: true,
+                  forceColdReason: "rescan after DirWiz changed files")
     }
 
     /// Called once from the app's launch entry point. Restores the last successfully
@@ -244,6 +246,7 @@ extension AppState {
         volumeURL: URL,
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
         forceCold: Bool,
+        forceColdReason: String? = nil,
         preloadedCache: TreeCache.Payload? = nil
     ) {
         // Symmetric with `canStartHeavyTask(.applyChanges)` requiring `!isScanning`:
@@ -292,6 +295,10 @@ extension AppState {
             }
         } else {
             cached = nil
+            // A requested cold is not an anomaly, but an unexplained one reads as a bug -
+            // the scan-history line was showing bare COLD entries with no reason exactly
+            // here, which cost a debugging session to attribute. Record why.
+            noCacheReason = forceColdReason
         }
 
         // Publish the "preparing" ScanProgress now, unconditionally - see the supervision

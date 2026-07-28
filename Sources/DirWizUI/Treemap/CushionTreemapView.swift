@@ -110,7 +110,12 @@ public struct CushionTreemapView: NSViewRepresentable {
         coordinator.isScanning = isScanning
         coordinator.currentRootIndex = rootIndex
         coordinator.selectedNodeIndex = selectedNodeIndex
-        coordinator.renderStyle = renderStyle
+        if styleChanged {
+            coordinator.renderStyle = renderStyle
+            // Card nesting is applied at instance-build time, so a style switch must
+            // rebuild - without this, cards render un-nested until the next relayout.
+            coordinator.instanceBufferDirty = true
+        }
         if paletteChanged {
             coordinator.extensionPalette = extensionPalette
             coordinator.instanceBufferDirty = true
