@@ -94,6 +94,11 @@ section{padding:clamp(76px,10vw,120px) 0}
    specificity so .wrap's `padding:0 …` can't zero it out */
 section.wrap{padding:clamp(76px,10vw,120px) clamp(20px,4.5vw,36px)}
 #features{padding-top:clamp(20px,3vw,40px)}
+.beyond-shot{margin:34px 0 0}
+.beyond-shot img{width:100%;height:auto;border-radius:10px;border:1px solid var(--line);
+  box-shadow:0 12px 34px rgba(22,48,94,.10)}
+.beyond-shot figcaption{margin:0 0 12px;font-size:14.5px;color:var(--body);line-height:1.55}
+.beyond-shot figcaption b{color:var(--ink)}
 .band{background:var(--band);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 h1,h2,h3{color:var(--ink);text-wrap:balance}
 h2.sec{font-size:clamp(28px,4vw,38px);font-weight:700;letter-spacing:-.022em;line-height:1.15;margin:12px 0 14px}
@@ -464,6 +469,31 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
   </div>
 </div>
 
+
+
+<section class="wrap" id="beyond">
+  <h2 class="sec rv" style="--d:.05s">More than the map</h2>
+  <p class="sec-sub rv" style="--d:.1s">The treemap gets the poster, but most days you live in the
+  other tabs. All of it runs off the same scan - nothing below re-reads the disk.</p>
+
+  <figure class="beyond-shot rv" style="--d:.12s">
+    <figcaption><b>Search that answers as you type.</b> 56 results in 0.2&thinsp;ms here -
+    filter by file type, size band, modified date, or scope it to one folder.</figcaption>
+    <img src="assets/tab-search.webp" alt="DirWiz search tab: query results with paths and sizes, filter bar with type, size, and date filters" width="1440" height="458">
+  </figure>
+
+  <figure class="beyond-shot rv" style="--d:.14s">
+    <figcaption><b>Duplicates, guilty until proven.</b> Likely copies surface the moment a scan
+    ends, grouped by name and size - and nothing is deletable until the bytes match.</figcaption>
+    <img src="assets/tab-dupes.webp" alt="DirWiz duplicates tab: likely duplicate groups with paths and per-group Verify buttons" width="1440" height="458">
+  </figure>
+
+  <figure class="beyond-shot rv" style="--d:.16s">
+    <figcaption><b>Insights, collapsible.</b> Where the space went, how old it is, how it is
+    distributed - cards you can fold away and that stay folded.</figcaption>
+    <img src="assets/tab-insights.webp" alt="DirWiz insights tab: space categorization, file age distribution and size distribution cards" width="1440" height="410">
+  </figure>
+</section>
 
 <section class="wrap" id="duplicates">
   <div class="split">
