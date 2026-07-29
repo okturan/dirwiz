@@ -67,6 +67,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// rects with the old rects' colours - which is exactly the grey wash that shipped.
     private var layoutIdentity: UInt64 = 0
 
+    /// Nodes inside a collapsed folder in Folders style: drawn as part of their ancestor,
+    /// so a hit on them resolves upward to the block the user can actually see.
+    private var hiddenNodes: Set<UInt32> = []
+
     /// The style actually painted last frame. Card style falls back to cushion above
     /// `CardBudget.fallbackNodeThreshold`, where cards could only draw sub-pixel slivers;
     /// the view reads this to tell the user rather than silently degrading.
@@ -366,7 +370,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 ))
             }
             nestedRect.reserveCapacity(items.count)
-            for placed in CardNesting.place(items) { nestedRect[placed.nodeIndex] = placed }
+            var hidden = Set<UInt32>()
+            for placed in CardNesting.place(items) {
+                nestedRect[placed.nodeIndex] = placed
+                if placed.suppressed { hidden.insert(placed.nodeIndex) }
+            }
+            hiddenNodes = hidden
+        } else {
+            hiddenNodes = []
         }
 
         // Above the draw budget, card style keeps the largest rects and drops the tail.
@@ -424,10 +435,26 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             }
 
             var x = tmRect.x, y = tmRect.y, w = tmRect.width, h = tmRect.height
+            var isCollapsedFolder = false
             if nestCards, let placed = nestedRect[tmRect.nodeIndex] {
+                // Inside a folder too small to subdivide: that folder stands in for this.
+                if placed.suppressed { continue }
                 x = placed.x; y = placed.y; w = placed.width; h = placed.height
+                isCollapsedFolder = placed.collapsed
                 // Re-cull: nesting insets can push a rect below drawable size.
                 guard w >= 0.5, h >= 0.5 else { continue }
+            }
+
+            // Folders style: containers are structure, so they take a neutral fill instead
+            // of their dominant child's hue. Overriding here rather than in the resolver
+            // keeps the colour cache style-independent.
+            let drawColor: SIMD4<Float>
+            if nestCards && tmRect.isBackground && !isCollapsedFolder {
+                drawColor = CardGeometry.containerFill(depth: tmRect.depth)
+            } else {
+                // A collapsed folder is standing in for its contents, so it keeps the
+                // colour those contents gave it.
+                drawColor = baseColor
             }
 
             // Use cached coefficients instead of recomputing.
@@ -436,7 +463,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             instances.append(CushionInstance(
                 rect: SIMD4<Float>(x, y, w, h),
                 coefs: coefs,
-                color: baseColor
+                color: drawColor
             ))
             // Overlays (labels, selection border) must use the geometry actually drawn.
             // In Folders style the nesting transform insets children, so the raw layout
@@ -627,6 +654,24 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     // MARK: - Hit Testing
 
+    /// Maps a hit on a node hidden inside a collapsed folder to the folder actually drawn
+    /// there. The spatial grid deliberately still indexes full layout rects (so the gaps
+    /// between cards stay clickable); this is what keeps the ANSWER honest in Folders style,
+    /// where whole subtrees are represented by one block.
+    private func visibleAncestor(of hit: UInt32?) -> UInt32? {
+        guard let hit, !hiddenNodes.isEmpty else { return hit }
+        var current = hit
+        var guardCount = 0
+        while hiddenNodes.contains(current), guardCount < 64 {
+            let parent = cachedSnapshot.indices.contains(Int(current))
+                ? cachedSnapshot[Int(current)].parentIndex : FileNode.invalid
+            guard parent != FileNode.invalid, parent != current else { return current }
+            current = parent
+            guardCount += 1
+        }
+        return current
+    }
+
     /// Find which TreemapRect contains the given point (in logical coordinates).
     /// Uses the spatial grid for O(1) cell lookup instead of O(n) linear scan.
     /// Returns the node index, or nil if no rect contains the point.
@@ -636,7 +681,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
         // Use spatial grid if available for fast lookup.
         if let grid = spatialGrid {
-            return grid.hitTest(point: (x: px, y: py), rects: cachedLayout)
+            return visibleAncestor(of: grid.hitTest(point: (x: px, y: py), rects: cachedLayout))
         }
 
         // Fallback: linear scan in reverse order (deeper rects first).

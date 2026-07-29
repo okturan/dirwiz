@@ -507,3 +507,89 @@ struct FolderLabelTests {
         #expect(CardGeometry.headerHeight(width: 200, height: 30) == 0)
     }
 }
+
+/// The subdivide gate, taken from SpaceMonger 1.4's `minsizes` table. Its rule: only
+/// subdivide a folder while it can still show its contents; otherwise draw one block.
+@Suite("Subdivide Gate Tests")
+struct SubdivideGateTests {
+
+    private func item(_ node: UInt32, parent: UInt32, _ w: Float, _ h: Float,
+                      container: Bool) -> CardNesting.Item {
+        CardNesting.Item(nodeIndex: node, parentIndex: parent, x: 0, y: 0,
+                         width: w, height: h, isContainer: container)
+    }
+
+    @Test("The gate matches SpaceMonger's default density row")
+    func gateMatchesReference() {
+        #expect(CardGeometry.minSubdivideWidth == 32)
+        #expect(CardGeometry.minSubdivideHeight == 24)
+        #expect(CardGeometry.canSubdivide(width: 40, height: 30))
+        #expect(!CardGeometry.canSubdivide(width: 30, height: 30))
+        #expect(!CardGeometry.canSubdivide(width: 40, height: 20))
+    }
+
+    /// A folder below the gate is still DRAWN - it stands in for its contents - but nothing
+    /// inside it is. Drawing both would put invisible slivers on top of the block.
+    @Test("A too-small folder is drawn once and its contents are not")
+    func smallFolderCollapses() throws {
+        let placed = CardNesting.place([
+            item(0, parent: 0, 400, 300, container: true),
+            item(1, parent: 0, 20, 16, container: true),   // below the gate
+            item(2, parent: 1, 20, 16, container: false),  // inside it
+            item(3, parent: 2, 20, 16, container: false),  // deeper still
+        ])
+        let small = try #require(placed.first { $0.nodeIndex == 1 })
+        #expect(small.collapsed, "the folder itself is drawn as one block")
+        #expect(!small.suppressed)
+
+        for hidden in [2, 3] {
+            let p = try #require(placed.first { $0.nodeIndex == UInt32(hidden) })
+            #expect(p.suppressed, "everything inside a collapsed folder is suppressed")
+        }
+    }
+
+    /// Suppression must propagate to the whole subtree, not just direct children -
+    /// otherwise a grandchild draws on top of the block that is meant to represent it.
+    @Test("Suppression reaches the entire subtree")
+    func suppressionPropagates() throws {
+        var items = [item(0, parent: 0, 400, 300, container: true),
+                     item(1, parent: 0, 18, 14, container: true)]
+        // a chain 1 -> 2 -> 3 -> ... -> 8
+        for n in 2...8 { items.append(item(UInt32(n), parent: UInt32(n - 1), 18, 14, container: true)) }
+        let placed = CardNesting.place(items)
+        for n in 2...8 {
+            let p = try #require(placed.first { $0.nodeIndex == UInt32(n) })
+            #expect(p.suppressed, "node \(n) is inside a collapsed ancestor")
+        }
+    }
+
+    @Test("A folder above the gate still subdivides normally")
+    func largeFolderSubdivides() throws {
+        let placed = CardNesting.place([
+            item(0, parent: 0, 400, 300, container: true),
+            item(1, parent: 0, 200, 200, container: true),
+            item(2, parent: 1, 200, 200, container: false),
+        ])
+        let child = try #require(placed.first { $0.nodeIndex == 2 })
+        #expect(!child.suppressed, "a roomy folder shows its contents")
+        let mid = try #require(placed.first { $0.nodeIndex == 1 })
+        #expect(!mid.collapsed)
+        #expect(child.y > mid.y, "and reserves its header strip")
+    }
+
+    /// Folder chrome varies by depth so stacked levels separate; files keep extension
+    /// colour, which is where the meaning lives.
+    @Test("Container fill varies with depth and stays neutral")
+    func containerFillByDepth() {
+        let a = CardGeometry.containerFill(depth: 0)
+        let b = CardGeometry.containerFill(depth: 3)
+        #expect(a != b, "nesting levels must be distinguishable")
+        for depth in 0..<16 {
+            let c = CardGeometry.containerFill(depth: depth)
+            // neutral: the three channels stay close together, so it never reads as a hue
+            let spread = max(c.x, max(c.y, c.z)) - min(c.x, min(c.y, c.z))
+            #expect(spread < 0.12, "container chrome must not compete with file colour")
+            #expect(c.x > 0.15 && c.x < 0.65, "and must stay a mid-dark panel")
+        }
+    }
+}

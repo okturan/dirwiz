@@ -59,6 +59,43 @@ public enum CardGeometry {
     public static let minHeightForHeader: Float = 56
     public static let headerHeight: Float = 18
 
+    /// Folders style paints containers as neutral chrome rather than in their dominant
+    /// child's colour. A directory tinted bright magenta competes with the files inside it
+    /// for attention and turns nested chains into stacked colour bands; a slate panel reads
+    /// as structure and lets the files carry the only colour that means anything.
+    ///
+    /// Applied at instance-build time, NOT in the colour resolver, so the resolved-colour
+    /// cache stays independent of render style (a style-dependent cache key would put the
+    /// 70ms-per-toggle cost straight back).
+    public static let containerFill = SIMD4<Float>(0.29, 0.31, 0.36, 1.0)
+
+    /// Below this, a folder is drawn as ONE solid block and its contents are not drawn.
+    ///
+    /// Taken from SpaceMonger 1.4 (`FolderView.cpp`, `minsizes` density table, default row
+    /// `{32, 24}`): it only subdivides a folder when `w > hmin && h > vmin`, otherwise the
+    /// folder becomes a single labelled block. DirWiz's layout recurses down to a 1pt
+    /// `minPixelSize`, which is right for cushions - lighting survives extreme density - but
+    /// in Folders style it produces regions of unreadable confetti where rounding, gaps and
+    /// frames all collapse into mush. A folder too small to show its contents usefully is
+    /// better drawn as one block that says how big it is.
+    public static let minSubdivideWidth: Float = 32
+    public static let minSubdivideHeight: Float = 24
+
+    public static func canSubdivide(width: Float, height: Float) -> Bool {
+        width > minSubdivideWidth && height > minSubdivideHeight
+    }
+
+    /// Depth-varied container fill. SpaceMonger colours by nesting depth
+    /// (`BoxColors[depth & 7]` with bright/dark variants) rather than by file type, which is
+    /// what makes its nesting legible. DirWiz keeps extension colour for FILES - that is the
+    /// WinDirStat inheritance and the point of the map - so depth only modulates the neutral
+    /// chrome of folder panels, giving stacked levels separation without stealing meaning
+    /// from the colours that carry data.
+    public static func containerFill(depth: Int) -> SIMD4<Float> {
+        let step = Float(depth & 7) * 0.021
+        return SIMD4<Float>(0.25 + step, 0.27 + step, 0.32 + step, 1.0)
+    }
+
     public static func headerHeight(width: Float, height: Float) -> Float {
         (width >= minWidthForHeader && height >= minHeightForHeader) ? headerHeight : 0
     }
@@ -155,6 +192,11 @@ public enum CardNesting {
     public struct Placed: Sendable, Equatable {
         public var nodeIndex: UInt32
         public var x: Float, y: Float, width: Float, height: Float
+        /// A folder too small to subdivide: draw it as one solid block, in its own colour,
+        /// standing in for everything inside it.
+        public var collapsed: Bool = false
+        /// Inside a collapsed folder, so not drawn at all.
+        public var suppressed: Bool = false
     }
 
     /// `items` must be in layout order (parents before their children).
@@ -164,7 +206,18 @@ public enum CardNesting {
         var out: [Placed] = []
         out.reserveCapacity(items.count)
 
+        // Folders whose contents are not drawn, plus everything beneath them. The layout
+        // emits a parent before its children, so one forward pass propagates this.
+        var hidden = Set<UInt32>()
+
         for item in items {
+            if item.parentIndex != item.nodeIndex, hidden.contains(item.parentIndex) {
+                hidden.insert(item.nodeIndex)
+                out.append(Placed(nodeIndex: item.nodeIndex, x: item.x, y: item.y,
+                                  width: item.width, height: item.height, suppressed: true))
+                continue
+            }
+
             var x = item.x, y = item.y, w = item.width, h = item.height
             if item.parentIndex != item.nodeIndex,
                let box = boxes[item.parentIndex], box.outer.width > 0, box.outer.height > 0 {
@@ -175,14 +228,24 @@ public enum CardNesting {
                 w *= sx
                 h *= sy
             }
-            if item.isContainer,
-               let inner = CardGeometry.innerRect(x: x, y: y, width: w, height: h) {
-                // Keyed on the ORIGINAL rect: children arrive in original coordinates, so
-                // mapping original -> inner is what composes. Using the remapped rect as
-                // `outer` would apply the parent's own inset twice to every child.
-                boxes[item.nodeIndex] = (outer: item, inner: inner)
+
+            // SpaceMonger's rule: subdivide only while the folder can still show its
+            // contents; otherwise draw it as one block and stop.
+            var collapsed = false
+            if item.isContainer {
+                if CardGeometry.canSubdivide(width: w, height: h),
+                   let inner = CardGeometry.innerRect(x: x, y: y, width: w, height: h) {
+                    // Keyed on the ORIGINAL rect: children arrive in original coordinates,
+                    // so mapping original -> inner is what composes. Using the remapped
+                    // rect as `outer` would apply the parent's inset twice to every child.
+                    boxes[item.nodeIndex] = (outer: item, inner: inner)
+                } else {
+                    collapsed = true
+                    hidden.insert(item.nodeIndex)
+                }
             }
-            out.append(Placed(nodeIndex: item.nodeIndex, x: x, y: y, width: w, height: h))
+            out.append(Placed(nodeIndex: item.nodeIndex, x: x, y: y, width: w, height: h,
+                              collapsed: collapsed))
         }
         return out
     }

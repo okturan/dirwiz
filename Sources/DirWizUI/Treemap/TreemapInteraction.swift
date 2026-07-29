@@ -267,9 +267,13 @@ public struct InteractiveTreemapView: View {
                     // Folders style reserves a header strip per container for exactly this.
                     // Cushions stays a pure file view: a chip there would sit on top of a
                     // child tile, since cushion children fill their parent edge to edge.
+                    // The filter MUST be the geometry's own header test, not an
+                    // approximation of it: a container between 40 and 56pt tall reserves
+                    // no strip, so a chip drawn there lands on top of its first child.
                     let containers = appState.treemapRenderStyle == .cards
                         ? rects
-                            .filter { $0.isBackground && $0.width > 96 && $0.height > 40 }
+                            .filter { $0.isBackground
+                                && CardGeometry.headerHeight(width: $0.width, height: $0.height) > 0 }
                             .sorted { $0.width * $0.height > $1.width * $1.height }
                             .prefix(24)
                         : [].prefix(0)
