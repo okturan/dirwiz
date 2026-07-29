@@ -66,6 +66,7 @@ struct InsightsRestructureTests {
         #expect(!names.contains("Space"))
         #expect(DetailTab(rawValue: "Space") == nil)
         #expect(names.contains("Insights"), "the analysis has to be reachable somewhere")
+        #expect(!names.contains("Extensions"), "retired in favour of the sidebar legend")
     }
 
     /// `activeTab` is not part of saved session state, so removing a case cannot strand a

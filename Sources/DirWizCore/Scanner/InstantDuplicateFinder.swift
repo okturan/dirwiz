@@ -7,7 +7,22 @@ import Foundation
 /// them by accident - the compiler enforces the gate that a boolean would leave to
 /// reviewer discipline. Files only become a `DuplicateGroup` by passing byte verification.
 public struct InstantDuplicateCandidate: Identifiable, Sendable {
-    public let id = UUID()
+    /// Derived from the group's CONTENT, not random.
+    ///
+    /// A random per-instance id looked fine until the living view re-ran the grouping: the
+    /// same group came back with a new id, so "compared - not duplicates" markers detached
+    /// from their rows and the answer silently reverted to an unanswered button. Identity
+    /// here means "the same files", which survives regrouping.
+    public var id: String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        func mix(_ text: String) {
+            for byte in text.utf8 { hash ^= UInt64(byte); hash &*= 0x100000001b3 }
+        }
+        mix(name)
+        for path in paths.sorted() { mix(path) }
+        return "\(fileSize)-\(String(hash, radix: 16))"
+    }
+
     public let fileSize: UInt64
     /// The shared name, as displayed (original case of the first member).
     public let name: String

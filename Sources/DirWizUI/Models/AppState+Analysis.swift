@@ -510,11 +510,21 @@ extension AppState {
                     // Same name, same size, different bytes - a real answer, so say so
                     // instead of leaving a button that appears to have done nothing.
                     self.duplicate.rejectedCandidateIDs.insert(candidate.id)
+                    self.duplicate.lastVerifyOutcome =
+                        "\(candidate.name): same size, but the contents differ - not duplicates."
                     return
                 }
                 self.duplicate.duplicateGroups.append(contentsOf: confirmed)
                 self.duplicate.duplicateGroups.sort { $0.wastedSpace > $1.wastedSpace }
                 self.duplicate.instantCandidates.removeAll { $0.id == candidate.id }
+                // Point at the result: the row leaves the candidate list and appears below
+                // as a confirmed group, which reads as "it vanished" without this.
+                for group in confirmed { self.duplicate.lastConfirmedGroupIDs.insert(group.id) }
+                self.duplicate.duplicateExpandedGroups.formUnion(confirmed.map(\.id))
+                let reclaimable = confirmed.reduce(UInt64(0)) { $0 + $1.wastedSpace }
+                self.duplicate.lastVerifyOutcome =
+                    "\(candidate.name): byte-for-byte identical. "
+                    + SizeFormatter.shared.format(reclaimable) + " can be reclaimed - see Confirmed below."
             }
         }
     }

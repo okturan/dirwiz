@@ -411,3 +411,29 @@ struct DuplicateFinderCharacterizationTests {
         #expect(await DuplicateFinder(minimumFileSize: 1).findDuplicates(in: await scan(root)).isEmpty)
     }
 }
+
+/// Candidate identity. The living view re-runs instant grouping after every splice, so a
+/// candidate's id must survive regrouping - otherwise a "compared, not duplicates" answer
+/// detaches from its row and silently reverts to an unanswered button.
+@Suite("Instant Duplicate Identity Tests")
+struct InstantDuplicateIdentityTests {
+
+    @Test("The same group regrouped keeps the same id")
+    func idIsStableAcrossRegrouping() {
+        let a = InstantDuplicateCandidate(fileSize: 4_242, name: "report.pdf",
+                                          paths: ["/b/report.pdf", "/a/report.pdf"])
+        // Same files, discovered in a different order by a later pass.
+        let b = InstantDuplicateCandidate(fileSize: 4_242, name: "report.pdf",
+                                          paths: ["/a/report.pdf", "/b/report.pdf"])
+        #expect(a.id == b.id, "path order must not change identity")
+    }
+
+    @Test("Different groups get different ids")
+    func idDistinguishesGroups() {
+        let base = InstantDuplicateCandidate(fileSize: 100, name: "x.bin", paths: ["/a/x.bin", "/b/x.bin"])
+        let otherSize = InstantDuplicateCandidate(fileSize: 200, name: "x.bin", paths: ["/a/x.bin", "/b/x.bin"])
+        let otherName = InstantDuplicateCandidate(fileSize: 100, name: "y.bin", paths: ["/a/x.bin", "/b/x.bin"])
+        let otherPaths = InstantDuplicateCandidate(fileSize: 100, name: "x.bin", paths: ["/a/x.bin", "/c/x.bin"])
+        #expect(Set([base.id, otherSize.id, otherName.id, otherPaths.id]).count == 4)
+    }
+}

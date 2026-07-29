@@ -29,6 +29,32 @@ struct ContentView: View {
             }
             .navigationTitle("")
             .sheet(isPresented: $showPinSheet) { pinSheet }
+            .sheet(isPresented: $appState.showAllFileTypes) {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("All file types").font(.headline)
+                        Spacer()
+                        Button("Done") { appState.showAllFileTypes = false }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(12)
+                    Divider()
+                    ExtensionListView(
+                        fileTypeStats: appState.fileTypeStats,
+                        totalSize: appState.fileTree?.rootDisplaySize ?? 0,
+                        extensionPalette: appState.extensionPalette,
+                        onDrillDown: { stat in
+                            let model = ExtensionRowModel(
+                                id: stat.extensionHash, rawName: stat.extensionName,
+                                color: .zero, totalSize: 0, fileCount: 0)
+                            appState.showAllFileTypes = false
+                            appState.drillDownToExtension(
+                                hash: model.id, displayName: model.displayName)
+                        }
+                    )
+                }
+                .frame(width: 720, height: 560)
+            }
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     HStack(spacing: 6) {
@@ -593,22 +619,6 @@ struct ContentView: View {
                                 switch appState.activeTab {
                                 case .treeView:
                                     TreeTableView(appState: appState)
-                                case .extensions:
-                                    ExtensionListView(
-                                        fileTypeStats: appState.fileTypeStats,
-                                        totalSize: appState.fileTree?.rootDisplaySize ?? 0,
-                                        extensionPalette: appState.extensionPalette,
-                                        onDrillDown: { stat in
-                                            let model = ExtensionRowModel(
-                                                id: stat.extensionHash,
-                                                rawName: stat.extensionName,
-                                                color: .zero, totalSize: 0, fileCount: 0
-                                            )
-                                            appState.drillDownToExtension(
-                                                hash: model.id, displayName: model.displayName
-                                            )
-                                        }
-                                    )
                                 case .duplicates:
                                     DuplicateFilesView(appState: appState)
                                 case .hardlinks:
@@ -657,7 +667,7 @@ struct ContentView: View {
                     onSelect: { model in
                         appState.drillDownToExtension(hash: model.id, displayName: model.displayName)
                     },
-                    onSeeAll: { appState.activeTab = .extensions }
+                    onSeeAll: { appState.showAllFileTypes = true }
                 )
                 .frame(width: 220)
             }

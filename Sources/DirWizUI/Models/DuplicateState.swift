@@ -43,12 +43,18 @@ public final class DuplicateState {
     public var instantToken: UInt64 = 0
 
     /// Candidate ids currently being byte-verified.
-    public var verifyingCandidateIDs: Set<UUID> = []
+    public var verifyingCandidateIDs: Set<String> = []
+
+    /// Groups confirmed in this session, so the UI can point at what a Verify produced
+    /// instead of leaving the row to vanish silently.
+    public var lastConfirmedGroupIDs: Set<UUID> = []
+    /// What the most recent verification found, phrased for a human.
+    public var lastVerifyOutcome: String?
 
     /// Candidate ids that were verified and produced NO identical group - same name, same
     /// size, different bytes. Surfaced so a rejected candidate reads as a checked answer
     /// rather than as a button that did nothing.
-    public var rejectedCandidateIDs: Set<UUID> = []
+    public var rejectedCandidateIDs: Set<String> = []
 
     /// Files considered by the last instant pass, for the "scanned N files" line.
     public var instantFilesConsidered: Int = 0
@@ -91,6 +97,8 @@ public final class DuplicateState {
         instantToken &+= 1
         verifyingCandidateIDs = []
         rejectedCandidateIDs = []
+        lastConfirmedGroupIDs = []
+        lastVerifyOutcome = nil
         instantFilesConsidered = 0
         instantElapsedMs = 0
     }

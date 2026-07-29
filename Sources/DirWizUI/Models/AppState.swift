@@ -90,6 +90,11 @@ public final class AppState {
         }
     }
 
+    /// Presents the full file-type table. It used to be a whole tab, which duplicated the
+    /// always-visible sidebar legend; the legend is now the only file-type surface and this
+    /// sheet is its "see everything" affordance.
+    public var showAllFileTypes: Bool = false
+
     static let renderStyleKey = "DirWizTreemapRenderStyle"
 
     /// Whether the bottom treemap pane is collapsed to give the detail pane full height.
@@ -443,7 +448,9 @@ extension AppState {
         // "Other" aggregates many extensions, so there is no single filter to apply.
         // Send the user to the full table instead of a search that cannot be expressed.
         guard hash != ExtensionRowModel.otherID else {
-            activeTab = .extensions
+            // "Other" aggregates many extensions, so no single filter expresses it -
+            // show the full table instead of a search that is guaranteed empty.
+            showAllFileTypes = true
             return
         }
         search.extensionFilter = hash
@@ -468,7 +475,6 @@ extension AppState {
 
 public enum DetailTab: String, CaseIterable, Identifiable {
     case treeView = "Tree View"
-    case extensions = "Extensions"
     case duplicates = "Duplicates"
     case hardlinks = "Hardlinks"
     case search = "Search"

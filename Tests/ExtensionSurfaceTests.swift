@@ -63,7 +63,7 @@ struct ExtensionSurfaceTests {
     func drillDownSetsFilterAndTab() {
         let state = AppState()
         state.search.searchQuery = "leftover query"
-        state.activeTab = .extensions
+        state.activeTab = .treeView
 
         state.drillDownToExtension(hash: 99, displayName: ".swift")
 
@@ -75,8 +75,9 @@ struct ExtensionSurfaceTests {
     }
 
     /// "Other" is an aggregate of many extensions, so there is no filter that expresses it.
-    /// Sending it to Search would produce a guaranteed-empty result.
-    @Test("Drilling into Other opens the Extensions tab instead of an empty search")
+    /// Sending it to Search would produce a guaranteed-empty result; it opens the full
+    /// file-type table instead (a sheet now that the Extensions TAB is retired).
+    @Test("Drilling into Other opens the full file-type list instead of an empty search")
     @MainActor
     func drillDownOtherGoesToTable() {
         let state = AppState()
@@ -86,8 +87,22 @@ struct ExtensionSurfaceTests {
 
         state.drillDownToExtension(hash: ExtensionRowModel.otherID, displayName: "Other")
 
-        #expect(state.activeTab == .extensions)
+        #expect(state.showAllFileTypes, "Other must lead somewhere it can actually be explored")
+        #expect(state.activeTab == .treeView, "and must not hijack the current tab")
         #expect(state.search.extensionFilter == 7, "an existing filter must not be clobbered")
         #expect(state.search.extensionFilterName == ".png")
+    }
+
+    /// The sidebar legend and the tab were two surfaces for one thing. The tab is gone; the
+    /// legend's "see all" sheet keeps the full sortable table one click away.
+    @Test("The Extensions tab is retired")
+    @MainActor
+    func extensionsTabRetired() {
+        let names = DetailTab.allCases.map(\.rawValue)
+        #expect(!names.contains("Extensions"))
+        #expect(DetailTab(rawValue: "Extensions") == nil)
+
+        let state = AppState()
+        #expect(!state.showAllFileTypes, "the sheet starts closed")
     }
 }

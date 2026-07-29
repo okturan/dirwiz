@@ -33,6 +33,11 @@ public enum CardGeometry {
     /// Below this, a rect is drawn as plain fill: no radius, no gap.
     public static let minSideForDecoration: Float = 6
 
+    /// Card style skips tiles below this. Deliberately sub-pixel: culling anything a user
+    /// can actually see punches grey container holes through the map, and the colour cache
+    /// already removed the cost that culling was introduced to pay for.
+    public static let minVisibleSide: Float = 0.9
+
     public static func radius(minSide: Float) -> Float {
         guard minSide >= minSideForDecoration else { return 0 }
         return min(maxRadius, minSide * 0.12)
@@ -97,9 +102,14 @@ public enum CardGeometry {
 /// habit of surfacing the reason instead of silently degrading.
 public enum CardBudget {
     /// Above this, card style cannot draw individual nodes legibly at typical viewport sizes.
-    public static let maxDrawnNodes = 4_000
+    public static let maxDrawnNodes = 40_000
     /// Above this, card style is abandoned entirely for the view.
-    public static let fallbackNodeThreshold = 20_000
+    ///
+    /// Raised from 20,000 after measuring the real cost: 100k instances render in ~3ms on
+    /// the GPU, and tiny tiles are now culled before they reach it. The old ceiling meant a
+    /// 33k-instance volume scan silently fell back to cushion - the Cards button cost 70ms
+    /// and changed nothing on screen.
+    public static let fallbackNodeThreshold = 250_000
 
     public enum Decision: Equatable, Sendable {
         /// Draw every node as a card.

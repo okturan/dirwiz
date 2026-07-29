@@ -46,6 +46,22 @@ public struct DuplicateFilesView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         candidateSection
                         if !filteredGroups.isEmpty {
+                            HStack(spacing: 7) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundStyle(.green)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Confirmed duplicates - compared byte for byte")
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("Safe to clean up: DirWiz re-reads each file at the "
+                                         + "moment you act, and never removes the last copy.")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.top, 12)
+                            .padding(.bottom, 6)
                             duplicateList
                         }
                     }
@@ -233,26 +249,55 @@ public struct DuplicateFilesView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "wand.and.stars")
                         .foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Likely duplicates - same name & size, not content-verified")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Possible duplicates - not checked yet")
                             .font(.system(size: 12, weight: .semibold))
+                        Text("These files share a name and a size, which usually means a copy - "
+                             + "but DirWiz has not read their contents. "
+                             + "Comparing reads both files end to end; only files that match "
+                             + "byte for byte can be cleaned up.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text("\(visibleCandidates.count) groups · up to "
                              + SizeFormatter.shared.format(
                                  visibleCandidates.reduce(0) { $0 + $1.potentialWaste })
-                             + " reclaimable if identical")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                             + " reclaimable if they match")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
                     }
                     Spacer()
                     if appState.duplicate.isInstantGroupingRunning {
                         ProgressView().controlSize(.small)
                     }
-                    Button("Verify All") { appState.verifyAllInstantCandidates() }
+                    Button("Compare all") { appState.verifyAllInstantCandidates() }
                         .font(.system(size: 11))
+                        .help("Read every candidate group end to end and confirm which ones really are duplicates")
                         .disabled(!appState.duplicate.verifyingCandidateIDs.isEmpty)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
+
+                if let outcome = appState.duplicate.lastVerifyOutcome {
+                    HStack(spacing: 7) {
+                        Image(systemName: outcome.contains("identical")
+                              ? "checkmark.circle.fill" : "info.circle.fill")
+                            .foregroundStyle(outcome.contains("identical") ? .green : .secondary)
+                        Text(outcome).font(.system(size: 11))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button {
+                            appState.duplicate.lastVerifyOutcome = nil
+                        } label: { Image(systemName: "xmark").font(.system(size: 9)) }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 6)
+                        .fill(outcome.contains("identical")
+                              ? Color.green.opacity(0.10) : Color.secondary.opacity(0.08)))
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+                }
 
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(visibleCandidates.prefix(200)) { candidate in
@@ -300,17 +345,24 @@ public struct DuplicateFilesView: View {
                     .foregroundStyle(.secondary)
 
                 if isVerifying {
-                    ProgressView().controlSize(.small)
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.small)
+                        Text("Reading \(candidate.paths.count) files…")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
                 } else if wasRejected {
                     // A checked answer, not a no-op: the files differ despite matching.
                     HStack(spacing: 3) {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 10))
-                        Text("Different content").font(.system(size: 10))
+                        Text("Not duplicates").font(.system(size: 10))
                     }
                     .foregroundStyle(.secondary)
+                    .help("Same name and size, but the bytes differ - nothing to reclaim here")
                 } else {
-                    Button("Verify") { appState.verifyInstantCandidate(candidate) }
+                    Button("Compare bytes") { appState.verifyInstantCandidate(candidate) }
                         .font(.system(size: 11))
+                        .help("Read all \(candidate.paths.count) files end to end and check whether they are identical")
                 }
             }
 

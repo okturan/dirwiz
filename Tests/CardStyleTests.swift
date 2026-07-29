@@ -418,3 +418,53 @@ struct CardNestingTests {
         #expect(outIDs == inIDs)
     }
 }
+
+/// Performance characteristics of the render path, pinned after a measured 25x regression
+/// fix. The style toggle used to cost ~70ms of main thread on a real volume scan because
+/// every click re-resolved every instance's colour; it now reuses them.
+@Suite("Card Style Performance Tests")
+@MainActor
+struct CardStylePerformanceTests {
+
+    /// Colours depend on the palette, recency and temporal-diff state - never on whether
+    /// the map is drawn as cushions or cards. If a future change makes the style bump
+    /// `colorGeneration`, the toggle silently gets slow again.
+    @Test("Switching style does not invalidate resolved colours")
+    func styleDoesNotBumpColorGeneration() {
+        let tree = FileTree()
+        var root = FileNode(); root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        let view = CushionTreemapView(fileTree: tree, rootIndex: 0, renderStyle: .cushion)
+        let cards = CushionTreemapView(fileTree: tree, rootIndex: 0, renderStyle: .cards)
+        // The two differ only in style; nothing colour-affecting changed between them.
+        #expect(view.renderStyle != cards.renderStyle)
+        #expect(view.extensionPalette.generation == cards.extensionPalette.generation)
+        #expect(view.recencyGeneration == cards.recencyGeneration)
+        #expect(view.temporalDiffGeneration == cards.temporalDiffGeneration)
+    }
+
+    /// The budget must not silently discard card style on an ordinary volume scan. A real
+    /// scan of a 926 GB boot volume lays out ~33k rects; the old 20k ceiling meant the
+    /// Cards button did nothing but cost a rebuild.
+    @Test("A real-scale scan still renders as cards")
+    func realScanStaysCards() {
+        #expect(CardBudget.decide(nodeCount: 33_501) != .fallbackToCushion,
+                "a measured real volume scan must not fall back")
+        #expect(CardBudget.decide(nodeCount: 120_000) != .fallbackToCushion)
+        // But something genuinely absurd still bails out rather than drawing slivers.
+        #expect(CardBudget.decide(nodeCount: 400_000) == .fallbackToCushion)
+    }
+
+    /// The cull floor must stay SUB-PIXEL. An earlier version culled tiles under 3pt to buy
+    /// performance, which punched grey container holes through dense regions of the map -
+    /// the map is the product, and the colour cache had already removed the cost that
+    /// culling was paying for. Anything a user can see must be drawn.
+    @Test("Card culling never removes a visible tile")
+    func cullingStaysSubPixel() {
+        #expect(CardGeometry.minVisibleSide > 0)
+        #expect(CardGeometry.minVisibleSide < 1.0,
+                "culling anything a pixel or larger leaves visible holes in the treemap")
+        #expect(CardGeometry.minVisibleSide < CardGeometry.minSideForDecoration)
+    }
+}

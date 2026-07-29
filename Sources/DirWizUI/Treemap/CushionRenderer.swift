@@ -52,6 +52,21 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// testing, zoom and the spatial index keep working off one set of rects regardless.
     var renderStyle: TreemapRenderStyle = .cushion
 
+    /// Bumped by the view whenever anything COLOUR-affecting changes (palette, recency,
+    /// temporal diff). Style changes deliberately do not bump it: switching cushion to
+    /// cards repaints the same colours, and re-resolving them was costing 70ms of main
+    /// thread per click - the whole reason the toggle felt slow.
+    var colorGeneration: UInt64 = 0
+    private var cachedColors: [SIMD4<Float>] = []
+    private var cachedColorsGeneration: UInt64 = .max
+    private var cachedColorsLayoutIdentity: UInt64 = .max
+
+    /// Bumped every time `cachedLayout` is replaced or rescaled. The colour cache is keyed
+    /// on it as well as on `colorGeneration`: rect COUNT is not identity, and a relayout
+    /// that happens to produce the same number of rects would otherwise repaint the new
+    /// rects with the old rects' colours - which is exactly the grey wash that shipped.
+    private var layoutIdentity: UInt64 = 0
+
     /// The style actually painted last frame. Card style falls back to cushion above
     /// `CardBudget.fallbackNodeThreshold`, where cards could only draw sub-pixel slivers;
     /// the view reads this to tell the user rather than silently degrading.
@@ -192,6 +207,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             }
             spatialGrid = nil // Stale; rebuilt when background layout completes.
             instanceBufferDirty = true
+            layoutIdentity &+= 1
         }
 
         currentViewportSize = viewportSize
@@ -211,6 +227,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             guard let self else { return }
             guard self.currentRootIndex == rootIndex else { return }
             self.cachedLayout = layout
+            self.layoutIdentity &+= 1
             self.cachedSnapshot = snapshot
             self.spatialGrid = grid
             self.instanceBufferDirty = true
@@ -297,6 +314,17 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             }
         }
 
+        // Colours are the expensive part (directory colours walk their children), and they
+        // are independent of render style. Resolve once per layout/palette generation and
+        // reuse across style toggles and re-draws.
+        let colorsValid = cachedColorsGeneration == colorGeneration
+            && cachedColorsLayoutIdentity == layoutIdentity
+            && cachedColors.count == layoutCount
+        var colors: [SIMD4<Float>] = colorsValid ? cachedColors : []
+        if !colorsValid {
+            colors = [SIMD4<Float>](repeating: .zero, count: layoutCount)
+        }
+
         let resolver = TreemapColorResolver(
             palette: extensionPalette,
             recencyFactors: recencyFactors,
@@ -319,6 +347,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         // between cards stay clickable. Cushion style does none of this.
         let nestCards = (renderStyle == .cards)
             && CardBudget.decide(nodeCount: visibleCount) != .fallbackToCushion
+        let cullTinyCards = (renderStyle == .cards)
 
         // Precomputed by the pure `CardNesting` transform, keyed by node index.
         var nestedRect: [UInt32: CardNesting.Placed] = [:]
@@ -361,15 +390,32 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         for i in 0..<layoutCount {
             let tmRect = cachedLayout[i]
 
-            // Sub-pixel culling: skip rects smaller than half a pixel in either dimension.
-            guard tmRect.width >= 0.5, tmRect.height >= 0.5 else { continue }
-
             let nodeIdx = Int(tmRect.nodeIndex)
             guard nodeIdx < nodes.count else { continue }
+
+            // Resolve (and cache) the colour BEFORE any culling decision, so the cache
+            // covers every layout index and a later pass never reads an unfilled slot.
+            let baseColor: SIMD4<Float>
+            if colorsValid {
+                baseColor = colors[i]
+            } else {
+                baseColor = resolver.resolveColor(for: tmRect, nodes: nodes, scratchSizeByExt: &scratchSizeByExt)
+                colors[i] = baseColor
+            }
+
+            // Sub-pixel culling: skip rects smaller than half a pixel in either dimension.
+            guard tmRect.width >= 0.5, tmRect.height >= 0.5 else { continue }
 
             // Containers are always kept - dropping one would erase the backdrop that makes
             // its aggregated children read as contents rather than as a hole.
             if areaFloor > 0, !tmRect.isBackground, tmRect.width * tmRect.height < areaFloor {
+                continue
+            }
+            // Card style draws detail (rounding, gap, container frame) that a tile a few
+            // pixels across cannot show - it becomes a smudge that costs a full instance.
+            // Dropping those is both faster AND cleaner: the parent container shows through.
+            if cullTinyCards, min(tmRect.width, tmRect.height) < CardGeometry.minVisibleSide,
+               !tmRect.isBackground {
                 continue
             }
 
@@ -379,8 +425,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 // Re-cull: nesting insets can push a rect below drawable size.
                 guard w >= 0.5, h >= 0.5 else { continue }
             }
-
-            let baseColor = resolver.resolveColor(for: tmRect, nodes: nodes, scratchSizeByExt: &scratchSizeByExt)
 
             // Use cached coefficients instead of recomputing.
             let coefs = tmRect.cachedCoefs
@@ -392,6 +436,16 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             ))
             lookup[tmRect.nodeIndex] = writeIdx
             writeIdx += 1
+        }
+
+        // A partial rebuild (aggregation/culling skips rects) must not poison the cache;
+        // only a full pass produces a colour for every layout index.
+        // Every layout index got a colour: the loop visits all of them and only SKIPS
+        // emitting an instance, so the cache is complete regardless of culling.
+        if !colorsValid {
+            cachedColors = colors
+            cachedColorsGeneration = colorGeneration
+            cachedColorsLayoutIdentity = layoutIdentity
         }
 
         instanceCount = instances.count

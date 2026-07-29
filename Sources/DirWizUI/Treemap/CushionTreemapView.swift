@@ -117,16 +117,19 @@ public struct CushionTreemapView: NSViewRepresentable {
             coordinator.instanceBufferDirty = true
         }
         if paletteChanged {
+            coordinator.colorGeneration &+= 1
             coordinator.extensionPalette = extensionPalette
             coordinator.instanceBufferDirty = true
         }
         if recencyChanged {
+            coordinator.colorGeneration &+= 1
             coordinator.recencyFactors = recencyFactors
             coordinator.recencyGeneration = recencyGeneration
             coordinator.isRecencyOverlayEnabled = isRecencyOverlayEnabled
             coordinator.instanceBufferDirty = true
         }
         if temporalChanged {
+            coordinator.colorGeneration &+= 1
             coordinator.temporalDiffKinds = temporalDiffKinds
             coordinator.temporalDiffStrengths = temporalDiffStrengths
             coordinator.isTemporalDiffEnabled = isTemporalDiffEnabled
