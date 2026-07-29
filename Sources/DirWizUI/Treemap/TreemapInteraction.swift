@@ -168,19 +168,17 @@ public struct InteractiveTreemapView: View {
 
     /// Cushion vs. card painting. Purely visual - it changes no geometry, so switching
     /// mid-exploration keeps the current zoom, selection and hit targets exactly as they were.
+    /// Two icons with no words left people guessing what the control even was. Names are
+    /// wider but self-explanatory, which a two-state view switch has room to be.
     private var styleToggle: some View {
         Picker("", selection: $appState.treemapRenderStyle) {
-            Image(systemName: "circle.lefthalf.filled")
-                .tag(TreemapRenderStyle.cushion)
-                .help("Cushion")
-            Image(systemName: "square.grid.2x2")
-                .tag(TreemapRenderStyle.cards)
-                .help("Cards")
+            Text("Cushions").tag(TreemapRenderStyle.cushion)
+            Text("Folders").tag(TreemapRenderStyle.cards)
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(width: 72)
-        .help("Treemap style: cushion shading or rounded cards")
+        .frame(width: 152)
+        .help("Cushions: one shaded tile per file. Folders: files grouped inside labelled folder boxes.")
     }
 
     private func navButton(systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
@@ -257,12 +255,27 @@ public struct InteractiveTreemapView: View {
                     hoverPoint = point
                 },
                 onLayoutUpdate: { rects in
-                    labelRects = Array(
-                        rects
-                            .filter { $0.width * $0.height > 60 * 20 && !$0.isBackground }
+                    // Parent directories were excluded here, so a folder owning a huge
+                    // region was never named on the map - the hierarchy was real in the
+                    // layout but invisible on screen. Directory rects are now labelled
+                    // too, and in Folders style they get the header strip the geometry
+                    // already reserves for them.
+                    let leaves = rects
+                        .filter { $0.width * $0.height > 60 * 20 && !$0.isBackground }
+                        .sorted { $0.width * $0.height > $1.width * $1.height }
+                        .prefix(70)
+                    // Folders style reserves a header strip per container for exactly this.
+                    // Cushions stays a pure file view: a chip there would sit on top of a
+                    // child tile, since cushion children fill their parent edge to edge.
+                    let containers = appState.treemapRenderStyle == .cards
+                        ? rects
+                            .filter { $0.isBackground && $0.width > 96 && $0.height > 40 }
                             .sorted { $0.width * $0.height > $1.width * $1.height }
-                            .prefix(80)
-                    )
+                            .prefix(24)
+                        : [].prefix(0)
+                    // Leaves first, containers last: a ZStack draws later views on top,
+                    // and the folder name is the one that must never be buried.
+                    labelRects = Array(leaves) + Array(containers)
                     var byNode = [UInt32: TreemapRect](minimumCapacity: rects.count)
                     for r in rects { byNode[r.nodeIndex] = r }
                     layoutRectByNode = byNode
@@ -315,7 +328,51 @@ public struct InteractiveTreemapView: View {
         }
     }
 
+    @ViewBuilder
     private func treemapLabel(for rect: TreemapRect, tree: FileTree?) -> some View {
+        if rect.isBackground {
+            containerLabel(for: rect, tree: tree)
+        } else {
+            leafLabel(for: rect, tree: tree)
+        }
+    }
+
+    /// A folder's own name, pinned to the top-left of the region it owns. Drawn on a dark
+    /// chip so it stays readable over whatever its children happen to be coloured, and it
+    /// deliberately sits ABOVE the leaf labels in z-order for the same reason.
+    private func containerLabel(for rect: TreemapRect, tree: FileTree?) -> some View {
+        let name = tree?.name(at: rect.nodeIndex) ?? ""
+        let node = tree?.node(at: rect.nodeIndex)
+        let wide = rect.width > 150
+
+        return HStack(spacing: 5) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(0.75))
+            Text(name)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if wide, let node {
+                Text(SizeFormatter.shared.format(node.displaySize))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.black.opacity(0.55))
+        )
+        .padding(2)
+        .frame(width: CGFloat(rect.width), height: CGFloat(rect.height), alignment: .topLeading)
+        .clipped()
+        .offset(x: CGFloat(rect.x), y: CGFloat(rect.y))
+    }
+
+    private func leafLabel(for rect: TreemapRect, tree: FileTree?) -> some View {
         let name = tree?.name(at: rect.nodeIndex) ?? ""
         let node = tree?.node(at: rect.nodeIndex)
         let showSize = rect.height > 40 && node != nil

@@ -236,7 +236,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 self.lastScanTimeLayoutDuration = duration
                 self.lastScanTimeLayoutNodeCount = snapshot.count
             }
-            self.onLayoutUpdate?(layout)
+            // Display rects are published by `updateInstanceBuffer` (which this dirty
+            // flag guarantees will run), because only it knows the drawn geometry.
             self.mtkView?.needsDisplay = true
         }
 
@@ -386,6 +387,9 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             }
         }
 
+        var displayRects: [TreemapRect] = []
+        displayRects.reserveCapacity(visibleCount)
+
         var writeIdx: Int32 = 0
         for i in 0..<layoutCount {
             let tmRect = cachedLayout[i]
@@ -434,6 +438,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 coefs: coefs,
                 color: baseColor
             ))
+            // Overlays (labels, selection border) must use the geometry actually drawn.
+            // In Folders style the nesting transform insets children, so the raw layout
+            // rect is NOT where the tile ends up - labels drawn from it collide with the
+            // folder header chip and drift from their tiles.
+            var displayRect = tmRect
+            displayRect.x = x; displayRect.y = y
+            displayRect.width = w; displayRect.height = h
+            displayRects.append(displayRect)
             lookup[tmRect.nodeIndex] = writeIdx
             writeIdx += 1
         }
@@ -476,6 +488,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         }
 
         instanceBufferDirty = false
+        onLayoutUpdate?(displayRects)
     }
 
     private func ensureInstanceBuffer(at index: Int, requiredSize: Int) -> MTLBuffer? {

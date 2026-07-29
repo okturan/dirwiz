@@ -468,3 +468,42 @@ struct CardStylePerformanceTests {
         #expect(CardGeometry.minVisibleSide < CardGeometry.minSideForDecoration)
     }
 }
+
+/// Folder labels. A treemap that sizes hierarchically but never names a parent looks flat -
+/// early feedback was "make it hierarchical" when the SIZING already was; what was missing
+/// was the labelled container.
+@Suite("Folder Label Tests")
+struct FolderLabelTests {
+
+    /// Overlays must use the DRAWN geometry. Folders style insets children via
+    /// `CardNesting`, so a label positioned from the raw layout rect lands on top of the
+    /// folder's header chip instead of inside its own tile.
+    @Test("Nesting moves a child, so its label must move with it")
+    func labelsFollowNestedGeometry() throws {
+        let items = [
+            CardNesting.Item(nodeIndex: 0, parentIndex: 0, x: 0, y: 0,
+                             width: 400, height: 300, isContainer: true),
+            CardNesting.Item(nodeIndex: 1, parentIndex: 0, x: 0, y: 0,
+                             width: 200, height: 300, isContainer: false),
+        ]
+        let placed = CardNesting.place(items)
+        let container = try #require(placed.first { $0.nodeIndex == 0 })
+        let child = try #require(placed.first { $0.nodeIndex == 1 })
+
+        #expect(child.y > container.y,
+                "the header strip must push the child down, leaving room for the folder name")
+        #expect(child.x > container.x, "and inset it, so the container reads as a frame")
+        // A label drawn at the RAW rect would sit at the container's own origin - exactly
+        // where the folder chip goes.
+        #expect(items[1].y == container.y, "control: the raw rect really does start at the top")
+    }
+
+    /// The header only exists where a label would be legible; below that the geometry gives
+    /// the space back to children rather than reserving a strip nothing can use.
+    @Test("Small containers reserve no header, so nothing claims space for a hidden label")
+    func noHeaderWhenIllegible() {
+        #expect(CardGeometry.headerHeight(width: 200, height: 150) > 0)
+        #expect(CardGeometry.headerHeight(width: 60, height: 150) == 0)
+        #expect(CardGeometry.headerHeight(width: 200, height: 30) == 0)
+    }
+}
