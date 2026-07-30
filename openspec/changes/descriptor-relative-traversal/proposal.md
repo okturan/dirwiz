@@ -74,3 +74,8 @@ File-descriptor limits are a detail solved by `setrlimit`; the decomposition is 
   materialisation ordering) must be shown to behave identically, not assumed to.
 - This is worth doing AFTER the batched splice and mount-awareness, both of which are smaller,
   safer and land larger user-visible wins per unit of risk.
+- **Gated behind `searchfs-catalog-scan`.** That change removes both the opens and the bulk
+  calls by having the driver walk its own catalog, where this one only reduces the cost of the
+  opens. It has been proven to work on APFS and its own gate is a single measurement on an
+  idle machine. If it wins, this change is unnecessary, so do not start this rewrite of the
+  scanner's parallel decomposition until that measurement has been taken.
