@@ -26,17 +26,18 @@ The harness collected three distinct, non-empty, production-planner warm decisio
 workload was replayed three times from the same pre-patch scratch cache; all three repetitions
 agreed on the item distribution:
 
-| Workload | Roots | Estimated items | Actual staged items | Largest root | Share | Patch median |
+| Workload | Roots | Estimated items | Actual staged items | Largest root | Share | Patch timing |
 | --- | ---: | ---: | ---: | --- | ---: | ---: |
-| 1 | 6 | 359,824 | 359,827 | `/private/var/folders/.../T` (151,609) | 42.13% | 2.034 s |
-| 2 | 19 | 359,878 | 359,876 | `/private/var/folders/.../T` (151,609) | 42.13% | 2.020 s |
-| 3 | 7 | 292,853 | 292,853 | `/private/var/folders/.../T` (151,609) | **51.77%** | 1.640 s |
+| 1 | 6 | 359,824 | 359,827 | `/private/var/folders/.../T` (151,609) | 42.13% | 1.907-2.644 s; median 2.034 s |
+| 2 | 19 | 359,878 | 359,876 | `/private/var/folders/.../T` (151,609) | 42.13% | 2.015-2.068 s; median 2.020 s |
+| 3 | 7 | 292,853 | 292,853 | `/private/var/folders/.../T` (151,609) | **51.77%** | 1.637-1.675 s; median refused because the live tree drifted |
 
 The estimator was exact or within three items at aggregate level, so this is not an
-item-estimation failure. Workload 3 crossed the decision point: one root accounted for more
-than half of all staged items. Sections 2-5 are therefore deliberately not started. Narrowing
-FSEvents attribution for the oversized temp root - which contains the benchmark's isolated
-scratch cache - needs a separate spec before reconsidering the root cap.
+item-estimation failure. Workload 3's item counts and root shares agreed across all three
+repetitions despite that timing drift, and it crossed the decision point: one root accounted
+for more than half of all staged items. Sections 2-5 are therefore deliberately not started.
+Narrowing FSEvents attribution for the oversized temp root - which contains the benchmark's
+isolated scratch cache - needs a separate spec before reconsidering the root cap.
 
 ## 2. Make the item gate trustworthy before moving the cap
 
