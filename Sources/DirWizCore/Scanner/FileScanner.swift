@@ -331,6 +331,83 @@ public struct BundleSizeResolutionReport: Sendable {
     public let wasCancelled: Bool
 }
 
+/// Low-overhead diagnostics for one `FileScanner.rescanSubtrees` invocation.
+///
+/// Timings use a monotonic `ContinuousClock`; `totalSeconds` intentionally includes
+/// orchestration gaps not assigned to one of the named phases. Node counts distinguish
+/// work staged off-tree from nodes actually committed to the destination tree.
+public struct SubtreeRescanMetrics: Sendable {
+    public let preflightAndPlanningSeconds: Double
+    public let phaseAStagingSeconds: Double
+    public let phaseBTargetResolutionSeconds: Double
+    public let phaseBStructuralCompactionSeconds: Double
+    public let postCommitMetadataSeconds: Double
+    public let aggregateRecomputeSeconds: Double
+    public let totalSeconds: Double
+
+    public let beforeNodeCount: Int
+    /// Nodes in detached directory staging trees, including one placeholder root per
+    /// staged directory. Opaque bundle results do not create staging-tree nodes.
+    public let stagedNodeCount: Int
+    /// Non-placeholder staged nodes actually appended by a committed structural splice.
+    public let appendedNodeCount: Int
+    /// Old descendants actually removed by a committed structural splice.
+    public let removedNodeCount: Int
+    public let afterNodeCount: Int
+
+    public let requestedPathCount: Int
+    public let rescannedRootCount: Int
+    public let plannedRootCount: Int
+    public let stagedRootCount: Int
+    public let resolvedTargetCount: Int
+    public let structurallyReplacedRootCount: Int
+    public let appliedRootCount: Int
+
+    public init(
+        preflightAndPlanningSeconds: Double = 0,
+        phaseAStagingSeconds: Double = 0,
+        phaseBTargetResolutionSeconds: Double = 0,
+        phaseBStructuralCompactionSeconds: Double = 0,
+        postCommitMetadataSeconds: Double = 0,
+        aggregateRecomputeSeconds: Double = 0,
+        totalSeconds: Double = 0,
+        beforeNodeCount: Int = 0,
+        stagedNodeCount: Int = 0,
+        appendedNodeCount: Int = 0,
+        removedNodeCount: Int = 0,
+        afterNodeCount: Int = 0,
+        requestedPathCount: Int = 0,
+        rescannedRootCount: Int = 0,
+        plannedRootCount: Int = 0,
+        stagedRootCount: Int = 0,
+        resolvedTargetCount: Int = 0,
+        structurallyReplacedRootCount: Int = 0,
+        appliedRootCount: Int = 0
+    ) {
+        self.preflightAndPlanningSeconds = preflightAndPlanningSeconds
+        self.phaseAStagingSeconds = phaseAStagingSeconds
+        self.phaseBTargetResolutionSeconds = phaseBTargetResolutionSeconds
+        self.phaseBStructuralCompactionSeconds = phaseBStructuralCompactionSeconds
+        self.postCommitMetadataSeconds = postCommitMetadataSeconds
+        self.aggregateRecomputeSeconds = aggregateRecomputeSeconds
+        self.totalSeconds = totalSeconds
+        self.beforeNodeCount = beforeNodeCount
+        self.stagedNodeCount = stagedNodeCount
+        self.appendedNodeCount = appendedNodeCount
+        self.removedNodeCount = removedNodeCount
+        self.afterNodeCount = afterNodeCount
+        self.requestedPathCount = requestedPathCount
+        self.rescannedRootCount = rescannedRootCount
+        self.plannedRootCount = plannedRootCount
+        self.stagedRootCount = stagedRootCount
+        self.resolvedTargetCount = resolvedTargetCount
+        self.structurallyReplacedRootCount = structurallyReplacedRootCount
+        self.appliedRootCount = appliedRootCount
+    }
+
+    public static let zero = SubtreeRescanMetrics()
+}
+
 /// Outcome of `FileScanner.rescanSubtrees`.
 public struct SubtreeRescanReport: Sendable {
     public let requestedPaths: [String]
@@ -350,17 +427,20 @@ public struct SubtreeRescanReport: Sendable {
     /// rather than a normal completion - no cache write-back under the new event id, no
     /// "success" summary.
     public let wasCancelled: Bool
+    public let metrics: SubtreeRescanMetrics
 
     public init(
         requestedPaths: [String],
         rescannedRoots: [String],
         unresolvedPaths: [String],
-        wasCancelled: Bool = false
+        wasCancelled: Bool = false,
+        metrics: SubtreeRescanMetrics = .zero
     ) {
         self.requestedPaths = requestedPaths
         self.rescannedRoots = rescannedRoots
         self.unresolvedPaths = unresolvedPaths
         self.wasCancelled = wasCancelled
+        self.metrics = metrics
     }
 }
 
@@ -517,31 +597,32 @@ public final class FileScanner: @unchecked Sendable {
     ///   the fix for the reported incident: a serial per-root loop re-walking a large
     ///   fraction of the disk single-threaded took minutes where cold (fully parallel)
     ///   took ~20s.
-    /// - **Phase B** (`applyStagedRoots`, serial, memory-bound): each staged result is
-    ///   spliced in one at a time, re-resolving its path against `tree` FRESH immediately
-    ///   before splicing - an earlier splice in this same loop may have compacted and
-    ///   renumbered every index (`removeChildren`'s contract). Safe to resolve every root
-    ///   ONCE up front in Phase A because `rescannedRoots` are outermost/disjoint
-    ///   (`PathCollapse.outermostRoots`): applying one root's splice can never change
-    ///   whether an unrelated, non-nested root's path still resolves the same way.
+    /// - **Phase B** (`applyStagedRoots`, serial, memory-bound): every staged target is
+    ///   resolved by path against ONE snapshot, then all directory replacements are
+    ///   installed through ONE transactional compaction. Resolve-once-then-single-mutation
+    ///   is stronger than the old resolve-between-mutations discipline: no index is held
+    ///   across an earlier mutation because there is no earlier mutation in the batch.
+    ///   `rescannedRoots` are outermost/disjoint (`PathCollapse.outermostRoots`), so one
+    ///   target can never be nested inside another.
     ///
     /// Resolution runs entirely against path strings before any mutation begins - never
     /// holds a tree index across a splice, since indices are garbage after any mutation
     /// that compacts the array (same discipline as `TreeActions.batchTrash(paths:tree:)`).
     ///
-    /// Cancellation: `isCancelled` (this scanner's own flag, flipped by `cancel()`) is the
-    /// primary, coherent signal checked in both phases - NOT `Task.isCancelled`, which
-    /// stays false unless the surrounding `Task` itself is structurally cancelled (a stale
-    /// check 040 flagged: `cancel()` alone never trips it). `Task.isCancelled` is still
-    /// honored inside Phase A's child tasks as a secondary signal, since those are real
-    /// `Task`s structured cancellation can reach directly. Either way a cancelled rescan
-    /// leaves `tree` valid - whatever finished applying stays applied, the rest is
-    /// untouched - and `SubtreeRescanReport.wasCancelled` says so honestly.
+    /// Cancellation: `isCancelled` (this scanner's own flag, flipped by `cancel()`) and
+    /// `Task.isCancelled` are both honored. Phase B builds replacement arrays off to the
+    /// side and commits once, so cancellation during its long pass leaves `tree` exactly
+    /// untouched; cancellation after a successful commit still gets the mandatory
+    /// aggregate recompute before this method reports it.
     public func rescanSubtrees(
         _ changedDirectories: [String],
         tree: FileTree,
         progress: ScanProgress
     ) async -> SubtreeRescanReport {
+        let clock = ContinuousClock()
+        let totalStart = clock.now
+        let beforeNodeCount = tree.count
+
         // A scanner instance can be reused after cancel(); reset so a stale cancellation
         // from an earlier scan() call doesn't silently no-op this rescan.
         cancelState.withLock { $0 = false }
@@ -557,6 +638,31 @@ public final class FileScanner: @unchecked Sendable {
         }
 
         let rescannedRoots = PathCollapse.outermostRoots(resolvedPaths)
+        let treeRoot = tree.path(at: 0)
+
+        // Abandon before Phase A, and critically before ANY mutation, when the caller
+        // cannot trust a partial patch. AppState has always treated either shape as a
+        // cold-fallback signal; doing the preflight here strengthens that intended rule
+        // by ensuring a mixed valid+unresolved batch cannot alter the visible tree before
+        // AppState notices the report.
+        if !unresolvedPaths.isEmpty || rescannedRoots.contains(treeRoot) {
+            let now = clock.now
+            let metrics = SubtreeRescanMetrics(
+                preflightAndPlanningSeconds: Self.wallSeconds(totalStart.duration(to: now)),
+                totalSeconds: Self.wallSeconds(totalStart.duration(to: now)),
+                beforeNodeCount: beforeNodeCount,
+                afterNodeCount: tree.count,
+                requestedPathCount: changedDirectories.count,
+                rescannedRootCount: rescannedRoots.count
+            )
+            return SubtreeRescanReport(
+                requestedPaths: changedDirectories,
+                rescannedRoots: rescannedRoots,
+                unresolvedPaths: unresolvedPaths,
+                wasCancelled: isCancelled || Task.isCancelled,
+                metrics: metrics
+            )
+        }
 
         // One instance shared across every target in this batch - matches cold scan's
         // single firmlink/hardlink guard for the whole operation, not one per target. Its
@@ -566,22 +672,76 @@ public final class FileScanner: @unchecked Sendable {
         // own root: the warm-start equivalence gate asserts a patched tree equals a fresh
         // cold scan, so if cold skips the Data-side copies and a splice re-enumerated them,
         // the two would diverge the moment a firmlinked path changed.
-        let treeRoot = tree.path(at: 0)
         let visited = VisitedDirectories(
             firmlinkDuplicates: resolveFirmlinkDuplicates(forScanRoot: treeRoot)
         )
 
         let plans = planRescanTargets(rescannedRoots, tree: tree)
+        let preflightAndPlanningEnd = clock.now
+
+        let phaseAStart = clock.now
         let staged = await stageChangedRoots(plans, progress: progress, visited: visited)
-        applyStagedRoots(rescannedRoots, staged: staged, tree: tree, progress: progress)
+        let phaseAEnd = clock.now
+        let stagedNodeCount = staged.values.reduce(into: 0) { count, result in
+            guard case .directory(let staging) = result else { return }
+            let sum = count.addingReportingOverflow(staging.count)
+            count = sum.overflow ? Int.max : sum.partialValue
+        }
 
-        tree.recomputeAggregates()
+        let phaseB = applyStagedRoots(
+            rescannedRoots,
+            staged: staged,
+            tree: tree,
+            progress: progress
+        )
+        unresolvedPaths.append(contentsOf: phaseB.unresolvedPaths)
 
+        // A successful transactional splice deliberately leaves aggregate directory
+        // totals stale. Repair them before observing any cancellation that raced after
+        // commit; otherwise a structurally valid but numerically incoherent tree could
+        // escape.
+        var aggregateRecomputeSeconds = 0.0
+        if phaseB.committed {
+            let aggregateStart = clock.now
+            tree.recomputeAggregates()
+            aggregateRecomputeSeconds = Self.wallSeconds(
+                aggregateStart.duration(to: clock.now)
+            )
+        }
+
+        let afterNodeCount = tree.count
+        let totalEnd = clock.now
+        let metrics = SubtreeRescanMetrics(
+            preflightAndPlanningSeconds: Self.wallSeconds(
+                totalStart.duration(to: preflightAndPlanningEnd)
+            ),
+            phaseAStagingSeconds: Self.wallSeconds(
+                phaseAStart.duration(to: phaseAEnd)
+            ),
+            phaseBTargetResolutionSeconds: phaseB.targetResolutionSeconds,
+            phaseBStructuralCompactionSeconds: phaseB.structuralCompactionSeconds,
+            postCommitMetadataSeconds: phaseB.postCommitMetadataSeconds,
+            aggregateRecomputeSeconds: aggregateRecomputeSeconds,
+            totalSeconds: Self.wallSeconds(totalStart.duration(to: totalEnd)),
+            beforeNodeCount: beforeNodeCount,
+            stagedNodeCount: stagedNodeCount,
+            appendedNodeCount: phaseB.appendedNodeCount,
+            removedNodeCount: phaseB.removedNodeCount,
+            afterNodeCount: afterNodeCount,
+            requestedPathCount: changedDirectories.count,
+            rescannedRootCount: rescannedRoots.count,
+            plannedRootCount: plans.count,
+            stagedRootCount: staged.count,
+            resolvedTargetCount: phaseB.resolvedTargetCount,
+            structurallyReplacedRootCount: phaseB.structurallyReplacedRootCount,
+            appliedRootCount: phaseB.appliedRootCount
+        )
         return SubtreeRescanReport(
             requestedPaths: changedDirectories,
             rescannedRoots: rescannedRoots,
             unresolvedPaths: unresolvedPaths,
-            wasCancelled: isCancelled
+            wasCancelled: isCancelled || Task.isCancelled,
+            metrics: metrics
         )
     }
 
@@ -796,75 +956,246 @@ public final class FileScanner: @unchecked Sendable {
         return results
     }
 
-    /// Phase B: apply each staged result in `rescannedRoots` order, re-resolving its path
-    /// against `tree` fresh immediately before splicing - see `rescanSubtrees`'s doc
-    /// comment for why an earlier splice in this same loop can invalidate a later target's
-    /// index but never its path.
+    private struct PhaseBTarget {
+        let path: String
+        let oldIndex: UInt32
+        let expectedDevice: Int32
+        let expectedInode: UInt64
+        let result: StageResult
+    }
+
+    private struct PhaseBOutcome {
+        let committed: Bool
+        let unresolvedPaths: [String]
+        let targetResolutionSeconds: Double
+        let structuralCompactionSeconds: Double
+        let postCommitMetadataSeconds: Double
+        let appendedNodeCount: Int
+        let removedNodeCount: Int
+        let resolvedTargetCount: Int
+        let structurallyReplacedRootCount: Int
+        let appliedRootCount: Int
+
+        static let notCommitted = PhaseBOutcome(
+            committed: false,
+            unresolvedPaths: [],
+            targetResolutionSeconds: 0,
+            structuralCompactionSeconds: 0,
+            postCommitMetadataSeconds: 0,
+            appendedNodeCount: 0,
+            removedNodeCount: 0,
+            resolvedTargetCount: 0,
+            structurallyReplacedRootCount: 0,
+            appliedRootCount: 0
+        )
+    }
+
+    /// Resolve every Phase B target against one immutable snapshot. The returned indices
+    /// remain valid until the one transactional compaction below; there is no mutation
+    /// between this function and `applyStagedReplacements`.
+    private static func resolvePhaseBTargets(
+        _ rescannedRoots: [String],
+        staged: [String: StageResult],
+        tree: FileTree
+    ) -> (targets: [PhaseBTarget], unresolvedPaths: [String]) {
+        let snapshot = tree.pathBuildingSnapshot()
+        var targets: [PhaseBTarget] = []
+        var unresolvedPaths: [String] = []
+        targets.reserveCapacity(staged.count)
+
+        for targetPath in rescannedRoots {
+            // Cancellation before Phase A touched a root deliberately leaves no staged
+            // result. Preserve that root untouched rather than installing an empty tree.
+            guard let result = staged[targetPath] else { continue }
+            guard let components = relativeComponents(
+                      of: targetPath,
+                      rootPath: snapshot.rootPath
+                  ),
+                  let targetIndex = FileTree.descendPath(
+                      components,
+                      nodes: snapshot.nodes,
+                      stringPool: snapshot.stringPool
+                  ),
+                  Int(targetIndex) < snapshot.nodes.count else {
+                unresolvedPaths.append(targetPath)
+                continue
+            }
+            let node = snapshot.nodes[Int(targetIndex)]
+            targets.append(PhaseBTarget(
+                path: targetPath,
+                oldIndex: targetIndex,
+                expectedDevice: node.device,
+                expectedInode: node.inode,
+                result: result
+            ))
+        }
+        return (targets, unresolvedPaths)
+    }
+
+    /// Phase B: resolve every target once, then compact exactly once. Directory mtimes
+    /// and opaque bundle sizes are applied only after the transaction commits; their
+    /// post-commit path resolution never feeds another compaction and therefore cannot
+    /// invalidate a held splice target.
     private func applyStagedRoots(
         _ rescannedRoots: [String],
         staged: [String: StageResult],
         tree: FileTree,
         progress: ScanProgress
-    ) {
-        let total = rescannedRoots.count
-        var completed = 0
-        for targetPath in rescannedRoots {
-            guard !isCancelled, !Task.isCancelled else { break }
-            completed += 1
+    ) -> PhaseBOutcome {
+        guard !isCancelled, !Task.isCancelled else {
+            return .notCommitted
+        }
 
-            // Resolved in its own function so the snapshot's `nodes`/`stringPool`
-            // references (a full-tree COW handle) are provably released before this
-            // iteration mutates the tree - holding them any longer would force
-            // `removeChildren`/`installSubtree` to copy the entire array on every single
-            // root instead of appending in place (measured: this was Phase B's actual
-            // bottleneck on a large batch, not the per-node splice work itself).
-            guard let targetIndex = Self.resolveCurrentIndex(of: targetPath, tree: tree),
-                  let targetNode = tree.node(at: targetIndex) else {
+        // This helper's snapshot dies on return. Holding it while the primitive publishes
+        // its rebuilt arrays would retain the full pre-splice tree longer than necessary.
+        let clock = ContinuousClock()
+        let targetResolutionStart = clock.now
+        let resolved = Self.resolvePhaseBTargets(
+            rescannedRoots,
+            staged: staged,
+            tree: tree
+        )
+        let targetResolutionSeconds = Self.wallSeconds(
+            targetResolutionStart.duration(to: clock.now)
+        )
+        guard resolved.unresolvedPaths.isEmpty else {
+            return PhaseBOutcome(
+                committed: false,
+                unresolvedPaths: resolved.unresolvedPaths,
+                targetResolutionSeconds: targetResolutionSeconds,
+                structuralCompactionSeconds: 0,
+                postCommitMetadataSeconds: 0,
+                appendedNodeCount: 0,
+                removedNodeCount: 0,
+                resolvedTargetCount: resolved.targets.count,
+                structurallyReplacedRootCount: 0,
+                appliedRootCount: 0
+            )
+        }
+        guard !resolved.targets.isEmpty else {
+            return PhaseBOutcome(
+                committed: false,
+                unresolvedPaths: [],
+                targetResolutionSeconds: targetResolutionSeconds,
+                structuralCompactionSeconds: 0,
+                postCommitMetadataSeconds: 0,
+                appendedNodeCount: 0,
+                removedNodeCount: 0,
+                resolvedTargetCount: 0,
+                structurallyReplacedRootCount: 0,
+                appliedRootCount: 0
+            )
+        }
+
+        let folderCount = resolved.targets.count
+        progress.updateCurrentPath(
+            "Applying \(folderCount) folder\(folderCount == 1 ? "" : "s")…"
+        )
+        Task { await MainActor.run {
+            progress.publishCounters()
+        } }
+
+        let replacements: [(target: UInt32, staged: FileTree)] = resolved.targets.compactMap {
+            guard case .directory(let staging) = $0.result else { return nil }
+            return (target: $0.oldIndex, staged: staging)
+        }
+        let proposedAppendedNodeCount = replacements.reduce(into: 0) { count, replacement in
+            let appended = max(0, replacement.staged.count - 1)
+            let sum = count.addingReportingOverflow(appended)
+            count = sum.overflow ? Int.max : sum.partialValue
+        }
+        let structuralBeforeNodeCount = tree.count
+        let structuralCompactionStart = clock.now
+        let committed = tree.applyStagedReplacements(
+            replacements,
+            shouldCancel: { self.isCancelled || Task.isCancelled }
+        )
+        let structuralCompactionSeconds = Self.wallSeconds(
+            structuralCompactionStart.duration(to: clock.now)
+        )
+        guard committed else {
+            return PhaseBOutcome(
+                committed: false,
+                unresolvedPaths: [],
+                targetResolutionSeconds: targetResolutionSeconds,
+                structuralCompactionSeconds: structuralCompactionSeconds,
+                postCommitMetadataSeconds: 0,
+                appendedNodeCount: 0,
+                removedNodeCount: 0,
+                resolvedTargetCount: resolved.targets.count,
+                structurallyReplacedRootCount: 0,
+                appliedRootCount: 0
+            )
+        }
+        let structuralAfterNodeCount = tree.count
+        let removedNodeCount: Int
+        let sourcePlusAppended = structuralBeforeNodeCount.addingReportingOverflow(
+            proposedAppendedNodeCount
+        )
+        if sourcePlusAppended.overflow {
+            removedNodeCount = Int.max
+        } else {
+            removedNodeCount = max(
+                0,
+                sourcePlusAppended.partialValue - structuralAfterNodeCount
+            )
+        }
+
+        // The compaction keeps every target itself, so each path must still resolve.
+        // Resolve metadata destinations only after the transactional commit: cancellation
+        // before/during the long pass then leaves the exact old tree, not a tree with a
+        // few bundle sizes or mtimes changed ahead of an abandoned splice.
+        var postCommitUnresolved: [String] = []
+        let postCommitMetadataStart = clock.now
+        for target in resolved.targets {
+            guard let currentIndex = Self.resolveCurrentIndex(of: target.path, tree: tree) else {
+                postCommitUnresolved.append(target.path)
                 continue
             }
 
-            switch staged[targetPath] {
-            case .bundle(let fileSize, let allocatedSize):
-                tree.setNodeSizeAndPropagate(
-                    at: targetIndex,
+            if case .bundle(let fileSize, let allocatedSize) = target.result {
+                _ = tree.setNodeSizeAndPropagate(
+                    at: currentIndex,
                     fileSize: fileSize,
                     allocatedSize: allocatedSize,
-                    expectedDevice: targetNode.device,
-                    expectedInode: targetNode.inode
+                    expectedDevice: target.expectedDevice,
+                    expectedInode: target.expectedInode
                 )
-            case .directory(let staging):
-                tree.removeChildren(of: targetIndex)
-                tree.installSubtree(staging, at: targetIndex)
-            case nil:
-                // Cancelled before Phase A ever got to this root - nothing staged, so
-                // there's nothing trustworthy to apply. Leave it untouched rather than
-                // guessing; the next rescan will pick it up again.
-                continue
             }
 
             // A changed dir's mtime is user-visible in the table.
-            if let mtime = Self.modifiedDate(atPath: targetPath) {
-                tree.updateNode(at: targetIndex) { $0.modifiedDate = mtime }
+            if let mtime = Self.modifiedDate(atPath: target.path) {
+                tree.updateNode(at: currentIndex) { $0.modifiedDate = mtime }
             }
-
-            // Thread-safe hot-counter write (see `stageChangedRoots`'s matching comment) -
-            // setting `progress.currentPath` directly here would just get clobbered by
-            // `publishCounters()`'s own `currentPath = snapshot.path` line.
-            progress.updateCurrentPath("Refreshing changed folders (\(completed) of \(total))…")
-            Task { await MainActor.run {
-                progress.publishCounters()
-            } }
         }
+        let postCommitMetadataSeconds = Self.wallSeconds(
+            postCommitMetadataStart.duration(to: clock.now)
+        )
+
+        return PhaseBOutcome(
+            committed: true,
+            unresolvedPaths: postCommitUnresolved,
+            targetResolutionSeconds: targetResolutionSeconds,
+            structuralCompactionSeconds: structuralCompactionSeconds,
+            postCommitMetadataSeconds: postCommitMetadataSeconds,
+            appendedNodeCount: proposedAppendedNodeCount,
+            removedNodeCount: removedNodeCount,
+            resolvedTargetCount: resolved.targets.count,
+            structurallyReplacedRootCount: replacements.count,
+            appliedRootCount: resolved.targets.count
+        )
     }
 
-    /// Re-resolves `targetPath` to its CURRENT index in `tree` by path, isolated in its
-    /// own function so the `pathBuildingSnapshot()` it takes (a COW handle on the WHOLE
-    /// tree's nodes array and string pool) is provably released on return rather than
-    /// staying alive for the rest of the caller's loop body. `applyStagedRoots` calls
-    /// this immediately before each splice; if the snapshot outlived the splice, the
-    /// splice's own mutation (`removeChildren`/`installSubtree`) would see a
-    /// reference count > 1 and copy the ENTIRE array before appending instead of growing
-    /// it in place - on a large batch this dwarfed the actual per-node splice cost.
+    private static func wallSeconds(_ duration: ContinuousClock.Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds)
+            + Double(components.attoseconds) / 1_000_000_000_000_000_000
+    }
+
+    /// Re-resolve post-commit metadata destinations by durable path. Kept in a separate
+    /// function so its COW snapshot is provably released before `updateNode` or
+    /// `setNodeSizeAndPropagate` mutates the rebuilt array; holding the snapshot across
+    /// either write would force an unnecessary whole-array copy.
     private static func resolveCurrentIndex(of targetPath: String, tree: FileTree) -> UInt32? {
         let snapshot = tree.pathBuildingSnapshot()
         guard let components = Self.relativeComponents(of: targetPath, rootPath: snapshot.rootPath) else {
