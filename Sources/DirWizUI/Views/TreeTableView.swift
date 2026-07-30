@@ -100,7 +100,8 @@ public struct TreeTableView: View {
                     appState.saveExpandedPathsSession(newValue)
                 }
                 .onKeyPress(.space) {
-                    guard let sel = appState.selectedNodeIndex,
+                    guard !appState.isWarmPatchCommitInProgress,
+                          let sel = appState.selectedNodeIndex,
                           let tree = appState.fileTree else { return .ignored }
                     let path = tree.path(at: sel)
                     appState.quickLookCoordinator.toggleQuickLook(for: path)

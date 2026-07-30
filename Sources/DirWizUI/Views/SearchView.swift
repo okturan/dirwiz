@@ -425,7 +425,8 @@ public struct SearchView: View {
     }
 
     private func toggleQuickLook() {
-        guard let sel = appState.selectedNodeIndex,
+        guard !appState.isWarmPatchCommitInProgress,
+              let sel = appState.selectedNodeIndex,
               let tree = appState.fileTree else { return }
         let path = tree.path(at: sel)
         appState.quickLookCoordinator.toggleQuickLook(for: path)

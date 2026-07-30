@@ -34,6 +34,7 @@ public final class FSEventsMonitor: @unchecked Sendable {
 
     private var stream: FSEventStreamRef?
     private let watchPath: String
+    private let ignoredRoots: [String]
     private let lock = NSLock()
     private var changes: [String: DirectoryChangeSummary] = [:]
     private var isRunning = false
@@ -44,6 +45,13 @@ public final class FSEventsMonitor: @unchecked Sendable {
 
     public init(watchPath: String) {
         self.watchPath = watchPath
+        self.ignoredRoots = [DirWizOwnedPaths.applicationSupportRoot()]
+    }
+
+    /// Test seam for proving self-owned persistence cannot feed the living view.
+    init(watchPath: String, ignoredRoots: [String]) {
+        self.watchPath = watchPath
+        self.ignoredRoots = ignoredRoots
     }
 
     deinit {
@@ -137,10 +145,18 @@ public final class FSEventsMonitor: @unchecked Sendable {
     // MARK: - Internal
 
     /// Process raw FSChange events into directory summaries.
-    fileprivate func processChanges(_ newChanges: [FSChange]) {
+    @discardableResult
+    func processChanges(_ newChanges: [FSChange]) -> Bool {
         lock.lock()
+        var acceptedChange = false
 
         for change in newChanges {
+            guard !ignoredRoots.contains(where: {
+                DirWizOwnedPaths.contains(change.path, under: $0)
+            }) else {
+                continue
+            }
+            acceptedChange = true
             let dirPath = change.isDirectory
                 ? change.path
                 : (change.path as NSString).deletingLastPathComponent
@@ -165,6 +181,15 @@ public final class FSEventsMonitor: @unchecked Sendable {
             }
         }
 
+        // Self-owned persistence writes must be invisible to LiveRefreshPolicy, not
+        // merely absent from the accumulated path list. Re-publishing the old snapshot
+        // for an ignored-only batch would still reset the coordinator's quiescence clock
+        // and delay a real pending refresh.
+        guard acceptedChange else {
+            lock.unlock()
+            return false
+        }
+
         // Evict lowest-activity entries if we exceed the cap.
         if changes.count > Self.maxTrackedDirectories {
             let sorted = changes.sorted { $0.value.changeCount > $1.value.changeCount }
@@ -176,6 +201,7 @@ public final class FSEventsMonitor: @unchecked Sendable {
         lock.unlock()
 
         callback?(snapshot)
+        return true
     }
 }
 

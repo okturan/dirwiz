@@ -10,8 +10,10 @@ extension AppState {
 
     // MARK: - Statistics Computation
 
-    /// Build extension statistics from the file tree.
-    public func computeExtensionStats() {
+    /// Build extension statistics from the file tree. The default also schedules the
+    /// temporal-snapshot lookup used by the UI; the real-volume publication benchmark
+    /// disables that detached I/O so it cannot spill into the next matched sample.
+    public func computeExtensionStats(loadTemporalSnapshot: Bool = true) {
         guard let tree = fileTree else { return }
         var statsByExt: [String: ExtensionAccumulator] = [:]
         let colorMap = ExtensionColorMap.shared
@@ -48,7 +50,9 @@ extension AppState {
 
         // Assign WinDirStat-style palette colors based on extension size ranking.
         extensionPalette.assign(from: fileTypeStats)
-        loadSnapshotIfAvailable()
+        if loadTemporalSnapshot {
+            loadSnapshotIfAvailable()
+        }
     }
 
     private static func extractExtension(from node: FileNode, stringPool: Data) -> String {

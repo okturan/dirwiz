@@ -257,7 +257,21 @@ extension AppState {
         // repair since nothing here gets published.
         guard !isApplyingChanges else { return }
 
+        let mustDetachSupersededWarmTree = warmPatchMutatesDisplayedTree
         scanSession.cancelActiveScan()
+        isWarmPatchCommitInProgress = false
+        if mustDetachSupersededWarmTree {
+            // Cancellation can race AFTER FileScanner's transactional commit. The old
+            // task cannot safely invalidate a newer scan's UI state at its later token
+            // guard, so make its tree unreachable from the UI now. It may finish mutating
+            // that orphan, but it can no longer renumber the tree this new flow displays.
+            warmPatchMutatesDisplayedTree = false
+            warmPatchExploration = nil
+            warmPatchExplorationToken = nil
+            fileTree = nil
+            staleViewAsOf = nil
+            resetTreeDerivedState()
+        }
         // A new scan flow always supersedes any bundle-sizing pass left over from a
         // previous cold scan - it's scoped to that scan's own tree, which this flow is
         // about to replace. `resetForNewScan()`/`resetTreeDerivedState()` already cancel
@@ -406,7 +420,10 @@ extension AppState {
     /// a selected, non-empty tree: nothing meaningful to persist during the brief
     /// empty-tree window at the start of a scan reset.
     func saveSelectionAndRootSession() {
-        guard let tree = fileTree, !tree.isEmpty, let root = selectedVolume?.path else { return }
+        guard !isWarmPatchCommitInProgress,
+              let tree = fileTree,
+              !tree.isEmpty,
+              let root = selectedVolume?.path else { return }
         var snapshot = sessionStore.load(forVolume: root)
             ?? SessionSnapshot(expandedPaths: [], selectedPath: nil, treemapRootPath: nil)
         snapshot.selectedPath = selectedNodeIndex.map { tree.path(at: $0) }
@@ -439,12 +456,13 @@ extension AppState {
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool
     ) async {
         let tree = cached.tree
-        let scanner = FileScanner()
+        let scanner = warmPatchScannerFactory()
+        let tiers = ephemeralPaths.partition(targets)
         let preservingStaleView = staleViewAsOf != nil
         // Captured before resetForNewScan() below clears selection/navigation - reused
-        // to restore position after a successful patch, or handed to the cold fallback
-        // if the patch itself can't be trusted (028's unresolved-path/root-level-rescan
-        // guard), since that fallback runs after this reset already cleared self's state.
+        // after the first splice, or handed to its cold fallback if the patch itself
+        // can't be trusted, since that fallback runs after this reset cleared self's
+        // index-keyed state.
         let preservedExploration = captureExplorationIfPreserving()
 
         fileTree = tree
@@ -470,90 +488,365 @@ extension AppState {
         }
         scanSession.markStarted(scanner: scanner)
         let token = scanToken
+        warmPatchMutatesDisplayedTree = true
+        defer {
+            // An older superseded task must never clear a newer warm patch's ownership.
+            if scanToken == token {
+                warmPatchMutatesDisplayedTree = false
+                isWarmPatchCommitInProgress = false
+                if warmPatchExplorationToken == token {
+                    warmPatchExploration = nil
+                    warmPatchExplorationToken = nil
+                }
+            }
+        }
         scanProgress.isScanning = true
         scanProgress.currentPath = "Updating from last scan…"
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        let report = await scanner.rescanSubtrees(targets, tree: tree, progress: scanProgress)
+        var refreshedRootCount = 0
 
-        guard scanToken == token else { return }
+        if !tiers.interactive.isEmpty {
+            let interactiveReport = await scanner.rescanSubtrees(
+                tiers.interactive,
+                tree: tree,
+                progress: scanProgress,
+                options: .interactive,
+                onWillCommit: { [weak self] in
+                    guard let self, self.scanToken == token else { return }
+                    self.isWarmPatchCommitInProgress = true
+                }
+            )
 
-        // A root-level target means some changed path couldn't resolve to anything
-        // narrower than the scan root (028's `SubtreeRescanReport.rescannedRoots` doc) -
-        // treat it the same as an unresolved path: prefer a full rescan over patching
-        // the whole tree through the splice path it wasn't designed to replace wholesale.
-        guard report.unresolvedPaths.isEmpty, !report.rescannedRoots.contains(path) else {
-            // warm-start-observability: name which of the two abandonment shapes fired -
-            // this reason reaches `lastScanSummary` (via `beginColdScan`'s
-            // `coldFallbackReason`, same mechanism a planner-declined warm start already
-            // uses) and the warm-start history, rather than a silent, unexplained cold
-            // scan directly after a "Checking what changed…" wait.
-            let reason = !report.unresolvedPaths.isEmpty
-                ? "couldn't resolve \(report.unresolvedPaths.count) changed path\(report.unresolvedPaths.count == 1 ? "" : "s") against the cached tree"
-                : "a changed path resolved to the scan root - nothing narrower to patch"
-            log.notice("Warm start abandoned mid-patch for \(path, privacy: .public): \(reason, privacy: .public)")
-            beginColdScan(
-                path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason,
-                preservedExploration: preservedExploration
+            if scanToken == token {
+                isWarmPatchCommitInProgress = false
+            }
+            guard scanToken == token else { return }
+            // Cancellation can race after Phase B committed. Invalidate whenever a
+            // mutation actually landed, even though this attempt will not advance the
+            // cache horizon or claim successful completion.
+            if interactiveReport.metrics.appliedRootCount > 0 {
+                invalidateAfterTreeMutation(restoring: preservedExploration)
+                computeExtensionStats()
+            }
+            if let reason = warmPatchAbandonmentReason(interactiveReport, scanRoot: path) {
+                abandonWarmPatch(
+                    path: path,
+                    reason: reason,
+                    shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
+                    preservedExploration: preservedExploration
+                )
+                return
+            }
+            guard !interactiveReport.wasCancelled else {
+                finishCancelledWarmPatch(
+                    path: path,
+                    cachedAt: cached.savedAt,
+                    tree: tree
+                )
+                return
+            }
+
+            // A successful non-empty tier went through the splice contract even when
+            // its on-disk contents happened to be unchanged. The canonical invalidator
+            // must still be the publication boundary and restore path-keyed exploration.
+            if interactiveReport.metrics.appliedRootCount == 0 {
+                invalidateAfterTreeMutation(restoring: preservedExploration)
+                computeExtensionStats()
+            }
+            refreshedRootCount += interactiveReport.rescannedRoots.count
+
+            logWarmPatchTier("interactive", report: interactiveReport)
+        } else if preservingStaleView {
+            restoreExploration(preservedExploration, in: tree)
+        } else {
+            setTreemapRoot(0, recordHistory: false)
+        }
+
+        // This is the cache-horizon gate. With deferred targets, nil means no cache
+        // write at all: the previous atomic tree + old event id stay on disk until the
+        // trailing tier succeeds. A crash, quit, cancellation, or superseding scan then
+        // replays the whole old->new window next launch, safely repeating the first tier
+        // and catching every deferred change.
+        if let persistableEventId = WarmPatchCacheHorizon.eventIdForPersistence(
+            replayedThrough: newEventId,
+            deferredTargetCount: tiers.ephemeral.count
+        ) {
+            warmPatchMutatesDisplayedTree = false
+            await finishSuccessfulWarmPatch(
+                path: path,
+                tree: tree,
+                token: token,
+                refreshedRootCount: refreshedRootCount,
+                startTime: startTime,
+                persistableEventId: persistableEventId,
+                shouldRunPostScanAnalyses: shouldRunPostScanAnalyses
             )
             return
         }
 
-        // A cancelled rescan (plan 042) leaves `tree` valid but only partially patched -
-        // whatever finished applying stays applied, the rest didn't. Report that honestly
-        // instead of the "success" bookkeeping below: no cache write-back under the new
-        // event id (it would wrongly claim every target was applied), no completion
-        // summary implying a finished refresh.
-        guard !report.wasCancelled else {
-            log.info("Warm start cancelled mid-patch for \(path, privacy: .public); tree reflects a partial refresh")
-            scanSession.markFinished()
+        // The interactive tree is now usable, but its ephemeral roots still describe
+        // the old cache horizon. Reuse the existing stale-view vocabulary so the UI
+        // remains browsable without claiming the whole volume is fresh.
+        staleViewAsOf = staleViewAsOf ?? cached.savedAt
+        scanProgress.currentPath = "Finishing changed folders in temporary storage…"
+
+        // Start a path-keyed live capture AFTER the first publication. Selection and
+        // treemap navigation update it while the trailing tier runs, so the second
+        // compaction restores the user's latest position rather than tier-start state.
+        warmPatchExploration = ExplorationCapture.capture(
+            tree: tree,
+            selectedIndex: selectedNodeIndex,
+            treemapRootIndex: navigation.treemapRootIndex
+        )
+        warmPatchExplorationToken = token
+        let trailingReport = await scanner.rescanSubtrees(
+            tiers.ephemeral,
+            tree: tree,
+            progress: scanProgress,
+            options: .trailing,
+            onWillCommit: { [weak self] in
+                guard let self, self.scanToken == token else { return }
+                self.isWarmPatchCommitInProgress = true
+            }
+        )
+
+        if scanToken == token {
+            isWarmPatchCommitInProgress = false
+        }
+        guard scanToken == token else { return }
+        let trailingExploration = warmPatchExploration
+        warmPatchExploration = nil
+        warmPatchExplorationToken = nil
+
+        // Both splices renumber indices. This second call is not optional: it clears
+        // every index-keyed overlay, re-resolves navigation by path, and forces the
+        // second treemap layout revision required by the newly-compacted tree.
+        if trailingReport.metrics.appliedRootCount > 0 {
+            invalidateAfterTreeMutation(restoring: trailingExploration)
             computeExtensionStats()
-            scanProgress.publishCounters(forceLayoutRevision: true)
-            scanProgress.isScanning = false
-            scanProgress.isCancelled = true
-            scanProgress.scanComplete = true
+        }
+        if let reason = warmPatchAbandonmentReason(trailingReport, scanRoot: path) {
+            abandonWarmPatch(
+                path: path,
+                reason: reason,
+                shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
+                preservedExploration: trailingExploration
+            )
+            return
+        }
+        guard !trailingReport.wasCancelled else {
+            finishCancelledWarmPatch(
+                path: path,
+                cachedAt: cached.savedAt,
+                tree: tree
+            )
+            return
+        }
+        if trailingReport.metrics.appliedRootCount == 0 {
+            invalidateAfterTreeMutation(restoring: trailingExploration)
+            computeExtensionStats()
+        }
+        // No scanner call can mutate the displayed tree after this point. Release
+        // ownership before final bookkeeping/post-analysis awaits so a new scan does not
+        // unnecessarily detach a fully settled tree.
+        warmPatchMutatesDisplayedTree = false
+        refreshedRootCount += trailingReport.rescannedRoots.count
+        logWarmPatchTier("trailing", report: trailingReport)
+
+        guard let persistableEventId = WarmPatchCacheHorizon.eventIdForPersistence(
+            replayedThrough: newEventId,
+            deferredTargetCount: 0
+        ) else {
+            assertionFailure("completed trailing warm patch did not release cache horizon")
+            finishCancelledWarmPatch(path: path, cachedAt: cached.savedAt, tree: tree)
             return
         }
 
-        scanSession.markFinished()
-        persistLastScannedVolume(path: path)
-        if preservingStaleView {
-            selectedNodeIndex = preservedExploration?.selectedPath.flatMap {
-                ExplorationCapture.resolveOrAncestor($0, tree: tree)
-            }
-            let resolvedRoot = preservedExploration?.treemapRootPath.flatMap {
-                ExplorationCapture.resolveOrAncestor($0, tree: tree)
-            } ?? 0
-            setTreemapRoot(resolvedRoot, recordHistory: false)
-        } else {
-            setTreemapRoot(0, recordHistory: false)
+        await finishSuccessfulWarmPatch(
+            path: path,
+            tree: tree,
+            token: token,
+            refreshedRootCount: refreshedRootCount,
+            startTime: startTime,
+            persistableEventId: persistableEventId,
+            shouldRunPostScanAnalyses: shouldRunPostScanAnalyses
+        )
+    }
+
+    /// Returns the cold-fallback reason for either correctness failure shape. A root-level
+    /// target means nothing narrower resolved, so the splice path must not replace a full
+    /// scan wholesale; unresolved paths likewise make a partial patch untrustworthy.
+    private func warmPatchAbandonmentReason(
+        _ report: SubtreeRescanReport,
+        scanRoot: String
+    ) -> String? {
+        if !report.unresolvedPaths.isEmpty {
+            let count = report.unresolvedPaths.count
+            return "couldn't resolve \(count) changed path\(count == 1 ? "" : "s") against the cached tree"
         }
+        if report.rescannedRoots.contains(scanRoot) {
+            return "a changed path resolved to the scan root - nothing narrower to patch"
+        }
+        return nil
+    }
+
+    private func abandonWarmPatch(
+        path: String,
+        reason: String,
+        shouldRunPostScanAnalyses: Bool,
+        preservedExploration: ExplorationCapture?
+    ) {
+        warmPatchMutatesDisplayedTree = false
+        warmPatchExploration = nil
+        warmPatchExplorationToken = nil
+        log.notice("Warm start abandoned mid-patch for \(path, privacy: .public): \(reason, privacy: .public)")
+        beginColdScan(
+            path: path,
+            runPostScanAnalyses: shouldRunPostScanAnalyses,
+            coldFallbackReason: reason,
+            preservedExploration: preservedExploration
+        )
+    }
+
+    /// Terminal state for an interrupted tier. The in-memory tree may contain a partial
+    /// transactional patch, so publish its counters honestly and retain a stale badge;
+    /// critically, this function never writes TreeCache or starts live monitoring.
+    private func finishCancelledWarmPatch(
+        path: String,
+        cachedAt: Date,
+        tree: FileTree
+    ) {
+        log.info("Warm start cancelled mid-patch for \(path, privacy: .public); tree reflects a partial refresh")
+        scanSession.markFinished()
+        staleViewAsOf = staleViewAsOf ?? cachedAt
         computeExtensionStats()
+        // resetForNewScan() cleared the old model before either tier started. If
+        // cancellation landed before a splice (for example, an all-ephemeral patch),
+        // no canonical invalidation rebuilt it, so restore hardlink truth explicitly.
         refreshHardlinkGroups()
         scanProgress.publishCounters(forceLayoutRevision: true)
+        scanProgress.isScanning = false
+        scanProgress.isCancelled = true
+        scanProgress.scanComplete = true
+    }
+
+    private func restoreExploration(
+        _ capture: ExplorationCapture?,
+        in tree: FileTree
+    ) {
+        selectedNodeIndex = capture?.selectedPath.flatMap {
+            ExplorationCapture.resolveOrAncestor($0, tree: tree)
+        }
+        let resolvedRoot = capture?.treemapRootPath.flatMap {
+            ExplorationCapture.resolveOrAncestor($0, tree: tree)
+        } ?? 0
+        setTreemapRoot(resolvedRoot, recordHistory: false)
+    }
+
+    /// `selectedNodeIndex`'s didSet funnels every selection surface through here.
+    /// Record the path against the still-valid pre-splice tree; the index itself cannot
+    /// cross the trailing compaction.
+    func recordWarmPatchSelection() {
+        guard !isWarmPatchCommitInProgress,
+              warmPatchExplorationToken != nil,
+              let tree = fileTree else { return }
+        warmPatchExploration = ExplorationCapture(
+            selectedPath: selectedNodeIndex.map { tree.path(at: $0) },
+            treemapRootPath: warmPatchExploration?.treemapRootPath
+                ?? tree.path(at: navigation.treemapRootIndex)
+        )
+    }
+
+    /// Navigation helpers call this after changing the treemap root while a trailing
+    /// warm tier is active, keeping the durable path capture current.
+    func recordWarmPatchTreemapRoot() {
+        guard !isWarmPatchCommitInProgress,
+              warmPatchExplorationToken != nil,
+              let tree = fileTree else { return }
+        warmPatchExploration = ExplorationCapture(
+            selectedPath: warmPatchExploration?.selectedPath
+                ?? selectedNodeIndex.map { tree.path(at: $0) },
+            treemapRootPath: tree.path(at: navigation.treemapRootIndex)
+        )
+    }
+
+    private func logWarmPatchTier(
+        _ name: String,
+        report: SubtreeRescanReport
+    ) {
+        let stagedItems = report.metrics.rootStaging.reduce(0) {
+            $0 + $1.actualStagedItemCount
+        }
+        log.info(
+            "Warm patch \(name, privacy: .public) tier: roots=\(report.rescannedRoots.count), staged_items=\(stagedItems), seconds=\(report.metrics.totalSeconds, format: .fixed(precision: 3))"
+        )
+    }
+
+    private func finishSuccessfulWarmPatch(
+        path: String,
+        tree: FileTree,
+        token: UInt64,
+        refreshedRootCount: Int,
+        startTime: CFAbsoluteTime,
+        persistableEventId: UInt64,
+        shouldRunPostScanAnalyses: Bool
+    ) async {
+        scanSession.markFinished()
+        persistLastScannedVolume(path: path)
+        if refreshedRootCount == 0 {
+            // `.changes([])` is a valid warm decision. No splice means neither canonical
+            // invalidator rebuilt extension/hardlink state after resetForNewScan().
+            // Restore the same post-condition the original one-tier warm path provided.
+            computeExtensionStats()
+            refreshHardlinkGroups()
+            scanProgress.publishCounters(forceLayoutRevision: true)
+        }
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        let summary = ScanSummaryComposer.warm(foldersRefreshed: report.rescannedRoots.count, seconds: elapsed)
+        let summary = ScanSummaryComposer.warm(
+            foldersRefreshed: refreshedRootCount,
+            seconds: elapsed
+        )
+
         scanProgress.isScanning = false
         scanProgress.scanComplete = true
         scanProgress.currentPath = summary
         lastScanSummary = summary
         staleViewAsOf = nil
+        refreshInstantDuplicates()
+        // Start from "now" before potentially large persistence writes so real user
+        // changes cannot fall into a blind replay-to-monitor gap. FSEventsMonitor filters
+        // the central DirWiz Application Support root, so TreeCache/history/checkpoint
+        // writes below cannot feed back into LiveRefreshPolicy.
         startLiveMonitoring()
         autoCheckpointIfDue()
         WarmStartHistory.record(
-            .init(date: Date(), wasWarm: true, reason: nil, itemCount: tree.count, elapsedSeconds: elapsed),
+            .init(
+                date: Date(),
+                wasWarm: true,
+                reason: nil,
+                itemCount: tree.count,
+                elapsedSeconds: elapsed
+            ),
             for: path
         )
 
         do {
-            try TreeCache.save(tree: tree, lastEventId: newEventId)
+            try TreeCache.save(
+                tree: tree,
+                lastEventId: persistableEventId
+            )
         } catch {
             log.error("TreeCache save failed after warm start: \(error.localizedDescription, privacy: .public)")
         }
 
         if shouldRunPostScanAnalyses {
-            await runPostScanAnalyses(tree: tree, volumePath: path, token: token)
+            await runPostScanAnalyses(
+                tree: tree,
+                volumePath: path,
+                token: token
+            )
         }
     }
 

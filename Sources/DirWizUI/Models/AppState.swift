@@ -22,7 +22,22 @@ public final class AppState {
     /// directly rather than through a single function, so `didSet` is the one choke point
     /// that sees them all.
     public var selectedNodeIndex: UInt32? {
-        didSet { saveSelectionAndRootSession() }
+        didSet {
+            guard !isRejectingWarmPatchSelection else { return }
+            // FileScanner's transactional warm splice changes every downstream index
+            // atomically. Reject the tiny commit-to-invalidation interaction window:
+            // the event's index belongs to the old layout, while fileTree already holds
+            // the new layout. The canonical invalidator clears this flag before
+            // restoring the durable path-keyed selection.
+            if isWarmPatchCommitInProgress {
+                isRejectingWarmPatchSelection = true
+                selectedNodeIndex = oldValue
+                isRejectingWarmPatchSelection = false
+                return
+            }
+            recordWarmPatchSelection()
+            saveSelectionAndRootSession()
+        }
     }
 
     /// Coordinator for Quick Look panel - holds data source / controller conformance.
@@ -281,6 +296,34 @@ public final class AppState {
     /// suite instead of the app's real `UserDefaults.standard`.
     @ObservationIgnored let defaults: UserDefaults
 
+    /// OS-derived classifier for the warm patch's trailing tier. Injectable because
+    /// real test fixtures live under Darwin's own temp root and therefore cannot model
+    /// one interactive plus one ephemeral subtree without an explicit boundary.
+    @ObservationIgnored let ephemeralPaths: EphemeralPaths
+
+    /// Factory for the one scanner shared by both warm-patch tiers. Production uses the
+    /// real filesystem; tests inject a gated provider to stop exactly between the
+    /// interactive publication and the deferred splice.
+    @ObservationIgnored let warmPatchScannerFactory: @Sendable () -> FileScanner
+
+    /// A warm patch mutates the displayed cached tree in place. A superseding scan uses
+    /// this bit to detach that tree synchronously before the old scanner can commit after
+    /// cancellation and leave newly-renumbered nodes under stale index-keyed UI state.
+    @ObservationIgnored var warmPatchMutatesDisplayedTree = false
+
+    /// True only from immediately before a warm patch's transactional compaction until
+    /// AppState runs the matching canonical invalidation. Phase A remains interactive;
+    /// this closes the otherwise unsafe window where an old-layout click could be
+    /// interpreted against newly-renumbered nodes.
+    public internal(set) var isWarmPatchCommitInProgress = false
+    @ObservationIgnored var isRejectingWarmPatchSelection = false
+
+    /// Path-keyed position kept current while the trailing tier runs. The interactive tree
+    /// remains browsable during that pass, so a capture taken only at tier start would
+    /// rewind any selection or drill-down made before the second splice.
+    @ObservationIgnored var warmPatchExploration: ExplorationCapture?
+    @ObservationIgnored var warmPatchExplorationToken: UInt64?
+
     /// Per-volume, path-keyed exploration session (selection, treemap root, expansion)
     /// persisted across launches - plan 038. Restored by `restoreOnLaunch()`; saved by
     /// `saveSelectionAndRootSession()`/`saveExpandedPathsSession(_:)` (`AppState+Scan.swift`)
@@ -289,9 +332,15 @@ public final class AppState {
     /// tests isolates both.
     @ObservationIgnored let sessionStore: SessionStateStore
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(
+        defaults: UserDefaults = .standard,
+        ephemeralPaths: EphemeralPaths = .current(),
+        warmPatchScannerFactory: @escaping @Sendable () -> FileScanner = { FileScanner() }
+    ) {
         self.defaults = defaults
         self.sessionStore = SessionStateStore(defaults: defaults)
+        self.ephemeralPaths = ephemeralPaths
+        self.warmPatchScannerFactory = warmPatchScannerFactory
         // Read persisted preferences from the INJECTED store. Doing this here rather than
         // in a property default is what keeps an isolated test suite from writing into the
         // user's real defaults domain (it did, once).

@@ -477,6 +477,37 @@ public struct SubtreeRescanReport: Sendable {
     }
 }
 
+/// Scheduling and cancellation semantics for one subtree-rescan tier.
+///
+/// The ordinary interactive tier starts a new logical rescan and therefore clears a
+/// stale cancellation from any previous use of the scanner. A trailing tier is part of
+/// that same logical rescan: it preserves cancellation so a click landing between tiers
+/// cannot be erased, and it drains filesystem work at utility QoS.
+public struct SubtreeRescanOptions: Equatable, Sendable {
+    public enum Priority: Equatable, Sendable {
+        case interactive
+        case utility
+    }
+
+    public let priority: Priority
+    public let resetsCancellation: Bool
+
+    public init(priority: Priority, resetsCancellation: Bool) {
+        self.priority = priority
+        self.resetsCancellation = resetsCancellation
+    }
+
+    public static let interactive = SubtreeRescanOptions(
+        priority: .interactive,
+        resetsCancellation: true
+    )
+
+    public static let trailing = SubtreeRescanOptions(
+        priority: .utility,
+        resetsCancellation: false
+    )
+}
+
 // MARK: - FileScanner
 
 public final class FileScanner: @unchecked Sendable {
@@ -486,6 +517,13 @@ public final class FileScanner: @unchecked Sendable {
     private let computeBundleSizes: Bool
     private let deferTreeMaterialization: Bool
     let filesystem: FilesystemProvider
+
+    /// Test-only observation point after a transactional subtree splice and its aggregate
+    /// repair have committed, but before `rescanSubtrees` returns to AppState. Production
+    /// initializers always leave this nil. It exists to exercise the otherwise tiny
+    /// supersession window where a newer scan can land after mutation but before the
+    /// caller's token check.
+    let subtreeRescanPostCommitHook: (@Sendable () -> Void)?
 
     /// Test seam for firmlink deduplication. Real firmlinks can't be created in a fixture
     /// (APFS has no directory hard links), so tests inject the set of paths that would be
@@ -502,6 +540,7 @@ public final class FileScanner: @unchecked Sendable {
         self.computeBundleSizes = computeBundleSizes
         self.deferTreeMaterialization = deferTreeMaterialization
         self.firmlinkDuplicatesOverride = nil
+        self.subtreeRescanPostCommitHook = nil
     }
 
     /// Test-only initializer that injects the firmlink duplicate set directly.
@@ -515,6 +554,21 @@ public final class FileScanner: @unchecked Sendable {
         self.computeBundleSizes = computeBundleSizes
         self.deferTreeMaterialization = deferTreeMaterialization
         self.firmlinkDuplicatesOverride = firmlinkDuplicates
+        self.subtreeRescanPostCommitHook = nil
+    }
+
+    /// Test-only initializer for observing the post-commit/pre-return supersession window.
+    init(
+        filesystem: FilesystemProvider = RealFilesystemProvider(),
+        computeBundleSizes: Bool = false,
+        deferTreeMaterialization: Bool = false,
+        subtreeRescanPostCommitHook: @escaping @Sendable () -> Void
+    ) {
+        self.filesystem = filesystem
+        self.computeBundleSizes = computeBundleSizes
+        self.deferTreeMaterialization = deferTreeMaterialization
+        self.firmlinkDuplicatesOverride = nil
+        self.subtreeRescanPostCommitHook = subtreeRescanPostCommitHook
     }
 
     /// Resolves the duplicate set for a scan: an injected override wins (tests), otherwise
@@ -650,15 +704,21 @@ public final class FileScanner: @unchecked Sendable {
     public func rescanSubtrees(
         _ changedDirectories: [String],
         tree: FileTree,
-        progress: ScanProgress
+        progress: ScanProgress,
+        options: SubtreeRescanOptions = .interactive,
+        onWillCommit: (@MainActor @Sendable () -> Void)? = nil
     ) async -> SubtreeRescanReport {
         let clock = ContinuousClock()
         let totalStart = clock.now
         let beforeNodeCount = tree.count
 
-        // A scanner instance can be reused after cancel(); reset so a stale cancellation
-        // from an earlier scan() call doesn't silently no-op this rescan.
-        cancelState.withLock { $0 = false }
+        // A scanner instance can be reused after cancel(), so an ordinary first tier
+        // clears stale cancellation. A trailing tier is a continuation of the SAME
+        // logical patch and deliberately does not: otherwise a cancel landing between
+        // tiers would be erased just before the expensive deferred walk begins.
+        if options.resetsCancellation {
+            cancelState.withLock { $0 = false }
+        }
 
         var unresolvedPaths: [String] = []
         var resolvedRequests: [(requestedPath: String, resolvedPath: String)] = []
@@ -735,7 +795,12 @@ public final class FileScanner: @unchecked Sendable {
         let preflightAndPlanningEnd = clock.now
 
         let phaseAStart = clock.now
-        let staged = await stageChangedRoots(plans, progress: progress, visited: visited)
+        let staged = await stageChangedRoots(
+            plans,
+            progress: progress,
+            visited: visited,
+            priority: options.priority
+        )
         let phaseAEnd = clock.now
         let rootStaging = rescannedRoots.compactMap { path -> SubtreeRescanMetrics.RootStaging? in
             guard let result = staged[path] else { return nil }
@@ -758,6 +823,15 @@ public final class FileScanner: @unchecked Sendable {
             count = sum.overflow ? Int.max : sum.partialValue
         }
 
+        // Give a UI caller one MainActor turn to suspend index-based interaction before
+        // the transactional compaction renumbers the displayed tree. The callback is
+        // deliberately immediately adjacent to Phase B: Phase A can take seconds and
+        // leaves every old index valid, so blocking navigation for the whole enumeration
+        // would defeat warm start's browsable-stale-view contract.
+        if !staged.isEmpty {
+            await onWillCommit?()
+        }
+
         let phaseB = applyStagedRoots(
             rescannedRoots,
             staged: staged,
@@ -777,6 +851,7 @@ public final class FileScanner: @unchecked Sendable {
             aggregateRecomputeSeconds = Self.wallSeconds(
                 aggregateStart.duration(to: clock.now)
             )
+            subtreeRescanPostCommitHook?()
         }
 
         let afterNodeCount = tree.count
@@ -867,7 +942,8 @@ public final class FileScanner: @unchecked Sendable {
     private func stageChangedRoots(
         _ plans: [RootPlan],
         progress: ScanProgress,
-        visited: VisitedDirectories
+        visited: VisitedDirectories,
+        priority: SubtreeRescanOptions.Priority
     ) async -> [String: StageResult] {
         guard !plans.isEmpty else { return [:] }
 
@@ -922,6 +998,12 @@ public final class FileScanner: @unchecked Sendable {
         }
 
         let workerCount = min(Self.defaultRescanWorkerCount(), max(1, directoryPlans.count))
+        let dispatchQoS: DispatchQoS.QoSClass = priority == .utility
+            ? .utility
+            : .userInitiated
+        let taskPriority: TaskPriority = priority == .utility
+            ? .low
+            : .userInitiated
         var results: [String: StageResult] = [:]
         results.reserveCapacity(plans.count)
 
@@ -929,7 +1011,7 @@ public final class FileScanner: @unchecked Sendable {
             // Bundle plans: one Task each, no further internal parallelism possible -
             // computing a bundle's size is a single recursive walk, not splittable.
             for plan in bundlePlans {
-                group.addTask {
+                group.addTask(priority: taskPriority) {
                     guard !Task.isCancelled, !self.isCancelled else { return nil }
                     let (fileSize, allocatedSize) = self.filesystem.computeBundleSize(
                         path: plan.targetPath,
@@ -947,13 +1029,13 @@ public final class FileScanner: @unchecked Sendable {
             // risks starving the cooperative thread pool cold scan and everything else
             // shares.
             if !directoryPlans.isEmpty {
-                group.addTask {
+                group.addTask(priority: taskPriority) {
                     let rawFilesystemForScan = self.filesystem as? RealFilesystemProvider
                     await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                         let dispatchGroup = DispatchGroup()
                         for _ in 0..<workerCount {
                             dispatchGroup.enter()
-                            DispatchQueue.global(qos: .userInitiated).async {
+                            DispatchQueue.global(qos: dispatchQoS).async {
                                 let rawBuffer = rawFilesystemForScan.map { _ in
                                     UnsafeMutableRawPointer.allocate(
                                         byteCount: RealFilesystemProvider.directoryBufferSize,
@@ -996,7 +1078,7 @@ public final class FileScanner: @unchecked Sendable {
                                 dispatchGroup.leave()
                             }
                         }
-                        dispatchGroup.notify(queue: .global(qos: .userInitiated)) {
+                        dispatchGroup.notify(queue: .global(qos: dispatchQoS)) {
                             continuation.resume()
                         }
                     }

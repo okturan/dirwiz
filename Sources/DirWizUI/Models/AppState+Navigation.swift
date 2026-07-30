@@ -7,6 +7,7 @@ extension AppState {
 
     /// Set the treemap root to a directory, rebuilding the canonical path from the parent chain.
     public func setTreemapRoot(_ nodeIndex: UInt32, recordHistory: Bool = true) {
+        guard !isWarmPatchCommitInProgress else { return }
         guard let tree = fileTree else { return }
         let nodes = tree.nodesSnapshot()
         let i = Int(nodeIndex)
@@ -19,59 +20,71 @@ extension AppState {
 
         navigation.treemapRootIndex = nodeIndex
         navigation.treemapPath = Self.buildPath(to: nodeIndex, nodes: nodes)
+        recordWarmPatchTreemapRoot()
         saveSelectionAndRootSession()
     }
 
     /// Navigate up one level in treemap.
     public func navigateUp() {
+        guard !isWarmPatchCommitInProgress else { return }
         guard navigation.treemapPath.count > 1 else { return }
         let parentIndex = navigation.treemapPath[navigation.treemapPath.count - 2]
         navigation.backStack.append(navigation.treemapRootIndex)
         navigation.forwardStack.removeAll()
         navigation.treemapRootIndex = parentIndex
         navigation.treemapPath.removeLast()
+        recordWarmPatchTreemapRoot()
     }
 
     /// Navigate to a specific level in breadcrumb.
     public func navigateTo(pathIndex: Int) {
+        guard !isWarmPatchCommitInProgress else { return }
         guard pathIndex < navigation.treemapPath.count else { return }
         let target = navigation.treemapPath[pathIndex]
         navigation.backStack.append(navigation.treemapRootIndex)
         navigation.forwardStack.removeAll()
         navigation.treemapRootIndex = target
         navigation.treemapPath = Array(navigation.treemapPath.prefix(pathIndex + 1))
+        recordWarmPatchTreemapRoot()
     }
 
     /// Go back to previously viewed directory.
     public func navigateBack() {
+        guard !isWarmPatchCommitInProgress else { return }
         guard let prev = navigation.backStack.popLast() else { return }
         guard let tree = fileTree else { return }
         navigation.forwardStack.append(navigation.treemapRootIndex)
         navigation.treemapRootIndex = prev
         navigation.treemapPath = Self.buildPath(to: prev, nodes: tree.nodesSnapshot())
+        recordWarmPatchTreemapRoot()
     }
 
     /// Go forward after navigating back.
     public func navigateForward() {
+        guard !isWarmPatchCommitInProgress else { return }
         guard let next = navigation.forwardStack.popLast() else { return }
         guard let tree = fileTree else { return }
         navigation.backStack.append(navigation.treemapRootIndex)
         navigation.treemapRootIndex = next
         navigation.treemapPath = Self.buildPath(to: next, nodes: tree.nodesSnapshot())
+        recordWarmPatchTreemapRoot()
     }
 
     /// Navigate to the volume root.
     public func navigateHome() {
+        guard !isWarmPatchCommitInProgress else { return }
         guard navigation.treemapRootIndex != 0 else { return }
         navigation.backStack.append(navigation.treemapRootIndex)
         navigation.forwardStack.removeAll()
         navigation.treemapRootIndex = 0
         navigation.treemapPath = [0]
+        recordWarmPatchTreemapRoot()
     }
 
     /// Navigate treemap to show a specific node (from search or tree view).
     /// For files, navigates to the parent directory. For directories, navigates to it.
     public func showNodeInTreemap(_ nodeIndex: UInt32) {
+        guard !isWarmPatchCommitInProgress else { return }
         guard let tree = fileTree else { return }
         let nodes = tree.nodesSnapshot()
         let i = Int(nodeIndex)

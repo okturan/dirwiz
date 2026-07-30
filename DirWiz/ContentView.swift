@@ -125,7 +125,10 @@ struct ContentView: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .help("Export Report (Cmd+Opt+E)")
-                    .disabled(appState.fileTree == nil)
+                    .disabled(
+                        appState.fileTree == nil
+                            || appState.isWarmPatchCommitInProgress
+                    )
                 }
                 ToolbarItem(placement: .automatic) {
                     Toggle(isOn: $showLegend) {
@@ -672,6 +675,13 @@ struct ContentView: View {
                 .frame(width: 220)
             }
         }
+        // FileScanner swaps the flat node array transactionally, then AppState clears
+        // and remaps every index-keyed consumer in the same MainActor turn after the
+        // scanner returns. Suppress the brief commit-to-invalidation interaction window
+        // across the whole detail surface: an old row/search/treemap index must never be
+        // resolved against the newly-renumbered tree (especially by destructive menus).
+        .disabled(appState.isWarmPatchCommitInProgress)
+        .allowsHitTesting(!appState.isWarmPatchCommitInProgress)
     }
 
     // MARK: - Split Divider
@@ -919,7 +929,8 @@ struct ContentView: View {
     // MARK: - Export Report
 
     private func exportReport() {
-        guard let tree = appState.fileTree else { return }
+        guard !appState.isWarmPatchCommitInProgress,
+              let tree = appState.fileTree else { return }
 
         let panel = NSSavePanel()
         panel.title = "Export Report"
@@ -946,7 +957,8 @@ struct ContentView: View {
     // MARK: - JSON Export
 
     private func exportJSON() {
-        guard appState.fileTree != nil else { return }
+        guard !appState.isWarmPatchCommitInProgress,
+              appState.fileTree != nil else { return }
 
         let panel = NSSavePanel()
         panel.title = "Export JSON Report"

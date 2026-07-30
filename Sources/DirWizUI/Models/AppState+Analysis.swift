@@ -440,7 +440,13 @@ extension AppState {
     /// with no path equivalent, and preserving them is complexity without user value.
     /// Shared by every tree-mutating action so the reset+restore list can't drift between
     /// callers.
-    private func invalidateAfterTreeMutation(restoring capture: ExplorationCapture? = nil) {
+    /// `scheduleDerivedAnalyses` is an internal timing seam: the real-volume publication
+    /// benchmark measures the synchronous UI boundary without leaving detached hardlink
+    /// work running into the next matched sample. Production callers use the default.
+    func invalidateAfterTreeMutation(
+        restoring capture: ExplorationCapture? = nil,
+        scheduleDerivedAnalyses: Bool = true
+    ) {
         search.reset()
         temporalDiff.reset()
         recencyFactors = []
@@ -461,12 +467,16 @@ extension AppState {
         }
 
         scanProgress.publishCounters(forceLayoutRevision: true)
-        refreshHardlinkGroups()
+        if scheduleDerivedAnalyses {
+            refreshHardlinkGroups()
+        }
 
         // Candidate paths may have just been trashed. A stale candidate offering to verify
         // a file that no longer exists is worse than showing none, so drop and recompute.
         duplicate.resetInstant()
-        refreshInstantDuplicates()
+        if scheduleDerivedAnalyses {
+            refreshInstantDuplicates()
+        }
     }
 
     /// Recomputes the name+size duplicate candidates from the current tree.
