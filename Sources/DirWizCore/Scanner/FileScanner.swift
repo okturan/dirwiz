@@ -337,6 +337,34 @@ public struct BundleSizeResolutionReport: Sendable {
 /// orchestration gaps not assigned to one of the named phases. Node counts distinguish
 /// work staged off-tree from nodes actually committed to the destination tree.
 public struct SubtreeRescanMetrics: Sendable {
+    /// Actual Phase A work attributed to one collapsed rescan root.
+    public struct RootStaging: Sendable, Equatable {
+        public let path: String
+        /// Original `rescanSubtrees` paths whose resolved targets collapsed into `path`,
+        /// preserving request order. This keeps cached-plan estimates attributable even
+        /// when a new or deleted path has to be rescanned through an existing ancestor.
+        public let contributingRequestedPaths: [String]
+        /// Directory staging trees include their placeholder/target root. Opaque bundle
+        /// results count as one item because Phase A stages the bundle target itself.
+        public let actualStagedItemCount: Int
+
+        public init(path: String, actualStagedItemCount: Int) {
+            self.path = path
+            self.contributingRequestedPaths = [path]
+            self.actualStagedItemCount = actualStagedItemCount
+        }
+
+        public init(
+            path: String,
+            contributingRequestedPaths: [String],
+            actualStagedItemCount: Int
+        ) {
+            self.path = path
+            self.contributingRequestedPaths = contributingRequestedPaths
+            self.actualStagedItemCount = actualStagedItemCount
+        }
+    }
+
     public let preflightAndPlanningSeconds: Double
     public let phaseAStagingSeconds: Double
     public let phaseBTargetResolutionSeconds: Double
@@ -362,6 +390,9 @@ public struct SubtreeRescanMetrics: Sendable {
     public let resolvedTargetCount: Int
     public let structurallyReplacedRootCount: Int
     public let appliedRootCount: Int
+    /// Phase A results in deterministic `rescannedRoots` order. A root cancelled before
+    /// producing any result is omitted rather than reported as an empty staged subtree.
+    public let rootStaging: [RootStaging]
 
     public init(
         preflightAndPlanningSeconds: Double = 0,
@@ -382,7 +413,8 @@ public struct SubtreeRescanMetrics: Sendable {
         stagedRootCount: Int = 0,
         resolvedTargetCount: Int = 0,
         structurallyReplacedRootCount: Int = 0,
-        appliedRootCount: Int = 0
+        appliedRootCount: Int = 0,
+        rootStaging: [RootStaging] = []
     ) {
         self.preflightAndPlanningSeconds = preflightAndPlanningSeconds
         self.phaseAStagingSeconds = phaseAStagingSeconds
@@ -403,6 +435,7 @@ public struct SubtreeRescanMetrics: Sendable {
         self.resolvedTargetCount = resolvedTargetCount
         self.structurallyReplacedRootCount = structurallyReplacedRootCount
         self.appliedRootCount = appliedRootCount
+        self.rootStaging = rootStaging
     }
 
     public static let zero = SubtreeRescanMetrics()
@@ -628,16 +661,38 @@ public final class FileScanner: @unchecked Sendable {
         cancelState.withLock { $0 = false }
 
         var unresolvedPaths: [String] = []
-        var resolvedPaths: [String] = []
+        var resolvedRequests: [(requestedPath: String, resolvedPath: String)] = []
         for changedPath in changedDirectories {
             guard let resolved = resolveRescanTarget(changedPath, tree: tree) else {
                 unresolvedPaths.append(changedPath)
                 continue
             }
-            resolvedPaths.append(resolved)
+            resolvedRequests.append((
+                requestedPath: changedPath,
+                resolvedPath: resolved
+            ))
         }
 
-        let rescannedRoots = PathCollapse.outermostRoots(resolvedPaths)
+        let rescannedRoots = PathCollapse.outermostRoots(
+            resolvedRequests.map { $0.resolvedPath }
+        )
+        let rescannedRootSet = Set(rescannedRoots)
+        var contributingRequestedPathsByRoot = Dictionary(
+            uniqueKeysWithValues: rescannedRoots.map { ($0, [String]()) }
+        )
+        for request in resolvedRequests {
+            var candidate = request.resolvedPath
+            while true {
+                if rescannedRootSet.contains(candidate) {
+                    contributingRequestedPathsByRoot[candidate, default: []]
+                        .append(request.requestedPath)
+                    break
+                }
+                let parent = (candidate as NSString).deletingLastPathComponent
+                guard !parent.isEmpty, parent != candidate else { break }
+                candidate = parent
+            }
+        }
         let treeRoot = tree.path(at: 0)
 
         // Abandon before Phase A, and critically before ANY mutation, when the caller
@@ -682,6 +737,21 @@ public final class FileScanner: @unchecked Sendable {
         let phaseAStart = clock.now
         let staged = await stageChangedRoots(plans, progress: progress, visited: visited)
         let phaseAEnd = clock.now
+        let rootStaging = rescannedRoots.compactMap { path -> SubtreeRescanMetrics.RootStaging? in
+            guard let result = staged[path] else { return nil }
+            let actualStagedItemCount: Int
+            switch result {
+            case .directory(let staging):
+                actualStagedItemCount = staging.count
+            case .bundle:
+                actualStagedItemCount = 1
+            }
+            return SubtreeRescanMetrics.RootStaging(
+                path: path,
+                contributingRequestedPaths: contributingRequestedPathsByRoot[path] ?? [],
+                actualStagedItemCount: actualStagedItemCount
+            )
+        }
         let stagedNodeCount = staged.values.reduce(into: 0) { count, result in
             guard case .directory(let staging) = result else { return }
             let sum = count.addingReportingOverflow(staging.count)
@@ -734,7 +804,8 @@ public final class FileScanner: @unchecked Sendable {
             stagedRootCount: staged.count,
             resolvedTargetCount: phaseB.resolvedTargetCount,
             structurallyReplacedRootCount: phaseB.structurallyReplacedRootCount,
-            appliedRootCount: phaseB.appliedRootCount
+            appliedRootCount: phaseB.appliedRootCount,
+            rootStaging: rootStaging
         )
         return SubtreeRescanReport(
             requestedPaths: changedDirectories,

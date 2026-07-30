@@ -2,18 +2,41 @@
 
 ## 1. Diagnose before tuning
 
-- [ ] 1.1 Log per-root staged item counts during a real `/` warm patch: root path, estimated
+- [x] 1.1 Log per-root staged item counts during a real `/` warm patch: root path, estimated
       items, actual items staged. Use the existing phase instrumentation from
       `SubtreeRescanMetricsTests`/`RealVolumeWarmStartBenchmarkTests` rather than adding a
       third harness.
-- [ ] 1.2 Report the distribution for at least three real patches. Specifically: does one root
+- [x] 1.2 Report the distribution for at least three real patches. Specifically: does one root
       account for most of the staged items?
-- [ ] 1.3 DECISION POINT: if a single root dominates (say one root is over half the staged
+- [x] 1.3 DECISION POINT: if a single root dominates (say one root is over half the staged
       items), STOP and report. Narrowing attribution for that root is then a better change
       than raising the cap, and it should be specced separately rather than folded in here.
-- [ ] 1.4 Measure on an idle machine. `sysctl -n vm.loadavg` must be low. Load already
+- [x] 1.4 Measure on an idle machine. `sysctl -n vm.loadavg` must be low. Load already
       invalidated one full round of scan timings in this repo, and it is the first thing to
       check when a number looks wrong.
+
+### Diagnostic result - STOP (2026-07-30)
+
+The Release harness was prebuilt and then run with `--skip-build` at production worker
+defaults. Immediately before the run, `vm.loadavg` was `{ 1.59 2.06 6.08 }` on a 10-core
+machine, sampled CPU idle was 87-89%, and disk traffic was 0.02-0.60 MB/s. The initial cold
+scan took 19.606 s for 4,778,117 items.
+
+The harness collected three distinct, non-empty, production-planner warm decisions. Each
+workload was replayed three times from the same pre-patch scratch cache; all three repetitions
+agreed on the item distribution:
+
+| Workload | Roots | Estimated items | Actual staged items | Largest root | Share | Patch median |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| 1 | 6 | 359,824 | 359,827 | `/private/var/folders/.../T` (151,609) | 42.13% | 2.034 s |
+| 2 | 19 | 359,878 | 359,876 | `/private/var/folders/.../T` (151,609) | 42.13% | 2.020 s |
+| 3 | 7 | 292,853 | 292,853 | `/private/var/folders/.../T` (151,609) | **51.77%** | 1.640 s |
+
+The estimator was exact or within three items at aggregate level, so this is not an
+item-estimation failure. Workload 3 crossed the decision point: one root accounted for more
+than half of all staged items. Sections 2-5 are therefore deliberately not started. Narrowing
+FSEvents attribution for the oversized temp root - which contains the benchmark's isolated
+scratch cache - needs a separate spec before reconsidering the root cap.
 
 ## 2. Make the item gate trustworthy before moving the cap
 

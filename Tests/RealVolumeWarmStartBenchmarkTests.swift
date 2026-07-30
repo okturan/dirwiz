@@ -18,6 +18,265 @@ private let runRealVolumeWarmStartBenchmark =
 private let runRealVolumeWarmStartDiagnostics =
     ProcessInfo.processInfo.environment["DIRWIZ_REAL_VOLUME_DIAGNOSTIC"] == "1"
 
+/// Keeps the ordinary three-refresh benchmark unchanged while making the heavier
+/// diagnostic mode honest about whether it actually observed a patchable workload.
+private enum RealVolumeDiagnosticPolicy {
+    static let ordinaryRefreshAttemptCount = 3
+    static let requiredWarmWorkloadCount = 3
+    static let samplesPerWarmWorkload = 3
+
+    /// Eight attempts give diagnostic mode five additional independent journal windows
+    /// beyond the ordinary three. A prior three-attempt run produced two warm decisions,
+    /// while another produced none, so eight improves the chance of collecting three
+    /// without pretending ambient filesystem churn can be forced. At the observed
+    /// ~30-second upper end for a cold fallback, the bounded worst case is about four
+    /// minutes - substantial but finite, and well inside this suite's 30-minute timeout.
+    static let diagnosticRefreshAttemptLimit = 8
+
+    static func refreshAttemptLimit(diagnosticEnabled: Bool) -> Int {
+        diagnosticEnabled
+            ? diagnosticRefreshAttemptLimit
+            : ordinaryRefreshAttemptCount
+    }
+
+    static func shouldCollect(
+        diagnosticEnabled: Bool,
+        targetCount: Int
+    ) -> Bool {
+        diagnosticEnabled && targetCount > 0
+    }
+
+    static func hasRequiredWarmWorkloads(_ completedWorkloadCount: Int) -> Bool {
+        completedWorkloadCount >= requiredWarmWorkloadCount
+    }
+}
+
+@Suite("Real-volume diagnostic attempt policy")
+struct RealVolumeDiagnosticAttemptPolicyTests {
+    @Test("Ordinary mode stays at three attempts and diagnostic mode is bounded")
+    func attemptLimits() {
+        #expect(
+            RealVolumeDiagnosticPolicy.refreshAttemptLimit(
+                diagnosticEnabled: false
+            ) == 3
+        )
+        #expect(
+            RealVolumeDiagnosticPolicy.refreshAttemptLimit(
+                diagnosticEnabled: true
+            ) == 8
+        )
+    }
+
+    @Test("Only non-empty diagnostic decisions count, and three workloads finish the gate")
+    func collectionAndCompletion() {
+        #expect(
+            !RealVolumeDiagnosticPolicy.shouldCollect(
+                diagnosticEnabled: false,
+                targetCount: 12
+            )
+        )
+        #expect(
+            !RealVolumeDiagnosticPolicy.shouldCollect(
+                diagnosticEnabled: true,
+                targetCount: 0
+            )
+        )
+        #expect(
+            RealVolumeDiagnosticPolicy.shouldCollect(
+                diagnosticEnabled: true,
+                targetCount: 1
+            )
+        )
+        #expect(!RealVolumeDiagnosticPolicy.hasRequiredWarmWorkloads(2))
+        #expect(RealVolumeDiagnosticPolicy.hasRequiredWarmWorkloads(3))
+    }
+}
+
+/// One root's cached-tree estimate compared with the Phase A work that was actually
+/// staged. The sign convention is deliberate: a negative error means the cached estimate
+/// undershot the live filesystem work, which is the dangerous direction for the item gate.
+private struct RootStagingEstimateComparison: Equatable {
+    let path: String
+    let estimatedItemCount: Int?
+    let actualStagedItemCount: Int
+
+    var estimateMinusActualItemCount: Int? {
+        estimatedItemCount.map { $0 - actualStagedItemCount }
+    }
+
+    var estimateErrorPercentOfActual: Double? {
+        guard actualStagedItemCount > 0,
+              let estimateMinusActualItemCount else {
+            return nil
+        }
+        return Double(estimateMinusActualItemCount) / Double(actualStagedItemCount) * 100
+    }
+}
+
+private struct RootStagingDistribution {
+    let rootsByActualItemCount: [RootStagingEstimateComparison]
+    let totalActualStagedItemCount: Int
+
+    var totalEstimatedItemCount: Int? {
+        var total = 0
+        for root in rootsByActualItemCount {
+            guard let estimate = root.estimatedItemCount else { return nil }
+            let sum = total.addingReportingOverflow(estimate)
+            total = sum.overflow ? Int.max : sum.partialValue
+        }
+        return total
+    }
+
+    var topRootShare: Double {
+        guard totalActualStagedItemCount > 0,
+              let topRoot = rootsByActualItemCount.first else {
+            return 0
+        }
+        return Double(topRoot.actualStagedItemCount)
+            / Double(totalActualStagedItemCount)
+    }
+
+    /// Task 1.3 says "over half", not half-or-more. Keep the decision exact so two
+    /// equally sized roots do not accidentally trigger the diagnostic STOP.
+    var singleRootOverHalf: Bool {
+        topRootShare > 0.5
+    }
+}
+
+private func rootStagingDistribution(
+    _ roots: [RootStagingEstimateComparison]
+) -> RootStagingDistribution {
+    let ordered = roots.sorted {
+        if $0.actualStagedItemCount != $1.actualStagedItemCount {
+            return $0.actualStagedItemCount > $1.actualStagedItemCount
+        }
+        return $0.path < $1.path
+    }
+    return RootStagingDistribution(
+        rootsByActualItemCount: ordered,
+        totalActualStagedItemCount: ordered.reduce(0) {
+            $0 + $1.actualStagedItemCount
+        }
+    )
+}
+
+/// Attributes planner-time estimates to the actual root Phase A staged. A changed path
+/// can disappear from the cached tree and resolve upward to its nearest surviving parent;
+/// looking up the parent's path would then report "unavailable" (or the whole parent's
+/// cached size) instead of preserving the planner's 32-item unresolved estimate.
+private func attributedCachedEstimate(
+    contributingRequestedPaths: [String],
+    estimatedItemsByRequestedPath: [String: Int]
+) -> Int? {
+    guard !contributingRequestedPaths.isEmpty else { return nil }
+
+    var total = 0
+    for requestedPath in contributingRequestedPaths {
+        guard let estimate = estimatedItemsByRequestedPath[requestedPath] else {
+            return nil
+        }
+        let sum = total.addingReportingOverflow(estimate)
+        total = sum.overflow ? Int.max : sum.partialValue
+    }
+    return total
+}
+
+@Suite("Real-volume root staging distribution")
+struct RealVolumeRootStagingDistributionTests {
+    @Test("Sorts by actual work and triggers only when one root is over half")
+    func dominantRootDecision() {
+        let dominant = rootStagingDistribution([
+            RootStagingEstimateComparison(
+                path: "/small",
+                estimatedItemCount: 25,
+                actualStagedItemCount: 20
+            ),
+            RootStagingEstimateComparison(
+                path: "/large",
+                estimatedItemCount: 40,
+                actualStagedItemCount: 80
+            ),
+        ])
+
+        #expect(dominant.rootsByActualItemCount.map(\.path) == ["/large", "/small"])
+        #expect(dominant.totalActualStagedItemCount == 100)
+        #expect(dominant.totalEstimatedItemCount == 65)
+        #expect(dominant.topRootShare == 0.8)
+        #expect(dominant.singleRootOverHalf)
+        #expect(
+            dominant.rootsByActualItemCount[0].estimateMinusActualItemCount == -40
+        )
+        #expect(
+            dominant.rootsByActualItemCount[0].estimateErrorPercentOfActual == -50
+        )
+
+        let tied = rootStagingDistribution([
+            RootStagingEstimateComparison(
+                path: "/a",
+                estimatedItemCount: 50,
+                actualStagedItemCount: 50
+            ),
+            RootStagingEstimateComparison(
+                path: "/b",
+                estimatedItemCount: 50,
+                actualStagedItemCount: 50
+            ),
+        ])
+        #expect(tied.topRootShare == 0.5)
+        #expect(!tied.singleRootOverHalf)
+
+        let missingEstimate = rootStagingDistribution([
+            RootStagingEstimateComparison(
+                path: "/resolved-upward",
+                estimatedItemCount: nil,
+                actualStagedItemCount: 90
+            ),
+            RootStagingEstimateComparison(
+                path: "/known",
+                estimatedItemCount: 10,
+                actualStagedItemCount: 10
+            ),
+        ])
+        #expect(missingEstimate.totalActualStagedItemCount == 100)
+        #expect(missingEstimate.totalEstimatedItemCount == nil)
+        #expect(missingEstimate.topRootShare == 0.9)
+        #expect(missingEstimate.singleRootOverHalf)
+    }
+
+    @Test("Resolved-upward roots keep and sum their original requested-path estimates")
+    func resolvedUpwardEstimateAttribution() {
+        let estimates = [
+            "/cached/parent/new-a": 32,
+            "/cached/parent/new-b": 32,
+        ]
+
+        #expect(
+            attributedCachedEstimate(
+                contributingRequestedPaths: ["/cached/parent/new-a"],
+                estimatedItemsByRequestedPath: estimates
+            ) == 32
+        )
+        #expect(
+            attributedCachedEstimate(
+                contributingRequestedPaths: [
+                    "/cached/parent/new-a",
+                    "/cached/parent/new-b",
+                ],
+                estimatedItemsByRequestedPath: estimates
+            ) == 64
+        )
+        // The actual staged root is the surviving parent, but its path is deliberately
+        // NOT a key. Attribution must use the original requested paths, never substitute
+        // the resolved parent and silently lose the planner's estimate.
+        #expect(
+            attributedCachedEstimate(
+                contributingRequestedPaths: ["/cached/parent"],
+                estimatedItemsByRequestedPath: estimates
+            ) == nil
+        )
+    }
+}
+
 /// This benchmark mutates the process-global `DIRWIZ_APP_SUPPORT_DIR`, so it must live
 /// beneath `AppSupportEnvSuites` rather than the otherwise usual
 /// `PerformanceSensitiveSuites`. Its stricter explicit opt-in keeps it out of both normal
@@ -34,8 +293,8 @@ extension AppSupportEnvSuites {
         )
     )
     struct RealVolumeWarmStartBenchmarkTests {
-        private static let refreshCount = 3
-        private static let diagnosticPatchSampleCount = 3
+        private static let diagnosticPatchSampleCount =
+            RealVolumeDiagnosticPolicy.samplesPerWarmWorkload
         private static let machTimebase: (numerator: UInt32, denominator: UInt32) = {
             var info = mach_timebase_info_data_t()
             mach_timebase_info(&info)
@@ -238,6 +497,117 @@ extension AppSupportEnvSuites {
             String(format: "%.6f s", value)
         }
 
+        private func perRootCachedEstimates(
+            for targets: [String],
+            cachedTree: FileTree
+        ) -> [String: Int] {
+            var estimates: [String: Int] = [:]
+            estimates.reserveCapacity(targets.count)
+            for target in targets {
+                estimates[target] = WarmStartPlanner.estimatedPatchItemCount(
+                    forChangedPaths: [target],
+                    cachedTree: cachedTree
+                )
+            }
+            return estimates
+        }
+
+        private func signedInteger(_ value: Int?) -> String {
+            guard let value else { return "unavailable" }
+            return value >= 0 ? "+\(value)" : "\(value)"
+        }
+
+        private func signedPercent(_ value: Double?) -> String {
+            guard let value else { return "unavailable" }
+            return String(format: "%+.2f%%", value)
+        }
+
+        private func printRootStagingDistribution(
+            _ rootStaging: [SubtreeRescanMetrics.RootStaging],
+            estimatedItemsByPath: [String: Int],
+            prefix: String
+        ) -> RootStagingDistribution {
+            let comparisons: [RootStagingEstimateComparison] =
+                rootStaging.map { actual in
+                    RootStagingEstimateComparison(
+                        path: actual.path,
+                        estimatedItemCount: attributedCachedEstimate(
+                            contributingRequestedPaths:
+                                actual.contributingRequestedPaths,
+                            estimatedItemsByRequestedPath:
+                                estimatedItemsByPath
+                        ),
+                        actualStagedItemCount: actual.actualStagedItemCount
+                    )
+                }
+            let distribution = rootStagingDistribution(comparisons)
+            for (offset, root) in distribution.rootsByActualItemCount.enumerated() {
+                let actualShare = distribution.totalActualStagedItemCount > 0
+                    ? Double(root.actualStagedItemCount)
+                        / Double(distribution.totalActualStagedItemCount)
+                    : 0
+                let fields = [
+                    "[real-volume warm bench] \(prefix) root staging rank \(offset + 1)",
+                    "path=\(root.path)",
+                    "estimated_items="
+                        + (root.estimatedItemCount.map(String.init) ?? "unavailable"),
+                    "actual_staged_items=\(root.actualStagedItemCount)",
+                    "estimated_minus_actual="
+                        + signedInteger(root.estimateMinusActualItemCount),
+                    "estimate_error_percent_of_actual="
+                        + signedPercent(root.estimateErrorPercentOfActual),
+                    "share_of_actual="
+                        + String(format: "%.2f%%", actualShare * 100),
+                ]
+                print(fields.joined(separator: ", "))
+            }
+            let summaryFields = [
+                "[real-volume warm bench] \(prefix) root staging distribution",
+                "roots_reported=\(rootStaging.count)",
+                "roots_with_cached_estimate="
+                    + String(comparisons.reduce(0) {
+                        $0 + ($1.estimatedItemCount == nil ? 0 : 1)
+                    }),
+                "total_actual_staged_items="
+                    + String(distribution.totalActualStagedItemCount),
+                "total_estimated_items="
+                    + (distribution.totalEstimatedItemCount.map(String.init)
+                        ?? "unavailable"),
+                "top_root_share="
+                    + String(format: "%.2f%%", distribution.topRootShare * 100),
+                "single_root_over_half=\(distribution.singleRootOverHalf)",
+                "error_sign=estimated_minus_actual "
+                    + "(negative means cached estimate undershot live work)",
+            ]
+            print(summaryFields.joined(separator: ", "))
+            return distribution
+        }
+
+        private func validateRootStagingEstimates(
+            _ distribution: RootStagingDistribution,
+            expectedPatchItems: Int?,
+            prefix: String
+        ) {
+            guard let expectedPatchItems else {
+                Issue.record(
+                    "\(prefix): planner total estimate unavailable for a warm decision"
+                )
+                return
+            }
+            guard let attributedTotal = distribution.totalEstimatedItemCount else {
+                Issue.record(
+                    "\(prefix): at least one staged root lacks its planner-time estimate"
+                )
+                return
+            }
+            guard attributedTotal == expectedPatchItems else {
+                Issue.record(
+                    "\(prefix): per-root estimates total \(attributedTotal), but the planner used \(expectedPatchItems)"
+                )
+                return
+            }
+        }
+
         private func printTreePhase(
             _ name: String,
             duration: Double,
@@ -302,7 +672,7 @@ extension AppSupportEnvSuites {
         /// helper afterward. The benchmark never edits, renames, trashes, or deletes
         /// pre-existing content in the selected volume.
         @Test(
-            "Cold scan followed by three real FSEvents warm-refresh attempts",
+            "Cold scan followed by bounded real FSEvents warm-refresh attempts",
             .timeLimit(.minutes(30))
         )
         func coldThenRepeatedWarmRefreshes() async throws {
@@ -316,8 +686,13 @@ extension AppSupportEnvSuites {
                 ProcessInfo.processInfo.environment["DIRWIZ_REAL_VOLUME_BENCH_ROOT"] ?? "/"
             let root = try canonicalDirectoryPath(requestedRoot)
             let clock = ContinuousClock()
+            let refreshAttemptLimit =
+                RealVolumeDiagnosticPolicy.refreshAttemptLimit(
+                    diagnosticEnabled: runRealVolumeWarmStartDiagnostics
+                )
 
             try await withTemporaryAppSupportDir {
+                var completedNonEmptyDiagnosticWorkloads = 0
                 let scratchRoot = try #require(
                     ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"],
                     "temporary App Support override was not installed"
@@ -335,10 +710,14 @@ extension AppSupportEnvSuites {
                 }
 
                 print(
-                    "[real-volume warm bench] BEGIN root=\(root), refreshes=\(Self.refreshCount), "
+                    "[real-volume warm bench] BEGIN root=\(root), "
+                        + "refresh_attempt_limit=\(refreshAttemptLimit), "
                         + "scratch_app_support=\(scratchRoot), "
                         + "diagnostic_replay=\(runRealVolumeWarmStartDiagnostics), "
-                        + "diagnostic_samples=\(Self.diagnosticPatchSampleCount)"
+                        + "diagnostic_workloads_required="
+                        + "\(RealVolumeDiagnosticPolicy.requiredWarmWorkloadCount), "
+                        + "diagnostic_samples_per_workload="
+                        + "\(Self.diagnosticPatchSampleCount)"
                 )
                 print(
                     "[real-volume warm bench] safety: no mutation of pre-existing root content; "
@@ -346,8 +725,10 @@ extension AppSupportEnvSuites {
                 )
                 if runRealVolumeWarmStartDiagnostics {
                     print(
-                        "[real-volume warm bench] diagnostic mode: each warm target list is "
-                            + "replayed from a fresh decode of the same pre-patch scratch cache; "
+                        "[real-volume warm bench] diagnostic mode: three distinct non-empty "
+                            + "production-planner warm decisions are required; each decision's "
+                            + "target list is replayed from a fresh decode of the same pre-patch "
+                            + "scratch cache for three repeat samples; "
                             + "enable only with DIRWIZ_REAL_VOLUME_BENCH=1 "
                             + "DIRWIZ_REAL_VOLUME_DIAGNOSTIC=1 in a Release build"
                     )
@@ -386,7 +767,7 @@ extension AppSupportEnvSuites {
                 // than measuring two complete trees held by the test itself.
                 bootstrapTree = nil
 
-                for refresh in 1...Self.refreshCount {
+                refreshAttempts: for refresh in 1...refreshAttemptLimit {
                     var payload: TreeCache.Payload?
                     let loadStart = clock.now
                     payload = TreeCache.load(for: root)
@@ -453,7 +834,10 @@ extension AppSupportEnvSuites {
 
                         let report: SubtreeRescanReport
                         let patchDuration: Double
-                        if runRealVolumeWarmStartDiagnostics {
+                        if RealVolumeDiagnosticPolicy.shouldCollect(
+                            diagnosticEnabled: runRealVolumeWarmStartDiagnostics,
+                            targetCount: targets.count
+                        ) {
                             // Preserve the exact output of this one planner decision.
                             // There is no second journal replay or collapse between
                             // samples: every direct rescan receives this same value.
@@ -511,6 +895,14 @@ extension AppSupportEnvSuites {
                                         + "dirs=\(sampleBaselineStats.directories)"
                                 )
 
+                                // Compute the exact same cached-tree estimate that guards
+                                // production warm starts, one root at a time. Keep this
+                                // outside `diagnosticPatchStart`: estimate lookup is
+                                // diagnostic overhead, not patch time.
+                                let sampleRootEstimates = perRootCachedEstimates(
+                                    for: diagnosticTargets,
+                                    cachedTree: samplePayload.tree
+                                )
                                 let resourcesBefore = processResourceSample()
                                 let diagnosticPatchStart = clock.now
                                 let sampleReport = await FileScanner(
@@ -545,6 +937,19 @@ extension AppSupportEnvSuites {
                                 printRescanMetrics(
                                     sampleReport.metrics,
                                     prefix: "refresh \(refresh) diagnostic sample \(sample)"
+                                )
+                                let sampleDistribution =
+                                    printRootStagingDistribution(
+                                        sampleReport.metrics.rootStaging,
+                                        estimatedItemsByPath: sampleRootEstimates,
+                                        prefix:
+                                            "refresh \(refresh) diagnostic sample \(sample)"
+                                    )
+                                validateRootStagingEstimates(
+                                    sampleDistribution,
+                                    expectedPatchItems: estimatedPatchItems,
+                                    prefix:
+                                        "refresh \(refresh) diagnostic sample \(sample)"
                                 )
                                 print(
                                     "[real-volume warm bench] refresh \(refresh) diagnostic "
@@ -586,6 +991,11 @@ extension AppSupportEnvSuites {
                             payload = selectedPayload
                             report = selectedReport
                             patchDuration = selectedDuration
+                            // One completed workload means one distinct non-empty planner
+                            // decision/FSEvents replay window. The three repeats above
+                            // characterize that ONE workload and never count as three
+                            // independent decisions.
+                            completedNonEmptyDiagnosticWorkloads += 1
 
                             let orderedDurations = durations.sorted()
                             let medianDuration =
@@ -609,6 +1019,12 @@ extension AppSupportEnvSuites {
                                 )
                             }
                         } else {
+                            // As above, keep cached-tree estimate lookup out of the warm
+                            // patch's measured interval.
+                            let rootEstimates = perRootCachedEstimates(
+                                for: targets,
+                                cachedTree: payload!.tree
+                            )
                             let patchStart = clock.now
                             report = await FileScanner(
                                 computeBundleSizes: false,
@@ -619,6 +1035,16 @@ extension AppSupportEnvSuites {
                                 progress: ScanProgress()
                             )
                             patchDuration = elapsed(since: patchStart)
+                            let distribution = printRootStagingDistribution(
+                                report.metrics.rootStaging,
+                                estimatedItemsByPath: rootEstimates,
+                                prefix: "refresh \(refresh) warm patch"
+                            )
+                            validateRootStagingEstimates(
+                                distribution,
+                                expectedPatchItems: estimatedPatchItems,
+                                prefix: "refresh \(refresh) warm patch"
+                            )
                         }
 
                         let patchedStats = treeStats(payload!.tree)
@@ -659,6 +1085,20 @@ extension AppSupportEnvSuites {
                                 + "cache=\(cacheSize(for: root).map(gibibytes) ?? "unavailable"); "
                                 + "\(memoryDescription())"
                         )
+                        if runRealVolumeWarmStartDiagnostics,
+                           RealVolumeDiagnosticPolicy.hasRequiredWarmWorkloads(
+                               completedNonEmptyDiagnosticWorkloads
+                           ) {
+                            print(
+                                "[real-volume warm bench] diagnostic collection complete: "
+                                    + "completed_non_empty_workloads="
+                                    + "\(completedNonEmptyDiagnosticWorkloads), "
+                                    + "samples_per_workload="
+                                    + "\(Self.diagnosticPatchSampleCount), "
+                                    + "refresh_attempt=\(refresh)"
+                            )
+                            break refreshAttempts
+                        }
 
                     case .coldFallback(let reason):
                         print(
@@ -705,6 +1145,14 @@ extension AppSupportEnvSuites {
                     }
                 }
 
+                if runRealVolumeWarmStartDiagnostics,
+                   !RealVolumeDiagnosticPolicy.hasRequiredWarmWorkloads(
+                       completedNonEmptyDiagnosticWorkloads
+                   ) {
+                    Issue.record(
+                        "diagnostic mode completed \(refreshAttemptLimit) production-planner refresh attempts but collected only \(completedNonEmptyDiagnosticWorkloads) distinct non-empty warm workloads; required \(RealVolumeDiagnosticPolicy.requiredWarmWorkloadCount)"
+                    )
+                }
                 print("[real-volume warm bench] END; \(memoryDescription())")
             }
 #endif
