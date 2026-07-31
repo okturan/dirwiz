@@ -80,5 +80,10 @@ trade than a second pass.
   nothing.
 - Honesty requirement: while a subtree is deferred it is stale. Per this repo's "never silent"
   discipline, that must be representable rather than presented as fresh.
-- Out of scope: making Phase A faster (`mount-aware-traversal`, `searchfs-catalog-scan`), and
-  the root cap (`retire-root-count-cap`, now sequenced after this).
+- Out of scope: making Phase A faster (`mount-aware-traversal`, `searchfs-catalog-scan`).
+- **Sequencing correction (2026-07-31):** this proposal placed `retire-root-count-cap` after the
+  ephemeral work, and that was wrong. `throttled-ephemeral-sweep` later measured collapsed roots
+  of 84/99/131 at 1/5/15-minute holdbacks, against a cap of 48 that `decide` checks BEFORE its
+  item budget, so the cap blocks any throttled sweep. The 6/19/7 root counts that justified
+  deprioritising the cap were measured on live patches at a ~10-second cadence and do not
+  generalise to accumulated intervals. The cap work now comes first.
