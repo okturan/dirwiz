@@ -1,66 +1,28 @@
-# Throttle the Ephemeral Sweep
-
 ## Why
 
-`deferred-ephemeral-roots` (5a35a12) delivered the latency it was specced for and did not
-reduce the work. Interactive patch time fell from 2.03 s to 0.635 s on workload 1, but total
-throughput across both tiers went the wrong way:
-
-| | items/sec |
-| --- | ---: |
-| Before, single tier | ~177,000 |
-| After, interactive tier | 147,000-164,000 |
-| After, trailing tier | 52,000-100,500 |
-| After, both tiers combined | **79,000-119,000** |
-
-Total wall clock roughly doubled: workload 2 went from 2.020 s to 4.230 s for comparable work.
-
-The reason is that nothing throttles the trailing tier. It sweeps on EVERY warm patch, and the
-per-user Darwin temp root changes every ~10 seconds (measured: 6 mtime changes in 60 s across
-12,250 direct children). So DirWiz still re-enumerates ~157,665 temp files continuously. The
-cost moved off the critical path without shrinking.
-
-That is a gap in the previous proposal's own reasoning, not in its implementation. It argued
-"nobody needs it accurate to the second", which is an argument for doing the work RARELY. It
-then specced doing the work LATER, and gated only on interactive-tier latency, so nothing
-asked whether total enumeration dropped. It did not.
-
-Deferral was still the correct first step, because it preserved `patched-tree ≡
-fresh-cold-scan` while the tiering machinery was proven. That machinery now exists and is
-tested. This change spends the guarantee that deferral protected, deliberately and once.
+The previous change (`deferred-ephemeral-roots`, 5a35a12) moved the per-user Darwin temp root off the warm patch's critical path but did not reduce the work: interactive patch time fell from 2.03 s to 0.635 s, while combined throughput across both tiers fell from ~177,000 items/sec to 79,000-119,000 and total wall clock roughly doubled. Nothing throttles the trailing tier, so it sweeps on every patch while that root changes every ~10 seconds, meaning ~157,665 temp files are still re-enumerated continuously.
 
 ## What Changes
 
-- The ephemeral tier sweeps on a throttled cadence rather than once per patch. Policy lives in
-  a pure, clock-injected type (`EphemeralSweepPolicy`) beside `WarmStartPlanner` and
-  `LiveRefreshPolicy`, matching how every other scheduling decision in this codebase is made
-  testable.
-- **The shipped guarantee is amended, not contradicted.** `warm-patch-tiering`'s current
-  requirement says the tree equals a fresh cold scan "once the trailing pass completes". That
-  becomes "once the throttled sweep runs". The existing requirement is edited in place; two
-  requirements that disagree about the same behaviour is worse than a weaker single one.
-- Staleness becomes representable rather than implied, reusing `staleViewAsOf` and the
-  skipped-directory vocabulary instead of a parallel mechanism.
-- Cold scans, the kill switch (`DIRWIZ_NO_EPHEMERAL_DEFER`), and the interactive tier are
-  unchanged.
+- Sweep the ephemeral tier on a throttled cadence rather than once per warm patch, decided by a pure clock-injected `EphemeralSweepPolicy` in DirWizCore.
+- Derive the interval and a maximum cache-horizon holdback from a measured journal-replay cost curve rather than choosing them.
+- Force a sweep when the held-back horizon ages past its bound, regardless of interval, so throttling cannot turn a warm start into a cold scan.
+- Sweep on navigation into a stale ephemeral subtree, which is the one moment its freshness has value.
+- Represent ephemeral staleness in the UI using the existing `staleViewAsOf` and skipped-directory vocabulary.
+- **BREAKING** (spec-level, not API): `patched-tree ≡ fresh-cold-scan` holds only after a throttled sweep, not after the trailing pass. This deliberately weakens a guarantee CLAUDE.md protects.
+- Unchanged: cold-scan totals, the interactive tier, `EphemeralPaths` classification, and the `DIRWIZ_NO_EPHEMERAL_DEFER` kill switch.
+
+## Capabilities
+
+### New Capabilities
+- `ephemeral-sweep-scheduling`: when the deferred ephemeral tier is swept, the horizon bound that overrides the throttle, and on-demand sweeps triggered by navigation.
+
+### Modified Capabilities
+- `warm-patch-tiering`: the equivalence guarantee moves from "once the trailing pass completes" to "once the throttled sweep runs", and staleness between sweeps becomes a stated, represented condition rather than a transient one.
 
 ## Impact
 
-- **The cache horizon gets more dangerous, not less, and this is the main risk.** The persisted
-  `TreeCache` event id must be held back to the oldest un-swept ephemeral change. Throttling
-  widens that window from ~one patch to the full interval, so the next warm start replays a
-  correspondingly longer stretch of journal. A long enough interval can push the replay past
-  what FSEvents will serve, poison it, and force the cold scan this whole line of work exists
-  to avoid. **A throttle that causes cold scans is worse than no throttle.** Bound the
-  holdback, and prove the bound.
-- Expected win: ephemeral sweeps drop from every patch to roughly one per interval. At a 5
-  minute interval against ~10 second churn that is a large reduction in total enumeration, and
-  it is the first change in this sequence to reduce work rather than move it.
-- Honesty cost: the temp subtree's size is now knowingly stale between sweeps. That is
-  acceptable only if it is visible.
-- If the analysis concludes the interval wants to be very long, this becomes the "skip" design
-  the previous proposal rejected, wearing extra machinery. That is a legitimate finding. Say
-  so and propose skipping outright with the gate rescoped honestly, rather than shipping a
-  throttle that is a skip in disguise.
-- Out of scope: `retire-root-count-cap` (still sequenced after this), `mount-aware-traversal`,
-  `searchfs-catalog-scan`.
+- Affected code: `Sources/DirWizCore/Scanner/` (new `EphemeralSweepPolicy`, `WarmPatchCacheHorizon`), `Sources/DirWizUI/Models/AppState+Scan.swift` (trailing-tier scheduling), `AppState+Navigation.swift` (on-demand sweep).
+- Affected tests: the `patched-tree ≡ fresh-cold-scan` equivalence tests must force a sweep and then assert, rather than being loosened or deleted.
+- Primary risk is inverted from the previous change: throttling widens the window over which the persisted `TreeCache` event id is held back, lengthening the next warm start's journal replay. A long enough interval can poison that replay and force the 26 s cold scan this entire line of work exists to avoid.
+- No persisted-format change, so no cache `formatVersion` bump.

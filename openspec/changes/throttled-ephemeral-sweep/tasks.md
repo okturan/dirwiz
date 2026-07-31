@@ -1,69 +1,38 @@
-# Tasks - Throttle the Ephemeral Sweep
+## 1. Derive the interval and horizon bound from measurement
 
-## 1. Derive the interval before implementing it
+- [ ] 1.1 Confirm on an idle machine that `sysctl -n vm.loadavg` is low before taking any timing
+- [ ] 1.2 Measure the ephemeral tier's current cadence: sweeps per minute, items per sweep, observed churn interval of the temp root
+- [ ] 1.3 Measure journal replay cost at holdback ages of 1, 5, 15 and 30 minutes, recording duration, changed-root count, and whether replay poisons
+- [ ] 1.4 Derive the default interval and horizon bound from 1.3 and record the arithmetic in the policy's doc comment
+- [ ] 1.5 STOP and report if 1.3 shows the safe holdback is too short for the throttle to win anything
+- [ ] 1.6 STOP and report if the useful interval is so long that this is the rejected skip design, and propose skipping outright with the equivalence gate rescoped
 
-- [ ] 1.1 Measure the ephemeral tier's real cadence today: sweeps per minute, items per sweep,
-      and the observed churn interval of the per-user Darwin temp root. The prior diagnostic
-      saw ~157,665 items and roughly 10 s churn; confirm on the current machine.
-- [ ] 1.2 Measure how journal replay cost grows with holdback age. Replay a journal held back
-      1, 5, 15 and 30 minutes and record replay duration, changed-root count, and whether it
-      poisons. This is the curve that decides both the interval and the horizon bound, so it
-      must be measured rather than assumed.
-- [ ] 1.3 Derive and record the default interval and the horizon bound from 1.1 and 1.2, with
-      the arithmetic written into the policy's doc comment.
-- [ ] 1.4 DECISION POINT: if 1.2 shows the safe holdback is short enough that the throttle wins
-      little, STOP and report. If it shows the useful interval is very long, say so and propose
-      skipping the ephemeral tier outright with the equivalence gate rescoped honestly. Both are
-      legitimate findings and better than shipping a throttle that is a skip in disguise.
-- [ ] 1.5 Measure on an idle machine. Check `sysctl -n vm.loadavg` first; load has invalidated
-      two rounds of numbers in this repo already.
+## 2. Hold the cache horizon before adding the throttle
 
-## 2. The horizon, first, because widening its window is the new risk
-
-- [ ] 2.1 Failing test first: throttle sweeps across a long window, persist, relaunch, and
-      assert the warm start still succeeds rather than falling back cold on an over-long replay.
-- [ ] 2.2 Implement the horizon bound as a policy INPUT, so an aged horizon forces a sweep
-      regardless of interval. Not as a post-hoc clamp.
-- [ ] 2.3 STOP CONDITION: if the bound cannot be held such that warm start survives throttled
-      operation, stop and report. A throttle that causes cold scans defeats the entire purpose
-      of the warm-start line of work.
-- [ ] 2.4 Cover interruption: quit or cancellation with unswept ephemeral changes outstanding.
+- [ ] 2.1 Write the failing test first: throttle sweeps across a long window, persist, relaunch, assert warm start still succeeds
+- [ ] 2.2 Implement the horizon bound as a policy input so an aged horizon forces a sweep
+- [ ] 2.3 STOP and report if the bound cannot be held such that warm start survives throttled operation
+- [ ] 2.4 Cover quit and cancellation with unswept ephemeral changes outstanding
 
 ## 3. Policy and scheduling
 
-- [ ] 3.1 `EphemeralSweepPolicy` in DirWizCore, pure and clock-injected, beside
-      `WarmStartPlanner` and `LiveRefreshPolicy`. Inputs `(lastSweepAt, now,
-      pendingEphemeralRoots, guardsActive, horizonAge)`, returning `.sweep` or
-      `.wait(reason:)`. The reason string is user-facing, following the warm-start
-      observability discipline that no deferral is silent.
-- [ ] 3.2 Wire it into the existing trailing tier. No new splice machinery: the tiering,
-      compaction and invalidation from `deferred-ephemeral-roots` are unchanged.
-- [ ] 3.3 Sweep-on-navigation into a stale ephemeral subtree.
-- [ ] 3.4 Represent staleness via `staleViewAsOf` and the skipped-directory vocabulary, not a
-      parallel mechanism.
-- [ ] 3.5 `EPHEMERAL_SWEEP_INTERVAL` override for tests; `DIRWIZ_NO_EPHEMERAL_DEFER=1` keeps
-      disabling tiering entirely.
+- [ ] 3.1 Add `EphemeralSweepPolicy` to DirWizCore, pure and clock-injected, beside `WarmStartPlanner`
+- [ ] 3.2 Return `.wait(reason:)` with a user-facing reason string for every withheld sweep
+- [ ] 3.3 Re-evaluate guards on each tick so a deferral never latches
+- [ ] 3.4 Wire the policy into the existing trailing tier without adding splice machinery
+- [ ] 3.5 Sweep on navigation into a stale ephemeral subtree
+- [ ] 3.6 Represent staleness via `staleViewAsOf` and the skipped-directory vocabulary
+- [ ] 3.7 Add the `DIRWIZ_EPHEMERAL_SWEEP_INTERVAL` test override and keep `DIRWIZ_NO_EPHEMERAL_DEFER` working
 
 ## 4. Verify
 
-- [ ] 4.1 THE GATE, and it is total work rather than latency: report combined items/sec across
-      both tiers, ephemeral sweeps per minute, and total items enumerated per minute, before
-      and after. Latency is already won by the previous change and must not regress, but the
-      thing to prove here is that total enumeration actually drops. Report numbers; set no
-      absolute target. `batched-subtree-splice`'s `<1s` gate demanded 2x to 3.6x the scanner's
-      measured throughput and cost a full implementation cycle.
-- [ ] 4.2 Warm start survives throttled operation end to end: relaunch after a throttled
-      session and confirm it stays warm, with the replay duration reported.
-- [ ] 4.3 Equivalence still has teeth: re-express the `patched-tree ≡ fresh-cold-scan` tests to
-      force a sweep and then assert, rather than deleting or loosening them.
-- [ ] 4.4 Cold-scan totals byte-identical to before this change.
-- [ ] 4.5 Full suite plus `CI=true` parity. If `ScanSupervisionTests` fails, stash and confirm
-      master fails identically before attributing it: known load-induced FSEvents flake,
-      documented in CLAUDE.md.
+- [ ] 4.1 Report combined items/sec across both tiers, sweeps per minute, and items enumerated per minute, before and after
+- [ ] 4.2 Confirm interactive-tier latency does not regress from the 0.635 s baseline
+- [ ] 4.3 Confirm warm start survives an end-to-end throttled session, reporting replay duration
+- [ ] 4.4 Re-express the `patched-tree ≡ fresh-cold-scan` tests to force a sweep and then assert, rather than loosening them
+- [ ] 4.5 Confirm cold-scan totals are byte-identical to before this change
+- [ ] 4.6 Run the full suite plus a `CI=true` parity run, stashing to confirm any `ScanSupervisionTests` failure also occurs on master
 
 ## 5. Documentation
 
-- [ ] 5.1 CLAUDE.md, edited into the existing warm-start section rather than appended: the
-      ephemeral tier is throttled, the interval and horizon bound and where they came from, and
-      that the horizon bound is what keeps a throttle from causing cold scans. That last point
-      is the one a future change is most likely to break silently.
+- [ ] 5.1 Edit CLAUDE.md's existing warm-start section to record the throttle, the interval and horizon bound with their derivation, and that the bound is what stops a throttle causing cold scans
