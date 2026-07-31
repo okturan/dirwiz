@@ -1,3 +1,9 @@
+> **UNBLOCKS `throttled-ephemeral-sweep` (2026-07-31).** That change is stopped
+> because `maxPatchRoots` (48) is checked before the item budget and its scheduled
+> sweeps collapse to 84/99/131 roots at 1/5/15-minute holdbacks, so every sweep
+> would cold-fall back. Section 1 here is already complete; its STOP evidence is
+> recorded below and stands.
+
 # Tasks - Retire the Root-Count Cap in Favour of the Item Budget
 
 ## 1. Diagnose before tuning
@@ -38,6 +44,9 @@ repetitions despite that timing drift, and it crossed the decision point: one ro
 for more than half of all staged items. Sections 2-5 are therefore deliberately not started.
 Narrowing FSEvents attribution for the oversized temp root - which contains the benchmark's
 isolated scratch cache - needs a separate spec before reconsidering the root cap.
+
+- [ ] 1.6 Re-confirm the blocking evidence from `throttled-ephemeral-sweep`: collapsed roots of 84 at a 1-minute holdback, 99 at 5 minutes, 131 at 15, all against a cap of 48
+- [ ] 1.7 Confirm `maxPatchRoots` is evaluated before the item-fraction rule in `decide`, since the ordering is the defect rather than the value
 
 ## 2. Make the item gate trustworthy before moving the cap
 
