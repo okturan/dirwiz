@@ -264,6 +264,9 @@ struct ContentView: View {
             Text(String(format: "%.1fs elapsed", appState.scanProgress.elapsedTime))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let status = appState.ephemeralStaleStatusText {
+                ephemeralStaleQuietLine(text: status)
+            }
             // Skipped-dirs line: only the quiet (FDA-granted) style renders here. The
             // FDA-missing case folds into `fullDiskAccessBanner` above - one alarm, one
             // action - instead of a second independent warning (skipped-dirs-honesty).
@@ -464,10 +467,26 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let status = appState.ephemeralStaleStatusText {
+                ephemeralStaleQuietLine(text: status)
+            }
             warmStartHistoryLine
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 10)
+    }
+
+    /// Temporary storage remains included in totals, but can knowingly lag behind the
+    /// interactive tree until its throttled sweep. Keep this separate from the skipped
+    /// directory count and FDA warning: those describe unreadable, omitted content.
+    private func ephemeralStaleQuietLine(text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "info.circle")
+                .font(.caption2)
+            Text(text)
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
     }
 
     /// Live "N folders changed · Refresh" row shown inside `scanSummary` once

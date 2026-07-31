@@ -26,6 +26,17 @@ struct AppliedChangesTests {
         "images/photo.jpg": 500,
     ]
 
+    /// These tests characterize the interactive live-splice contract. Their fixtures
+    /// necessarily live under Darwin's real temp root, which production now classifies
+    /// as ephemeral, so disable that classification explicitly rather than accidentally
+    /// turning every legacy apply case into a scheduler test.
+    private var noEphemeralPaths: EphemeralPaths {
+        EphemeralPaths(
+            darwinUserTemporaryDirectory: nil,
+            darwinUserCacheDirectory: nil
+        )
+    }
+
     private func makeEphemeralDefaults() -> (defaults: UserDefaults, cleanup: () -> Void) {
         let suiteName = "test-\(UUID())"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -80,7 +91,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
@@ -122,7 +136,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
 
@@ -171,7 +188,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
@@ -214,7 +234,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
@@ -261,7 +284,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.fsChanges = []
@@ -290,7 +316,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.isSpaceAnalysisRunning = true
@@ -328,7 +357,10 @@ struct AppliedChangesTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
@@ -395,6 +427,13 @@ extension AppSupportEnvSuites {
 @Suite("Applied Changes Real Monitor Tests")
 struct AppliedChangesRealMonitorTests {
 
+    private var noEphemeralPaths: EphemeralPaths {
+        EphemeralPaths(
+            darwinUserTemporaryDirectory: nil,
+            darwinUserCacheDirectory: nil
+        )
+    }
+
     private func makeEphemeralDefaults() -> (defaults: UserDefaults, cleanup: () -> Void) {
         let suiteName = "test-\(UUID())"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -442,7 +481,10 @@ struct AppliedChangesRealMonitorTests {
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: noEphemeralPaths
+        )
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)

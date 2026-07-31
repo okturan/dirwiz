@@ -147,6 +147,14 @@ struct DeferredEphemeralWarmStartTests {
         )
     }
 
+    /// Equivalence/cancellation tests explicitly force the throttled sweep. The production
+    /// default intentionally leaves the ephemeral subtree stale inside its 15-minute
+    /// interval; these tests judge the stronger post-sweep contract.
+    private var immediateSweepConfiguration:
+        EphemeralSweepPolicy.Configuration {
+        .init(interval: 0, maximumHorizonAge: 30 * 60)
+    }
+
     /// Establishes an FSEvents boundary for a freshly-created fixture without relying
     /// on an arbitrary daemon-latency sleep. The marker is gone before the scan, and
     /// both its creation and removal must be replayable before the saved horizon is
@@ -362,7 +370,7 @@ struct DeferredEphemeralWarmStartTests {
         #expect(!SubtreeRescanOptions.trailing.resetsCancellation)
     }
 
-    @Test("AppState publishes the interactive splice, invalidates both splices, then reaches cold-scan equivalence")
+    @Test("A forced sweep invalidates its splice, then reaches cold-scan equivalence")
     func appStatePublishesBothTiersAndReachesEquivalence() async throws {
         try await withTemporaryAppSupportDir {
             try await self.appStatePublishesBothTiersAndReachesEquivalenceBody()
@@ -410,6 +418,7 @@ struct DeferredEphemeralWarmStartTests {
         let state = AppState(
             defaults: defaults,
             ephemeralPaths: syntheticEphemeralPaths(root: root),
+            ephemeralSweepConfiguration: immediateSweepConfiguration,
             warmPatchScannerFactory: {
                 FileScanner(filesystem: gatedFilesystem)
             }
@@ -427,9 +436,10 @@ struct DeferredEphemeralWarmStartTests {
         let interactiveSnapshot = summarizeTree(interactiveTree)
         #expect(interactiveSnapshot[interactiveRoot + "/new.txt"] != nil)
         #expect(interactiveSnapshot[ephemeralRoot + "/new.txt"] == nil)
-        #expect(state.scanProgress.isScanning)
+        #expect(!state.scanProgress.isScanning)
+        #expect(state.isEphemeralSweepRunning)
         #expect(state.staleViewAsOf != nil)
-        #expect(!state.isFSMonitoringActive)
+        #expect(state.isFSMonitoringActive)
         #expect(state.scanProgress.treeLayoutRevision >= 1)
         let firstLayoutRevision = state.scanProgress.treeLayoutRevision
 
@@ -460,7 +470,10 @@ struct DeferredEphemeralWarmStartTests {
         )
 
         gatedFilesystem.release()
-        await waitUntil { !state.scanProgress.isScanning }
+        await waitUntil {
+            !state.isEphemeralSweepRunning
+                && !state.hardlink.isHardlinkScanRunning
+        }
         #expect(!state.scanProgress.isScanning)
         #expect(!state.scanProgress.isCancelled)
         #expect(state.staleViewAsOf == nil)
@@ -556,6 +569,7 @@ struct DeferredEphemeralWarmStartTests {
         let interruptedState = AppState(
             defaults: defaults,
             ephemeralPaths: paths,
+            ephemeralSweepConfiguration: immediateSweepConfiguration,
             warmPatchScannerFactory: {
                 FileScanner(filesystem: gatedFilesystem)
             }
@@ -568,11 +582,14 @@ struct DeferredEphemeralWarmStartTests {
 
         interruptedState.cancelScan()
         gatedFilesystem.release()
-        await waitUntil { !interruptedState.scanProgress.isScanning }
+        await waitUntil {
+            !interruptedState.isEphemeralSweepRunning
+                && !interruptedState.hardlink.isHardlinkScanRunning
+        }
 
         #expect(interruptedState.scanProgress.isCancelled)
         #expect(interruptedState.staleViewAsOf != nil)
-        #expect(!interruptedState.isFSMonitoringActive)
+        #expect(interruptedState.isFSMonitoringActive)
         let cacheAfterCancel = try #require(TreeCache.load(for: root))
         #expect(cacheAfterCancel.lastEventId == savedEventId)
         #expect(
@@ -581,16 +598,22 @@ struct DeferredEphemeralWarmStartTests {
         #expect(
             summarizeTree(cacheAfterCancel.tree)[ephemeralRoot + "/new.txt"] == nil
         )
+        interruptedState.stopLiveMonitoring()
 
         // A new process would construct a new AppState and load the untouched old
         // checkpoint. Replaying from its old horizon must see both changes again.
         let nextLaunch = AppState(
             defaults: defaults,
-            ephemeralPaths: paths
+            ephemeralPaths: paths,
+            ephemeralSweepConfiguration: immediateSweepConfiguration
         )
         nextLaunch.selectedVolume = URL(fileURLWithPath: root)
         nextLaunch.startSelectedVolumeScan()
-        await waitUntil { !nextLaunch.scanProgress.isScanning }
+        await waitUntil {
+            !nextLaunch.scanProgress.isScanning
+                && !nextLaunch.isEphemeralSweepRunning
+                && nextLaunch.pendingEphemeralRoots.isEmpty
+        }
 
         #expect(!nextLaunch.scanProgress.isCancelled)
         let caughtUpTree = try #require(nextLaunch.fileTree)
@@ -659,6 +682,7 @@ struct DeferredEphemeralWarmStartTests {
         let state = AppState(
             defaults: defaults,
             ephemeralPaths: syntheticEphemeralPaths(root: root),
+            ephemeralSweepConfiguration: immediateSweepConfiguration,
             warmPatchScannerFactory: {
                 FileScanner(filesystem: gatedFilesystem)
             }
@@ -683,7 +707,7 @@ struct DeferredEphemeralWarmStartTests {
         state.cancelScan()
         gatedFilesystem.release()
         await waitUntil {
-            !state.scanProgress.isScanning
+            !state.isEphemeralSweepRunning
                 && !state.hardlink.isHardlinkScanRunning
         }
 
@@ -733,7 +757,8 @@ struct DeferredEphemeralWarmStartTests {
         defer { defaultsCleanup() }
         let state = AppState(
             defaults: defaults,
-            ephemeralPaths: syntheticEphemeralPaths(root: root)
+            ephemeralPaths: syntheticEphemeralPaths(root: root),
+            ephemeralSweepConfiguration: immediateSweepConfiguration
         )
         state.selectedVolume = URL(fileURLWithPath: root)
         state.startSelectedVolumeScan()
@@ -796,6 +821,7 @@ struct DeferredEphemeralWarmStartTests {
         let state = AppState(
             defaults: defaults,
             ephemeralPaths: syntheticEphemeralPaths(root: root),
+            ephemeralSweepConfiguration: immediateSweepConfiguration,
             warmPatchScannerFactory: {
                 FileScanner(
                     filesystem: phaseAGate,
@@ -850,7 +876,7 @@ struct DeferredEphemeralWarmStartTests {
 
         postCommitGate.release()
         await waitUntil {
-            !state.scanProgress.isScanning
+            !state.isEphemeralSweepRunning
                 && !state.hardlink.isHardlinkScanRunning
         }
         #expect(!state.isWarmPatchCommitInProgress)
@@ -918,6 +944,7 @@ struct DeferredEphemeralWarmStartTests {
         let state = AppState(
             defaults: defaults,
             ephemeralPaths: syntheticEphemeralPaths(root: root),
+            ephemeralSweepConfiguration: immediateSweepConfiguration,
             warmPatchScannerFactory: {
                 FileScanner(
                     subtreeRescanPostCommitHook: {

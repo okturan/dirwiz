@@ -22,6 +22,9 @@ extension AppState {
         navigation.treemapPath = Self.buildPath(to: nodeIndex, nodes: nodes)
         recordWarmPatchTreemapRoot()
         saveSelectionAndRootSession()
+        if recordHistory {
+            requestEphemeralSweepForNavigation(to: tree.path(at: nodeIndex))
+        }
     }
 
     /// Navigate up one level in treemap.
@@ -34,6 +37,7 @@ extension AppState {
         navigation.treemapRootIndex = parentIndex
         navigation.treemapPath.removeLast()
         recordWarmPatchTreemapRoot()
+        requestEphemeralSweepForCurrentNavigation()
     }
 
     /// Navigate to a specific level in breadcrumb.
@@ -46,6 +50,7 @@ extension AppState {
         navigation.treemapRootIndex = target
         navigation.treemapPath = Array(navigation.treemapPath.prefix(pathIndex + 1))
         recordWarmPatchTreemapRoot()
+        requestEphemeralSweepForCurrentNavigation()
     }
 
     /// Go back to previously viewed directory.
@@ -57,6 +62,7 @@ extension AppState {
         navigation.treemapRootIndex = prev
         navigation.treemapPath = Self.buildPath(to: prev, nodes: tree.nodesSnapshot())
         recordWarmPatchTreemapRoot()
+        requestEphemeralSweepForNavigation(to: tree.path(at: prev))
     }
 
     /// Go forward after navigating back.
@@ -68,6 +74,7 @@ extension AppState {
         navigation.treemapRootIndex = next
         navigation.treemapPath = Self.buildPath(to: next, nodes: tree.nodesSnapshot())
         recordWarmPatchTreemapRoot()
+        requestEphemeralSweepForNavigation(to: tree.path(at: next))
     }
 
     /// Navigate to the volume root.
@@ -79,6 +86,7 @@ extension AppState {
         navigation.treemapRootIndex = 0
         navigation.treemapPath = [0]
         recordWarmPatchTreemapRoot()
+        requestEphemeralSweepForCurrentNavigation()
     }
 
     /// Navigate treemap to show a specific node (from search or tree view).
@@ -102,6 +110,16 @@ extension AppState {
 
         setTreemapRoot(targetDir)
         selectedNodeIndex = nodeIndex
+    }
+
+    /// Direct breadcrumb/history navigation mutates `NavigationState` without going through
+    /// `setTreemapRoot`. Resolve the final root only after that mutation, matching the
+    /// on-demand ephemeral sweep request to what the user now sees.
+    private func requestEphemeralSweepForCurrentNavigation() {
+        guard let tree = fileTree else { return }
+        requestEphemeralSweepForNavigation(
+            to: tree.path(at: navigation.treemapRootIndex)
+        )
     }
 
     // MARK: - Path Building

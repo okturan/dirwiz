@@ -7,6 +7,10 @@ The system SHALL sweep the deferred ephemeral tier at most once per configured i
 - **WHEN** multiple warm patches complete within a single sweep interval and each reports pending ephemeral changes
 - **THEN** the ephemeral tier is swept at most once across them and the interactive tier is unaffected
 
+#### Scenario: Repeated live temp churn inside one interval
+- **WHEN** always-on live refresh receives repeated ephemeral changes inside one sweep interval
+- **THEN** those roots remain pending without being enumerated or advancing the persisted cache horizon, while non-ephemeral live changes continue through the existing interactive patch
+
 #### Scenario: Interval elapsed with pending changes
 - **WHEN** ephemeral changes are pending and the configured interval has elapsed
 - **THEN** the ephemeral tier is swept and the sweep time is recorded

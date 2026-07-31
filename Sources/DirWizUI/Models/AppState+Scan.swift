@@ -110,6 +110,7 @@ extension AppState {
 
     public func cancelScan() {
         scanSession.cancelActiveScan()
+        ephemeralSweepScanner?.cancel()
     }
 
     /// True while a scan flow has published its "preparing" `ScanProgress` (see
@@ -196,6 +197,10 @@ extension AppState {
         let volumeURL = URL(fileURLWithPath: path)
         selectedVolume = volumeURL
         fileTree = cached.tree
+        recordPersistedCacheCheckpoint(
+            eventId: cached.lastEventId,
+            savedAt: cached.savedAt
+        )
 
         // Restore where the user left off (033/038): resolve the saved session's
         // selection and treemap root through `resolveOrAncestor` so a folder deleted
@@ -258,6 +263,7 @@ extension AppState {
         guard !isApplyingChanges else { return }
 
         let mustDetachSupersededWarmTree = warmPatchMutatesDisplayedTree
+        ephemeralSweepScanner?.cancel()
         scanSession.cancelActiveScan()
         isWarmPatchCommitInProgress = false
         if mustDetachSupersededWarmTree {
@@ -467,6 +473,10 @@ extension AppState {
 
         fileTree = tree
         resetForNewScan()
+        recordPersistedCacheCheckpoint(
+            eventId: cached.lastEventId,
+            savedAt: cached.savedAt
+        )
         if preservingStaleView {
             // ultrareview-caught (bug_002): resetForNewScan() just cleared hardlink
             // groups even though the stale tree - still fully on screen and interactive
@@ -585,93 +595,77 @@ extension AppState {
             return
         }
 
-        // The interactive tree is now usable, but its ephemeral roots still describe
-        // the old cache horizon. Reuse the existing stale-view vocabulary so the UI
-        // remains browsable without claiming the whole volume is fresh.
-        staleViewAsOf = staleViewAsOf ?? cached.savedAt
-        scanProgress.currentPath = "Finishing changed folders in temporary storage…"
-
-        // Start a path-keyed live capture AFTER the first publication. Selection and
-        // treemap navigation update it while the trailing tier runs, so the second
-        // compaction restores the user's latest position rather than tier-start state.
-        warmPatchExploration = ExplorationCapture.capture(
-            tree: tree,
-            selectedIndex: selectedNodeIndex,
-            treemapRootIndex: navigation.treemapRootIndex
-        )
-        warmPatchExplorationToken = token
-        let trailingReport = await scanner.rescanSubtrees(
+        // The interactive tree is usable now. Retain the previous complete cache
+        // checkpoint and let the shared one-second coordinator decide when to run the
+        // existing trailing splice. It will replay from cached.lastEventId again before
+        // persisting, so later live changes cannot fall through the widened horizon.
+        registerPendingEphemeralRoots(
             tiers.ephemeral,
-            tree: tree,
-            progress: scanProgress,
-            options: .trailing,
-            onWillCommit: { [weak self] in
-                guard let self, self.scanToken == token else { return }
-                self.isWarmPatchCommitInProgress = true
-            }
+            checkpointEventId: cached.lastEventId,
+            checkpointSavedAt: cached.savedAt
         )
-
-        if scanToken == token {
-            isWarmPatchCommitInProgress = false
-        }
-        guard scanToken == token else { return }
-        let trailingExploration = warmPatchExploration
-        warmPatchExploration = nil
-        warmPatchExplorationToken = nil
-
-        // Both splices renumber indices. This second call is not optional: it clears
-        // every index-keyed overlay, re-resolves navigation by path, and forces the
-        // second treemap layout revision required by the newly-compacted tree.
-        if trailingReport.metrics.appliedRootCount > 0 {
-            invalidateAfterTreeMutation(restoring: trailingExploration)
-            computeExtensionStats()
-        }
-        if let reason = warmPatchAbandonmentReason(trailingReport, scanRoot: path) {
-            abandonWarmPatch(
-                path: path,
-                reason: reason,
-                shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
-                preservedExploration: trailingExploration
-            )
-            return
-        }
-        guard !trailingReport.wasCancelled else {
-            finishCancelledWarmPatch(
-                path: path,
-                cachedAt: cached.savedAt,
-                tree: tree
-            )
-            return
-        }
-        if trailingReport.metrics.appliedRootCount == 0 {
-            invalidateAfterTreeMutation(restoring: trailingExploration)
-            computeExtensionStats()
-        }
-        // No scanner call can mutate the displayed tree after this point. Release
-        // ownership before final bookkeeping/post-analysis awaits so a new scan does not
-        // unnecessarily detach a fully settled tree.
         warmPatchMutatesDisplayedTree = false
-        refreshedRootCount += trailingReport.rescannedRoots.count
-        logWarmPatchTier("trailing", report: trailingReport)
-
-        guard let persistableEventId = WarmPatchCacheHorizon.eventIdForPersistence(
-            replayedThrough: newEventId,
-            deferredTargetCount: 0
-        ) else {
-            assertionFailure("completed trailing warm patch did not release cache horizon")
-            finishCancelledWarmPatch(path: path, cachedAt: cached.savedAt, tree: tree)
-            return
-        }
-
-        await finishSuccessfulWarmPatch(
+        await finishWarmPatchWithPendingEphemeral(
             path: path,
             tree: tree,
             token: token,
             refreshedRootCount: refreshedRootCount,
             startTime: startTime,
-            persistableEventId: persistableEventId,
             shouldRunPostScanAnalyses: shouldRunPostScanAnalyses
         )
+    }
+
+    /// The interactive warm patch is terminal from the user's perspective while temporary
+    /// roots remain intentionally stale. Unlike `finishSuccessfulWarmPatch`, this does not
+    /// clear staleness, checkpoint a snapshot, or write TreeCache. The old atomic cache is
+    /// the safety horizon until `performEphemeralSweep` replays and persists every target.
+    private func finishWarmPatchWithPendingEphemeral(
+        path: String,
+        tree: FileTree,
+        token: UInt64,
+        refreshedRootCount: Int,
+        startTime: CFAbsoluteTime,
+        shouldRunPostScanAnalyses: Bool
+    ) async {
+        scanSession.markFinished()
+        persistLastScannedVolume(path: path)
+        if refreshedRootCount == 0 {
+            computeExtensionStats()
+            refreshHardlinkGroups()
+            scanProgress.publishCounters(forceLayoutRevision: true)
+        }
+
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let summary = ScanSummaryComposer.warm(
+            foldersRefreshed: refreshedRootCount,
+            seconds: elapsed
+        )
+        scanProgress.isScanning = false
+        scanProgress.scanComplete = true
+        scanProgress.currentPath = summary
+        lastScanSummary = summary
+        refreshInstantDuplicates()
+        startLiveMonitoring()
+        WarmStartHistory.record(
+            .init(
+                date: Date(),
+                wasWarm: true,
+                reason: nil,
+                itemCount: tree.count,
+                elapsedSeconds: elapsed
+            ),
+            for: path
+        )
+
+        if shouldRunPostScanAnalyses {
+            await runPostScanAnalyses(
+                tree: tree,
+                volumePath: path,
+                token: token
+            )
+        }
+        guard scanToken == token else { return }
+        await evaluateEphemeralSweepAndApply()
     }
 
     /// Returns the cold-fallback reason for either correctness failure shape. A root-level
@@ -706,6 +700,20 @@ extension AppState {
             runPostScanAnalyses: shouldRunPostScanAnalyses,
             coldFallbackReason: reason,
             preservedExploration: preservedExploration
+        )
+    }
+
+    /// An unsweepable held horizon is the same correctness class as a poisoned warm
+    /// replay: keep the old cache intact, explain why, and replace the displayed tree with
+    /// the existing cold path rather than advancing an unproven event id.
+    func startColdFallbackFromEphemeralSweep(reason: String) {
+        guard let volumeURL = selectedVolume else { return }
+        isEphemeralSweepRunning = false
+        startScan(
+            volumeURL: volumeURL,
+            runPostScanAnalyses: true,
+            forceCold: true,
+            forceColdReason: "ephemeral sweep: \(reason)"
         )
     }
 
@@ -832,10 +840,15 @@ extension AppState {
             for: path
         )
 
+        let checkpointDate = Date()
         do {
             try TreeCache.save(
                 tree: tree,
                 lastEventId: persistableEventId
+            )
+            recordPersistedCacheCheckpoint(
+                eventId: persistableEventId,
+                savedAt: checkpointDate
             )
         } catch {
             log.error("TreeCache save failed after warm start: \(error.localizedDescription, privacy: .public)")
@@ -1000,8 +1013,16 @@ extension AppState {
             // Save failures are logged, never surfaced - a missing/stale cache just
             // means the next scan falls back cold, exactly today's behavior.
             guard shouldSaveCache else { return }
+            let checkpointDate = Date()
             do {
                 try TreeCache.save(tree: tree, lastEventId: eventIdAtScanStart)
+                await MainActor.run {
+                    guard self.scanToken == token else { return }
+                    self.recordPersistedCacheCheckpoint(
+                        eventId: eventIdAtScanStart,
+                        savedAt: checkpointDate
+                    )
+                }
             } catch {
                 log.error("TreeCache save failed after cold scan: \(error.localizedDescription, privacy: .public)")
             }

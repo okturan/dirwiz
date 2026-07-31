@@ -22,7 +22,7 @@ The previous change (`deferred-ephemeral-roots`, 5a35a12) moved the per-user Dar
 
 ## Impact
 
-- Affected code: `Sources/DirWizCore/Scanner/` (new `EphemeralSweepPolicy`, `WarmPatchCacheHorizon`), `Sources/DirWizUI/Models/AppState+Scan.swift` (trailing-tier scheduling), `AppState+Navigation.swift` (on-demand sweep).
+- Affected code: `Sources/DirWizCore/Scanner/` (new `EphemeralSweepPolicy`, `WarmPatchCacheHorizon`), `Sources/DirWizUI/Models/AppState+Scan.swift` (trailing-tier scheduling), `AppState+Analysis.swift` (the always-on live patch must retain ephemeral targets instead of continuing to enumerate them every ~10 seconds), and `AppState+Navigation.swift` (on-demand sweep).
 - Affected tests: the `patched-tree ≡ fresh-cold-scan` equivalence tests must force a sweep and then assert, rather than being loosened or deleted.
 - Primary risk is inverted from the previous change: throttling widens the window over which the persisted `TreeCache` event id is held back, lengthening the next warm start's journal replay. A long enough interval can poison that replay and force the 26 s cold scan this entire line of work exists to avoid.
 - No persisted-format change, so no cache `formatVersion` bump.

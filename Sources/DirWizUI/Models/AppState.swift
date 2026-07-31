@@ -210,6 +210,24 @@ public final class AppState {
 
     @ObservationIgnored public var liveRefreshTask: Task<Void, Never>?
 
+    // MARK: - Throttled ephemeral sweep
+
+    /// Ephemeral paths observed since the last complete, persisted sweep. They remain
+    /// visible from the previous atomic TreeCache checkpoint until the scheduler runs.
+    public internal(set) var pendingEphemeralRoots: [String] = []
+
+    /// Latest pure-policy verdict. Every withheld decision carries the human-readable
+    /// reason rendered by the quiet stale-temporary-folders status line.
+    public internal(set) var ephemeralSweepDecision:
+        EphemeralSweepPolicy.Decision = .wait(
+            reason: EphemeralSweepPolicy.noPendingReason
+        )
+
+    /// A delayed sweep is a tree-mutating heavy task in its own right. It deliberately
+    /// does not reuse `scanProgress.isScanning`, because the displayed interactive tier
+    /// remains usable throughout.
+    public internal(set) var isEphemeralSweepRunning = false
+
     // MARK: - Storage Trends
 
     /// Historical scan summaries.
@@ -301,10 +319,30 @@ public final class AppState {
     /// one interactive plus one ephemeral subtree without an explicit boundary.
     @ObservationIgnored let ephemeralPaths: EphemeralPaths
 
-    /// Factory for the one scanner shared by both warm-patch tiers. Production uses the
-    /// real filesystem; tests inject a gated provider to stop exactly between the
-    /// interactive publication and the deferred splice.
+    /// Pure sweep configuration and clock. Environment parsing happens once at AppState
+    /// construction; `EphemeralSweepPolicy.decide` itself never reads process state.
+    @ObservationIgnored let ephemeralSweepConfiguration:
+        EphemeralSweepPolicy.Configuration
+    @ObservationIgnored let ephemeralSweepClock: @Sendable () -> TimeInterval
+
+    /// Factory used by the warm interactive patch and each delayed sweep. Production uses
+    /// the real filesystem; tests inject gated/counting providers at the existing splice
+    /// seams.
     @ObservationIgnored let warmPatchScannerFactory: @Sendable () -> FileScanner
+
+    /// The last complete on-disk checkpoint. While `pendingEphemeralRoots` is non-empty,
+    /// these stay unchanged: delayed work is re-replayed from this event id before any
+    /// newer id can be persisted.
+    @ObservationIgnored var persistedCacheEventId: UInt64?
+    @ObservationIgnored var persistedCacheSavedAt: Date?
+
+    /// Scheduling state for the outstanding horizon. The navigation bit is sticky across
+    /// guards and clears only after a successful sweep (or a new scan replaces the tree).
+    @ObservationIgnored var ephemeralSweepHorizonEventId: UInt64?
+    @ObservationIgnored var ephemeralSweepHorizonStartedAt: TimeInterval?
+    @ObservationIgnored var lastEphemeralSweepAt: TimeInterval?
+    @ObservationIgnored var ephemeralNavigationSweepRequested = false
+    @ObservationIgnored var ephemeralSweepScanner: FileScanner?
 
     /// A warm patch mutates the displayed cached tree in place. A superseding scan uses
     /// this bit to detach that tree synchronously before the old scanner can commit after
@@ -335,11 +373,18 @@ public final class AppState {
     public init(
         defaults: UserDefaults = .standard,
         ephemeralPaths: EphemeralPaths = .current(),
+        ephemeralSweepConfiguration: EphemeralSweepPolicy.Configuration =
+            .init(environment: ProcessInfo.processInfo.environment),
+        ephemeralSweepClock: @escaping @Sendable () -> TimeInterval = {
+            Date().timeIntervalSinceReferenceDate
+        },
         warmPatchScannerFactory: @escaping @Sendable () -> FileScanner = { FileScanner() }
     ) {
         self.defaults = defaults
         self.sessionStore = SessionStateStore(defaults: defaults)
         self.ephemeralPaths = ephemeralPaths
+        self.ephemeralSweepConfiguration = ephemeralSweepConfiguration
+        self.ephemeralSweepClock = ephemeralSweepClock
         self.warmPatchScannerFactory = warmPatchScannerFactory
         // Read persisted preferences from the INJECTED store. Doing this here rather than
         // in a property default is what keeps an isolated test suite from writing into the
@@ -358,6 +403,7 @@ public final class AppState {
         case cloneCheck
         case bundleSizing
         case applyChanges
+        case ephemeralSweep
 
         var statusText: String {
             switch self {
@@ -377,6 +423,8 @@ public final class AppState {
                 return "Resolving app bundle sizes"
             case .applyChanges:
                 return "Applying filesystem changes"
+            case .ephemeralSweep:
+                return "Updating temporary folders"
             }
         }
 
@@ -392,6 +440,7 @@ public final class AppState {
             case .cloneCheck: return state.isCloneCheckRunning
             case .bundleSizing: return state.isBundleSizingRunning
             case .applyChanges: return state.isApplyingChanges
+            case .ephemeralSweep: return state.isEphemeralSweepRunning
             }
         }
     }
@@ -482,6 +531,19 @@ public final class AppState {
         fsChanges = []
         isFSMonitoringActive = false
         isApplyingChanges = false
+        isEphemeralSweepRunning = false
+        pendingEphemeralRoots = []
+        ephemeralSweepDecision = .wait(
+            reason: EphemeralSweepPolicy.noPendingReason
+        )
+        persistedCacheEventId = nil
+        persistedCacheSavedAt = nil
+        ephemeralSweepHorizonEventId = nil
+        ephemeralSweepHorizonStartedAt = nil
+        lastEphemeralSweepAt = nil
+        ephemeralNavigationSweepRequested = false
+        ephemeralSweepScanner?.cancel()
+        ephemeralSweepScanner = nil
     }
 }
 

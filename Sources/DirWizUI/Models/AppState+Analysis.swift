@@ -221,25 +221,27 @@ extension AppState {
     private func evaluateLiveRefreshAndApply() async {
         let decision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
         liveRefreshDecision = decision
-        guard decision == .apply else { return }
+        if decision == .apply {
+            await applyAccumulatedChanges()
 
-        await applyAccumulatedChanges()
+            lastLiveApplyAt = CFAbsoluteTimeGetCurrent()
+            lastLiveChangeAt = nil
+            liveRefreshGeneration &+= 1
+            liveRefreshDecision = LiveRefreshPolicy.decide(
+                currentLiveRefreshInput()
+            )
+        }
 
-        lastLiveApplyAt = CFAbsoluteTimeGetCurrent()
-        lastLiveChangeAt = nil
-        liveRefreshGeneration &+= 1
-        liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
+        // The same one-second tick owns both scheduling decisions. A `.wait` result is
+        // recomputed every time, so scan/heavy-task/diff guards can never latch a pending
+        // temporary-folder sweep forever.
+        await evaluateEphemeralSweepAndApply()
     }
 
-    /// Apply the accumulated FSEvents changes to the displayed tree incrementally - the
-    /// "N folders changed · Refresh" badge's action (plan 037, user decision 3a: no
-    /// auto-apply/debounced live mode, ever - the view only changes on an explicit click).
-    /// Reuses the same `rescanSubtrees` splice engine `commitWarmStart` (AppState+Scan.swift)
-    /// uses for warm start, but deliberately skips that flow's `scanProgress.isScanning` /
-    /// `staleViewAsOf` plumbing: this patch is meant to feel instantaneous, and blanking the
-    /// detail pane while it runs would defeat that. `isApplyingChanges` is the one honest
-    /// signal it needs - it drives the badge's spinner and slots into the existing
-    /// `HeavyTaskKind` exclusivity matrix via `.applyChanges`.
+    /// Apply accumulated FSEvents changes to the displayed tree incrementally. Interactive
+    /// roots reuse the same splice engine as warm start; ephemeral roots enter the held
+    /// sweep horizon without enumeration. `isApplyingChanges` covers only the interactive
+    /// splice, while the separate sweep flag covers its later tree mutation.
     ///
     /// No threshold gating: this is user-initiated and bounded by their own click, so an
     /// unusually large accumulated set just makes this one splice slower rather than being
@@ -247,14 +249,32 @@ extension AppState {
     public func applyAccumulatedChanges() async {
         guard canStartHeavyTask(.applyChanges), !fsChanges.isEmpty, let tree = fileTree else { return }
 
+        let rootPath = tree.path(at: 0)
+        let targets = fsChanges.map(\.path)
+        let tiers = ephemeralPaths.partition(targets)
+        if !tiers.ephemeral.isEmpty {
+            registerPendingEphemeralRoots(tiers.ephemeral)
+        }
+
+        guard !tiers.interactive.isEmpty else {
+            // The monitor is an accelerator, not the cache-horizon authority. Once its
+            // ephemeral paths are in durable in-session pending state, clearing this
+            // temp-only batch is safe: the delayed sweep replays from the old checkpoint.
+            fsChanges = []
+            fsEventsMonitor?.clearChanges()
+            log.info(
+                "Live patch retained \(tiers.ephemeral.count) ephemeral roots without enumeration"
+            )
+            refreshEphemeralSweepDecision()
+            return
+        }
+
         let token = scanToken
         isApplyingChanges = true
 
         let capture = ExplorationCapture.capture(
             tree: tree, selectedIndex: selectedNodeIndex, treemapRootIndex: navigation.treemapRootIndex
         )
-        let rootPath = tree.path(at: 0)
-        let targets = fsChanges.map(\.path)
 
         // Captured BEFORE the splice - same discipline as the cold-scan cache write-back
         // (AppState+Scan.swift): any change landing during the splice below is covered by
@@ -265,7 +285,12 @@ extension AppState {
         let scanner = FileScanner()
         let progress = ScanProgress()
         let startTime = CFAbsoluteTimeGetCurrent()
-        let report = await scanner.rescanSubtrees(targets, tree: tree, progress: progress)
+        let report = await scanner.rescanSubtrees(
+            tiers.interactive,
+            tree: tree,
+            progress: progress,
+            options: .interactive
+        )
 
         // A new scan (warm or cold) superseded this apply while the splice was running.
         // In practice this can no longer happen - `AppState+Scan.swift`'s `startScan`
@@ -304,20 +329,37 @@ extension AppState {
 
         invalidateAfterTreeMutation(restoring: capture)
         computeExtensionStats()
+        fsChanges = []
+        fsEventsMonitor?.clearChanges()
 
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         lastScanSummary = ScanSummaryComposer.warm(foldersRefreshed: report.rescannedRoots.count, seconds: elapsed)
 
-        fsChanges = []
-        fsEventsMonitor?.clearChanges()
+        let stagedItems = report.metrics.rootStaging.reduce(0) {
+            $0 + $1.actualStagedItemCount
+        }
+        log.info(
+            "Live patch interactive tier: roots=\(report.rescannedRoots.count), staged_items=\(stagedItems), retained_ephemeral_roots=\(tiers.ephemeral.count), seconds=\(report.metrics.totalSeconds, format: .fixed(precision: 3))"
+        )
 
-        do {
-            try TreeCache.save(tree: tree, lastEventId: eventIdBeforeSplice)
-        } catch {
-            log.error("TreeCache save failed after applying accumulated changes: \(error.localizedDescription, privacy: .public)")
+        if pendingEphemeralRoots.isEmpty {
+            let checkpointDate = Date()
+            do {
+                try TreeCache.save(
+                    tree: tree,
+                    lastEventId: eventIdBeforeSplice
+                )
+                recordPersistedCacheCheckpoint(
+                    eventId: eventIdBeforeSplice,
+                    savedAt: checkpointDate
+                )
+            } catch {
+                log.error("TreeCache save failed after applying accumulated changes: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         isApplyingChanges = false
+        refreshEphemeralSweepDecision()
     }
 
     // MARK: - Storage Trends
