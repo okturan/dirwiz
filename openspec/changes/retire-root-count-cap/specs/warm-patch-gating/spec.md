@@ -4,7 +4,7 @@
 The system SHALL decide whether to attempt a warm patch primarily from the estimated number of items the changed roots represent as a fraction of the cached tree, and SHALL evaluate that rule before any root-count rule.
 
 #### Scenario: Many roots covering few items
-- **WHEN** a change set collapses to more roots than the root-count backstop but the estimated staged items are a small fraction of the tree
+- **WHEN** a change set collapses to more roots than the former operational cap but remains within the high sanity backstop and the independent directory-fraction rule, and the estimated staged items are a small fraction of the tree
 - **THEN** the planner decides to patch warm, because the item fraction governs
 
 #### Scenario: Few roots covering most of the tree
@@ -12,7 +12,7 @@ The system SHALL decide whether to attempt a warm patch primarily from the estim
 - **THEN** the planner falls back cold and the reason names the fraction rather than the root count
 
 #### Scenario: Roots accumulated over time
-- **WHEN** changed roots have accumulated across a long interval and are individually small
+- **WHEN** changed roots have accumulated across a long interval, are individually small, and remain within the independent directory-fraction rule
 - **THEN** the planner judges them on total estimated items, so accumulation alone does not force a cold fallback
 
 ### Requirement: Root count survives only as a sanity backstop

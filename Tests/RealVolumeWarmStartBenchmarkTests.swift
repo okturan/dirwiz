@@ -20,6 +20,37 @@ private let runRealVolumeWarmStartBenchmark =
 private let runRealVolumeWarmStartDiagnostics =
     ProcessInfo.processInfo.environment["DIRWIZ_REAL_VOLUME_DIAGNOSTIC"] == "1"
 
+/// Optional comma-separated pauses before successive production refresh attempts. This
+/// lets the opt-in real-volume gate reproduce accumulated 1/5/15-minute journal windows
+/// end to end instead of hoping ordinary background churn crosses a planner boundary
+/// during three immediate refreshes. It has no effect unless explicitly supplied.
+private let realVolumeRefreshHoldbackRaw =
+    ProcessInfo.processInfo.environment["DIRWIZ_REAL_VOLUME_REFRESH_HOLDBACK_SECONDS"]
+private let realVolumeRefreshHoldbackSeconds: [TimeInterval] =
+    realVolumeRefreshHoldbackRaw?
+        .split(separator: ",")
+        .compactMap { rawValue in
+            guard let value = TimeInterval(rawValue),
+                  value.isFinite,
+                  value >= 0 else { return nil }
+            return value
+        } ?? []
+
+/// Optional deterministic root-count workload for the same real-volume pipeline. The
+/// harness creates the maximum number of self-owned sibling directories before the cold
+/// baseline, then writes one tiny file inside the requested number before each refresh.
+/// File-level FSEvents therefore reports real, independently patchable directory roots
+/// without modifying any pre-existing content. Example: `84,99,131`.
+private let realVolumeForcedRootCountsRaw =
+    ProcessInfo.processInfo.environment["DIRWIZ_REAL_VOLUME_FORCED_ROOT_COUNTS"]
+private let realVolumeForcedRootCounts: [Int] =
+    realVolumeForcedRootCountsRaw?
+        .split(separator: ",")
+        .compactMap { rawValue in
+            guard let value = Int(rawValue), value > 0 else { return nil }
+            return value
+        } ?? []
+
 /// Keeps the ordinary three-refresh benchmark unchanged while making the heavier
 /// diagnostic mode honest about whether it actually observed a patchable workload.
 private enum RealVolumeDiagnosticPolicy {
@@ -686,6 +717,7 @@ extension AppSupportEnvSuites {
                     $0.unresolvedPaths.isEmpty
                         && !$0.rescannedRoots.contains(scanRoot)
                         && !$0.wasCancelled
+                        && $0.stagedItemBudgetExceeded == nil
                 }
             }
         }
@@ -718,6 +750,138 @@ extension AppSupportEnvSuites {
             seconds(ContinuousClock().now - start)
         }
 
+        private func makeForcedRootFixture(
+            counts: [Int],
+            scanRoot: String
+        ) throws -> URL? {
+            guard let maximumRootCount = counts.max() else { return nil }
+            let fixtureURL = URL(
+                fileURLWithPath: FileManager.default.currentDirectoryPath,
+                isDirectory: true
+            ).appendingPathComponent(
+                ".dirwiz-real-volume-root-gate-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            let fixturePath = fixtureURL.standardizedFileURL.path
+            guard scanRoot == "/"
+                    || fixturePath.hasPrefix(scanRoot + "/") else {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try FileManager.default.createDirectory(
+                at: fixtureURL,
+                withIntermediateDirectories: false
+            )
+            do {
+                for index in 0..<maximumRootCount {
+                    try FileManager.default.createDirectory(
+                        at: fixtureURL.appendingPathComponent(
+                            "root-\(index)",
+                            isDirectory: true
+                        ),
+                        withIntermediateDirectories: false
+                    )
+                }
+                return fixtureURL
+            } catch {
+                try? FileManager.default.removeItem(at: fixtureURL)
+                throw error
+            }
+        }
+
+        private func stageForcedRootChanges(
+            fixtureURL: URL,
+            rootCount: Int,
+            refresh: Int
+        ) throws {
+            for index in 0..<rootCount {
+                try Data([UInt8(truncatingIfNeeded: refresh)]).write(
+                    to: fixtureURL
+                        .appendingPathComponent(
+                            "root-\(index)",
+                            isDirectory: true
+                        )
+                        .appendingPathComponent("refresh-\(refresh).dat")
+                )
+            }
+        }
+
+        private func forcedRootPaths(
+            fixtureURL: URL,
+            rootCount: Int
+        ) -> Set<String> {
+            Set((0..<rootCount).map {
+                fixtureURL
+                    .appendingPathComponent(
+                        "root-\($0)",
+                        isDirectory: true
+                    )
+                    .standardizedFileURL.path
+            })
+        }
+
+        private func settleForcedRootFixtureCreation(
+            fixtureURL: URL
+        ) async throws {
+            let firstRoot = fixtureURL.appendingPathComponent(
+                "root-0",
+                isDirectory: true
+            )
+            let markerURL = firstRoot.appendingPathComponent(
+                "baseline-settle.marker"
+            )
+            let eventIdBeforeMarker = FSEventsJournal.currentEventId()
+            try Data([0]).write(to: markerURL)
+            let deadline = ContinuousClock().now + .seconds(10)
+            while ContinuousClock().now < deadline {
+                let replay = await FSEventsJournal.replay(
+                    root: fixtureURL.path,
+                    since: eventIdBeforeMarker,
+                    timeout: 5
+                )
+                if case .changes(let changedPaths) = replay.outcome,
+                   PathCollapse.outermostRoots(changedPaths)
+                    .contains(firstRoot.path) {
+                    return
+                }
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            throw CocoaError(.fileReadUnknown)
+        }
+
+        private func validateOptInConfiguration(
+            refreshAttemptLimit: Int
+        ) -> Bool {
+            if let raw = realVolumeRefreshHoldbackRaw {
+                let tokenCount = raw.split(
+                    separator: ",",
+                    omittingEmptySubsequences: false
+                ).count
+                guard tokenCount == realVolumeRefreshHoldbackSeconds.count,
+                      tokenCount <= refreshAttemptLimit,
+                      realVolumeRefreshHoldbackSeconds.allSatisfy({
+                          $0 <= 1_800
+                      }),
+                      realVolumeRefreshHoldbackSeconds.reduce(0, +)
+                          <= 1_800 else {
+                    return false
+                }
+            }
+            if let raw = realVolumeForcedRootCountsRaw {
+                let tokenCount = raw.split(
+                    separator: ",",
+                    omittingEmptySubsequences: false
+                ).count
+                guard tokenCount == realVolumeForcedRootCounts.count,
+                      tokenCount <= refreshAttemptLimit,
+                      realVolumeForcedRootCounts.allSatisfy({
+                          $0 > 0 && $0 <= 512
+                      }) else {
+                    return false
+                }
+            }
+            return true
+        }
+
         private func emptyRescanReport() -> SubtreeRescanReport {
             SubtreeRescanReport(
                 requestedPaths: [],
@@ -733,7 +897,8 @@ extension AppSupportEnvSuites {
         @MainActor
         private func runTieredPatch(
             targets: [String],
-            tree: FileTree
+            tree: FileTree,
+            maximumStagedItemCount: Int? = nil
         ) async -> TieredPatchResult {
             let ephemeralPaths = EphemeralPaths.current()
             let tiers = ephemeralPaths.partition(targets)
@@ -766,20 +931,34 @@ extension AppSupportEnvSuites {
                     tiers.interactive,
                     tree: tree,
                     progress: progress,
-                    options: .interactive
+                    options: SubtreeRescanOptions(
+                        priority: .interactive,
+                        resetsCancellation: true,
+                        maximumStagedItemCount: maximumStagedItemCount
+                    )
                 )
-                publicationState.invalidateAfterTreeMutation(
-                    scheduleDerivedAnalyses: false
-                )
-                publicationState.computeExtensionStats(
-                    loadTemporalSnapshot: false
-                )
+                if interactiveReport.stagedItemBudgetExceeded == nil {
+                    publicationState.invalidateAfterTreeMutation(
+                        scheduleDerivedAnalyses: false
+                    )
+                    publicationState.computeExtensionStats(
+                        loadTemporalSnapshot: false
+                    )
+                }
                 interactiveDuration = elapsed(since: start)
             }
 
+            let interactiveStagedItems =
+                interactiveReport.metrics.rootStaging.reduce(0) {
+                    $0 + $1.actualStagedItemCount
+                }
+            let remainingStagedItemCount = maximumStagedItemCount.map {
+                max(0, $0 - interactiveStagedItems)
+            }
             let trailingReport: SubtreeRescanReport
             let trailingDuration: Double
-            if tiers.ephemeral.isEmpty {
+            if tiers.ephemeral.isEmpty
+                || interactiveReport.stagedItemBudgetExceeded != nil {
                 trailingReport = emptyRescanReport()
                 trailingDuration = 0
             } else {
@@ -788,14 +967,20 @@ extension AppSupportEnvSuites {
                     tiers.ephemeral,
                     tree: tree,
                     progress: progress,
-                    options: .trailing
+                    options: SubtreeRescanOptions(
+                        priority: .utility,
+                        resetsCancellation: false,
+                        maximumStagedItemCount: remainingStagedItemCount
+                    )
                 )
-                publicationState.invalidateAfterTreeMutation(
-                    scheduleDerivedAnalyses: false
-                )
-                publicationState.computeExtensionStats(
-                    loadTemporalSnapshot: false
-                )
+                if trailingReport.stagedItemBudgetExceeded == nil {
+                    publicationState.invalidateAfterTreeMutation(
+                        scheduleDerivedAnalyses: false
+                    )
+                    publicationState.computeExtensionStats(
+                        loadTemporalSnapshot: false
+                    )
+                }
                 trailingDuration = elapsed(since: start)
             }
 
@@ -1380,6 +1565,20 @@ extension AppSupportEnvSuites {
             prefix: String
         ) -> Bool {
             guard control.isComplete(scanRoot: root) else {
+                let rescannedScanRoot =
+                    control.report.rescannedRoots.contains(root)
+                let unresolvedDescription =
+                    String(describing: control.report.unresolvedPaths)
+                let cancelled = control.report.wasCancelled
+                let budgetExceeded =
+                    control.report.stagedItemBudgetExceeded != nil
+                print(
+                    "[real-volume warm bench] \(prefix) matched monolithic control incomplete: "
+                        + "rescanned_root=\(rescannedScanRoot), "
+                        + "unresolved=\(unresolvedDescription), "
+                        + "cancelled=\(cancelled), "
+                        + "budget_exceeded=\(budgetExceeded)"
+                )
                 Issue.record(
                     "\(prefix): matched monolithic control was incomplete"
                 )
@@ -1473,7 +1672,11 @@ extension AppSupportEnvSuites {
             let resourcesBefore = processResourceSample()
             let result = await runTieredPatch(
                 targets: targets,
-                tree: payload.tree
+                tree: payload.tree,
+                maximumStagedItemCount:
+                    WarmStartPlanner.maximumStagedItemCount(
+                        cachedTotalItemCount: baselineStats.items
+                    )
             )
             let resourcesAfter = processResourceSample()
             let patchedStats = treeStats(payload.tree)
@@ -1522,12 +1725,13 @@ extension AppSupportEnvSuites {
         /// Read-only with respect to pre-existing content in the selected scan root. The
         /// only writes made by this benchmark are self-owned TreeCache files beneath the
         /// unique temporary App Support directory installed by
-        /// `withTemporaryAppSupportDir`; that exact scratch directory is removed by the
-        /// helper afterward. The benchmark never edits, renames, trashes, or deletes
+        /// `withTemporaryAppSupportDir` and, when explicitly requested, one bounded
+        /// self-owned root-count fixture beneath the process working directory. Both are
+        /// removed afterward. The benchmark never edits, renames, trashes, or deletes
         /// pre-existing content in the selected volume.
         @Test(
             "Cold scan followed by bounded real FSEvents warm-refresh attempts",
-            .timeLimit(.minutes(30))
+            .timeLimit(.minutes(40))
         )
         func coldThenRepeatedWarmRefreshes() async throws {
 #if DEBUG
@@ -1544,11 +1748,54 @@ extension AppSupportEnvSuites {
                 RealVolumeDiagnosticPolicy.refreshAttemptLimit(
                     diagnosticEnabled: runRealVolumeWarmStartDiagnostics
                 )
+            let configurationIsValid = validateOptInConfiguration(
+                refreshAttemptLimit: refreshAttemptLimit
+            )
+            #expect(
+                configurationIsValid,
+                "holdback/count lists must be complete, bounded, and fit the refresh-attempt limit"
+            )
+            guard configurationIsValid else { return }
 
             try await withTemporaryAppSupportDir {
                 var completedComparableDiagnosticWorkloads = 0
                 var diagnosticWorkloadOrdinal = 0
                 var balancedWorkloadImprovements: [Double] = []
+                let forcedRootFixture = try makeForcedRootFixture(
+                    counts: realVolumeForcedRootCounts,
+                    scanRoot: root
+                )
+                defer {
+                    if let forcedRootFixture {
+                        do {
+                            try FileManager.default.removeItem(
+                                at: forcedRootFixture
+                            )
+                            print(
+                                "[real-volume warm bench] forced root fixture cleanup: "
+                                    + "removed=true, path="
+                                    + forcedRootFixture.path
+                            )
+                        } catch {
+                            print(
+                                "[real-volume warm bench] forced root fixture cleanup failed: "
+                                    + "path=\(forcedRootFixture.path), "
+                                    + "error=\(String(describing: error))"
+                            )
+                            Issue.record(
+                                "failed to remove self-owned forced root fixture"
+                            )
+                        }
+                    }
+                }
+                if let forcedRootFixture {
+                    // Fixture directory creation itself must be behind the baseline
+                    // event id; otherwise a delayed parent event can collapse every
+                    // intended child root into the one fixture ancestor.
+                    try await settleForcedRootFixtureCreation(
+                        fixtureURL: forcedRootFixture
+                    )
+                }
                 let scratchRoot = try #require(
                     ProcessInfo.processInfo.environment["DIRWIZ_APP_SUPPORT_DIR"],
                     "temporary App Support override was not installed"
@@ -1568,6 +1815,10 @@ extension AppSupportEnvSuites {
                 print(
                     "[real-volume warm bench] BEGIN root=\(root), "
                         + "refresh_attempt_limit=\(refreshAttemptLimit), "
+                        + "refresh_holdback_seconds="
+                        + "\(realVolumeRefreshHoldbackSeconds), "
+                        + "forced_root_counts="
+                        + "\(realVolumeForcedRootCounts), "
                         + "scratch_app_support=\(scratchRoot), "
                         + "diagnostic_replay=\(runRealVolumeWarmStartDiagnostics), "
                         + "diagnostic_workloads_required="
@@ -1581,7 +1832,8 @@ extension AppSupportEnvSuites {
                 )
                 print(
                     "[real-volume warm bench] safety: no mutation of pre-existing root content; "
-                        + "scratch cache only; bundle sizing disabled; immediate headless materialisation"
+                        + "scratch cache and optional self-owned root-count fixture only; "
+                        + "bundle sizing disabled; immediate headless materialisation"
                 )
                 if runRealVolumeWarmStartDiagnostics {
                     print(
@@ -1629,6 +1881,39 @@ extension AppSupportEnvSuites {
                 bootstrapTree = nil
 
                 refreshAttempts: for refresh in 1...refreshAttemptLimit {
+                    var expectedForcedRoots: Set<String> = []
+                    if refresh <= realVolumeForcedRootCounts.count,
+                       let forcedRootFixture {
+                        let forcedRootCount =
+                            realVolumeForcedRootCounts[refresh - 1]
+                        expectedForcedRoots = forcedRootPaths(
+                            fixtureURL: forcedRootFixture,
+                            rootCount: forcedRootCount
+                        )
+                        try stageForcedRootChanges(
+                            fixtureURL: forcedRootFixture,
+                            rootCount: forcedRootCount,
+                            refresh: refresh
+                        )
+                        print(
+                            "[real-volume warm bench] refresh \(refresh) "
+                                + "forced root changes: "
+                                + "roots=\(forcedRootCount), "
+                                + "fixture=\(forcedRootFixture.path)"
+                        )
+                    }
+                    if refresh <= realVolumeRefreshHoldbackSeconds.count {
+                        let holdbackSeconds =
+                            realVolumeRefreshHoldbackSeconds[refresh - 1]
+                        print(
+                            "[real-volume warm bench] refresh \(refresh) holdback: "
+                                + "\(formatSeconds(holdbackSeconds))"
+                        )
+                        try await Task.sleep(
+                            for: .seconds(holdbackSeconds)
+                        )
+                    }
+
                     var payload: TreeCache.Payload?
                     let loadStart = clock.now
                     payload = TreeCache.load(for: root)
@@ -1645,11 +1930,56 @@ extension AppSupportEnvSuites {
                     )
 
                     let replayStart = clock.now
-                    let replay = await FSEventsJournal.replay(
+                    var replay = await FSEventsJournal.replay(
                         root: root,
                         since: payload!.lastEventId,
                         timeout: 30
                     )
+                    if !expectedForcedRoots.isEmpty {
+                        let fixtureReplayDeadline =
+                            ContinuousClock().now + .seconds(10)
+                        while true {
+                            if case .poisoned = replay.outcome {
+                                break
+                            }
+                            let observedForcedRoots: Set<String>
+                            switch replay.outcome {
+                            case .changes(let changedPaths):
+                                observedForcedRoots = Set(
+                                    PathCollapse.outermostRoots(changedPaths)
+                                ).intersection(expectedForcedRoots)
+                            case .poisoned:
+                                observedForcedRoots = []
+                            }
+                            if observedForcedRoots == expectedForcedRoots
+                                || ContinuousClock().now
+                                    >= fixtureReplayDeadline {
+                                break
+                            }
+                            try await Task.sleep(for: .milliseconds(200))
+                            replay = await FSEventsJournal.replay(
+                                root: root,
+                                since: payload!.lastEventId,
+                                timeout: 30
+                            )
+                        }
+                        let observedForcedRoots: Set<String>
+                        switch replay.outcome {
+                        case .changes(let changedPaths):
+                            observedForcedRoots = Set(
+                                PathCollapse.outermostRoots(changedPaths)
+                            ).intersection(expectedForcedRoots)
+                        case .poisoned:
+                            observedForcedRoots = []
+                        }
+                        #expect(
+                            observedForcedRoots == expectedForcedRoots,
+                            "forced roots did not survive production journal replay and path collapse independently"
+                        )
+                        guard observedForcedRoots == expectedForcedRoots else {
+                            return
+                        }
+                    }
                     let replayDuration = elapsed(since: replayStart)
 
                     let rawChangedCount: Int
@@ -2103,7 +2433,12 @@ extension AppSupportEnvSuites {
                             matchedControlPayload = nil
                             patchResult = await runTieredPatch(
                                 targets: targets,
-                                tree: payload!.tree
+                                tree: payload!.tree,
+                                maximumStagedItemCount:
+                                    WarmStartPlanner.maximumStagedItemCount(
+                                        cachedTotalItemCount:
+                                            productionBaselineStats.items
+                                    )
                             )
                             let distribution = printRootStagingDistribution(
                                 patchResult.combinedRootStaging,
@@ -2115,6 +2450,25 @@ extension AppSupportEnvSuites {
                                 expectedPatchItems: estimatedPatchItems,
                                 prefix: "refresh \(refresh) warm patch"
                             )
+                        }
+
+                        if !expectedForcedRoots.isEmpty {
+                            let rescannedRoots = Set(
+                                patchResult.reports.flatMap(
+                                    \.rescannedRoots
+                                )
+                            )
+                            #expect(
+                                expectedForcedRoots.isSubset(
+                                    of: rescannedRoots
+                                ),
+                                "forced roots were replayed but not independently rescanned"
+                            )
+                            guard expectedForcedRoots.isSubset(
+                                of: rescannedRoots
+                            ) else {
+                                return
+                            }
                         }
 
                         let patchedStats = treeStats(payload!.tree)
@@ -2158,6 +2512,18 @@ extension AppSupportEnvSuites {
                         }
 
                         let saveStart = clock.now
+                        if !expectedForcedRoots.isEmpty {
+                            for forcedRoot in expectedForcedRoots {
+                                let refreshedFile =
+                                    forcedRoot + "/refresh-\(refresh).dat"
+                                #expect(
+                                    payload!.tree.nodeIndex(
+                                        forPath: refreshedFile
+                                    ) != nil,
+                                    "patched tree omitted forced file \(refreshedFile)"
+                                )
+                            }
+                        }
                         try TreeCache.save(
                             tree: payload!.tree,
                             lastEventId: replay.newEventId
@@ -2169,6 +2535,28 @@ extension AppSupportEnvSuites {
                                 + "cache=\(cacheSize(for: root).map(gibibytes) ?? "unavailable"); "
                                 + "\(memoryDescription())"
                         )
+                        if !expectedForcedRoots.isEmpty {
+                            payload = nil
+                            let persisted = try #require(
+                                TreeCache.load(for: root),
+                                "forced-root cache failed to reload after save"
+                            )
+                            #expect(
+                                persisted.lastEventId
+                                    == replay.newEventId,
+                                "forced-root cache persisted the wrong event horizon"
+                            )
+                            for forcedRoot in expectedForcedRoots {
+                                let refreshedFile =
+                                    forcedRoot + "/refresh-\(refresh).dat"
+                                #expect(
+                                    persisted.tree.nodeIndex(
+                                        forPath: refreshedFile
+                                    ) != nil,
+                                    "persisted cache omitted forced file \(refreshedFile)"
+                                )
+                            }
+                        }
                         if runRealVolumeWarmStartDiagnostics,
                            RealVolumeDiagnosticPolicy.hasRequiredWarmWorkloads(
                                completedComparableDiagnosticWorkloads

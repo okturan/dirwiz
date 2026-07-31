@@ -293,6 +293,12 @@ public enum WarmStartPlanner {
     /// to warm unboundedly rather than trust an unbounded root count blind.
     private static let unknownDirectoryCountBackstop = 5_000
 
+    /// Retained at 25% from the measured cost model rather than changed for appearance:
+    /// cold is 26.42s for 4,749,300 items and warm is approximately `26.42f + 0.15`.
+    /// At `f = 0.25`, warm predicts 6.755s versus 26.42s cold (19.665s saved); the
+    /// model's crossover is about 99.43%, so 25% remains deliberately conservative.
+    public static let defaultMaxChangedItemFraction = 0.25
+
     /// `maxChangedFraction` default 0.20: warm iff the collapsed changed-root count is at
     /// most this fraction of the cached tree's known directory count. Replaces an earlier
     /// absolute cap on raw (pre-collapse) FSEvents paths, which over-triggered cold
@@ -312,23 +318,14 @@ public enum WarmStartPlanner {
     /// can't see that a single collapsed root is a subtree of 100k+ files (the reported
     /// incident - days of churn collapsed to a handful of roots sitting high in the tree)
     /// while the root-count rule alone happily warms a handful of roots. Judging by
-    /// estimated WORK instead catches that shape. The root-count rule is kept as a
-    /// secondary sanity cap regardless - many small, scattered changed roots could pass
-    /// the item fraction trivially while still making per-root splice bookkeeping
-    /// dominate. Both new parameters default to `nil`, so a caller that doesn't supply
-    /// them (every existing call site) gets exactly today's root-count-only behavior.
+    /// estimated WORK instead catches that shape. The production AppState call supplies
+    /// both values, so this is the primary live gate rather than an optional dormant one.
     ///
-    /// `maxPatchRoots` (default 48) is a THIRD, always-on gate, independent of the two
-    /// above: 042's benchmark found `FileTree.removeChildren` recompacts and renumbers the
-    /// ENTIRE tree on every call - a cost proportional to total tree size, not to the
-    /// root being spliced (~6ms per call measured at ~200k items). Phase B calls it once
-    /// per changed root, so patch cost scales with ROOT COUNT regardless of how small
-    /// each root's own item fraction is - a shape neither the item-fraction rule nor the
-    /// percentage-of-directories rule catches (both can pass comfortably at, say, 50
-    /// scattered one-file-each roots). Until a batched single-pass splice lands (043),
-    /// many-root patches are structurally slower than a parallel cold scan even though
-    /// each root individually looks cheap, so this cap always applies - it is not gated
-    /// behind any optional parameter the way the item-fraction rule is.
+    /// `maxPatchRoots` is only a sanity backstop and runs after the item rule. Batched
+    /// subtree splice changed 38 roots from 9.14s across 38 full-tree recompactions to one
+    /// 0.118-0.164s compaction, so per-root structural cost is no longer a reason to reject
+    /// ordinary many-root patches. The default 512 is well above the measured 84/99/131
+    /// accumulated-root workloads while still refusing pathological unbounded input.
     public static func decide(
         cacheAvailable: Bool,
         replay: JournalReplay.Outcome?,
@@ -336,8 +333,8 @@ public enum WarmStartPlanner {
         cachedTotalItemCount: Int? = nil,
         estimatedPatchItems: Int? = nil,
         maxChangedFraction: Double = 0.20,
-        maxChangedItemFraction: Double = 0.25,
-        maxPatchRoots: Int = 48
+        maxChangedItemFraction: Double = defaultMaxChangedItemFraction,
+        maxPatchRoots: Int = 512
     ) -> Decision {
         guard cacheAvailable else {
             return .coldFallback(reason: "no cache available")
@@ -351,16 +348,18 @@ public enum WarmStartPlanner {
         case .changes(let targets):
             let roots = PathCollapse.outermostRoots(targets)
 
-            guard roots.count <= maxPatchRoots else {
-                return .coldFallback(reason: "\(roots.count) changed locations - full scan is faster")
+            if let estimatedPatchItems,
+               let cachedTotalItemCount,
+               let reason = itemBudgetFallbackReason(
+                   stagedItems: estimatedPatchItems,
+                   cachedTotalItemCount: cachedTotalItemCount,
+                   maxChangedItemFraction: maxChangedItemFraction
+               ) {
+                return .coldFallback(reason: reason)
             }
 
-            if let estimatedPatchItems, let cachedTotalItemCount, cachedTotalItemCount > 0 {
-                let itemThreshold = Double(cachedTotalItemCount) * maxChangedItemFraction
-                guard Double(estimatedPatchItems) <= itemThreshold else {
-                    let percent = percentage(estimatedPatchItems, of: cachedTotalItemCount)
-                    return .coldFallback(reason: "~\(percent)% of files changed since last scan")
-                }
+            guard roots.count <= maxPatchRoots else {
+                return .coldFallback(reason: "\(roots.count) changed locations - full scan is faster")
             }
 
             guard let cachedDirectoryCount else {
@@ -385,6 +384,38 @@ public enum WarmStartPlanner {
         return Int((Double(count) / Double(total) * 100).rounded())
     }
 
+    /// Maximum integer item count admitted by the same fraction `decide` uses. Warm-patch
+    /// tiers pass the remainder of this one budget into Phase A, so splitting work into an
+    /// interactive and trailing tier cannot accidentally grant each tier a fresh 25%.
+    public static func maximumStagedItemCount(
+        cachedTotalItemCount: Int,
+        maxChangedItemFraction: Double = defaultMaxChangedItemFraction
+    ) -> Int? {
+        guard cachedTotalItemCount > 0 else { return nil }
+        let threshold = Double(cachedTotalItemCount) * maxChangedItemFraction
+        guard threshold.isFinite else {
+            return threshold > 0 ? Int.max : 0
+        }
+        guard threshold > 0 else { return 0 }
+        guard threshold < Double(Int.max) else { return Int.max }
+        return Int(threshold.rounded(.down))
+    }
+
+    /// Shared reason for both the cached estimate gate and the exact post-staging guard.
+    /// Keeping one formatter ensures a patch refused after live growth is surfaced through
+    /// the same item-fraction vocabulary as an up-front refusal, never as root-count cost.
+    public static func itemBudgetFallbackReason(
+        stagedItems: Int,
+        cachedTotalItemCount: Int,
+        maxChangedItemFraction: Double = defaultMaxChangedItemFraction
+    ) -> String? {
+        guard cachedTotalItemCount > 0 else { return nil }
+        let itemThreshold = Double(cachedTotalItemCount) * maxChangedItemFraction
+        guard Double(stagedItems) > itemThreshold else { return nil }
+        let percent = percentage(stagedItems, of: cachedTotalItemCount)
+        return "~\(percent)% of files changed since last scan"
+    }
+
     /// Sum of the CACHED tree's subtree item counts for each collapsed changed root - the
     /// cost-based decision's numerator (plan 042). Caller-computed (like
     /// `cachedDirectoryCount`) rather than done inside `decide` itself, keeping that
@@ -396,20 +427,37 @@ public enum WarmStartPlanner {
     /// unresolvable root as "free" would silently undercount exactly the case (new
     /// content) most likely to be large.
     public static func estimatedPatchItemCount(forChangedPaths targets: [String], cachedTree: FileTree) -> Int {
+        estimatedPatchItemCounts(
+            forChangedPaths: targets,
+            cachedTree: cachedTree
+        ).values.reduce(into: 0) { total, itemCount in
+            let sum = total.addingReportingOverflow(itemCount)
+            total = sum.overflow ? Int.max : sum.partialValue
+        }
+    }
+
+    /// Per-collapsed-root form used for production observability. It shares one cached
+    /// snapshot across every root so recording estimates does not repeat the aggregate
+    /// estimator's whole-tree snapshot/traversal setup immediately before a patch.
+    public static func estimatedPatchItemCounts(
+        forChangedPaths targets: [String],
+        cachedTree: FileTree
+    ) -> [String: Int] {
         let roots = PathCollapse.outermostRoots(targets)
-        guard !roots.isEmpty else { return 0 }
+        guard !roots.isEmpty else { return [:] }
 
         let snapshot = cachedTree.pathBuildingSnapshot()
-        var total = 0
+        var estimates: [String: Int] = [:]
+        estimates.reserveCapacity(roots.count)
         for root in roots {
             guard let components = FileScanner.relativeComponents(of: root, rootPath: snapshot.rootPath),
                   let index = FileTree.descendPath(components, nodes: snapshot.nodes, stringPool: snapshot.stringPool) else {
-                total += unresolvedRootItemEstimate
+                estimates[root] = unresolvedRootItemEstimate
                 continue
             }
-            total += cachedTree.subtreeItemCount(at: index)
+            estimates[root] = cachedTree.subtreeItemCount(at: index)
         }
-        return total
+        return estimates
     }
 
     /// Fallback contribution (plan 042) for a changed root that doesn't resolve against

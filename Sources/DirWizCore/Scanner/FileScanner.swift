@@ -443,6 +443,21 @@ public struct SubtreeRescanMetrics: Sendable {
 
 /// Outcome of `FileScanner.rescanSubtrees`.
 public struct SubtreeRescanReport: Sendable {
+    /// Exact Phase A work exceeded the caller's remaining staged-item budget, so Phase B
+    /// was not entered and the destination tree was left untouched.
+    public struct StagedItemBudgetExceeded: Equatable, Sendable {
+        public let actualStagedItemCount: Int
+        public let maximumStagedItemCount: Int
+
+        public init(
+            actualStagedItemCount: Int,
+            maximumStagedItemCount: Int
+        ) {
+            self.actualStagedItemCount = actualStagedItemCount
+            self.maximumStagedItemCount = maximumStagedItemCount
+        }
+    }
+
     public let requestedPaths: [String]
     /// Targets actually spliced, after ancestor-resolution + outermost-dedupe. A
     /// root-level entry here means some requested path couldn't resolve to anything
@@ -460,6 +475,10 @@ public struct SubtreeRescanReport: Sendable {
     /// rather than a normal completion - no cache write-back under the new event id, no
     /// "success" summary.
     public let wasCancelled: Bool
+    /// Present only when Phase A completed normally but its exact staged-item count was
+    /// over the caller's budget. This stays distinct from cancellation and path-resolution
+    /// failures so a warm-start caller can reuse its coherent cold-abandonment path.
+    public let stagedItemBudgetExceeded: StagedItemBudgetExceeded?
     public let metrics: SubtreeRescanMetrics
 
     public init(
@@ -467,12 +486,14 @@ public struct SubtreeRescanReport: Sendable {
         rescannedRoots: [String],
         unresolvedPaths: [String],
         wasCancelled: Bool = false,
+        stagedItemBudgetExceeded: StagedItemBudgetExceeded? = nil,
         metrics: SubtreeRescanMetrics = .zero
     ) {
         self.requestedPaths = requestedPaths
         self.rescannedRoots = rescannedRoots
         self.unresolvedPaths = unresolvedPaths
         self.wasCancelled = wasCancelled
+        self.stagedItemBudgetExceeded = stagedItemBudgetExceeded
         self.metrics = metrics
     }
 }
@@ -491,10 +512,18 @@ public struct SubtreeRescanOptions: Equatable, Sendable {
 
     public let priority: Priority
     public let resetsCancellation: Bool
+    /// Exact Phase A ceiling for this invocation. A two-tier warm patch supplies the
+    /// remaining portion of one shared budget; ordinary subtree rescans leave it nil.
+    public let maximumStagedItemCount: Int?
 
-    public init(priority: Priority, resetsCancellation: Bool) {
+    public init(
+        priority: Priority,
+        resetsCancellation: Bool,
+        maximumStagedItemCount: Int? = nil
+    ) {
         self.priority = priority
         self.resetsCancellation = resetsCancellation
+        self.maximumStagedItemCount = maximumStagedItemCount
     }
 
     public static let interactive = SubtreeRescanOptions(
@@ -821,6 +850,49 @@ public final class FileScanner: @unchecked Sendable {
             guard case .directory(let staging) = result else { return }
             let sum = count.addingReportingOverflow(staging.count)
             count = sum.overflow ? Int.max : sum.partialValue
+        }
+        let actualStagedItemCount = rootStaging.reduce(into: 0) { count, root in
+            let sum = count.addingReportingOverflow(root.actualStagedItemCount)
+            count = sum.overflow ? Int.max : sum.partialValue
+        }
+
+        // The cached-tree estimate cannot see growth since the cache horizon. Once Phase A
+        // has the exact live count, enforce the caller's remaining budget before
+        // `onWillCommit` and before Phase B can renumber or otherwise mutate the tree.
+        // Cancellation wins over this policy result: a partial/cancelled staging pass is
+        // reported as cancellation, not mislabelled as an oversized coherent patch.
+        if !isCancelled,
+           !Task.isCancelled,
+           let maximumStagedItemCount = options.maximumStagedItemCount,
+           actualStagedItemCount > maximumStagedItemCount {
+            let totalEnd = clock.now
+            let metrics = SubtreeRescanMetrics(
+                preflightAndPlanningSeconds: Self.wallSeconds(
+                    totalStart.duration(to: preflightAndPlanningEnd)
+                ),
+                phaseAStagingSeconds: Self.wallSeconds(
+                    phaseAStart.duration(to: phaseAEnd)
+                ),
+                totalSeconds: Self.wallSeconds(totalStart.duration(to: totalEnd)),
+                beforeNodeCount: beforeNodeCount,
+                stagedNodeCount: stagedNodeCount,
+                afterNodeCount: tree.count,
+                requestedPathCount: changedDirectories.count,
+                rescannedRootCount: rescannedRoots.count,
+                plannedRootCount: plans.count,
+                stagedRootCount: staged.count,
+                rootStaging: rootStaging
+            )
+            return SubtreeRescanReport(
+                requestedPaths: changedDirectories,
+                rescannedRoots: rescannedRoots,
+                unresolvedPaths: unresolvedPaths,
+                stagedItemBudgetExceeded: .init(
+                    actualStagedItemCount: actualStagedItemCount,
+                    maximumStagedItemCount: maximumStagedItemCount
+                ),
+                metrics: metrics
+            )
         }
 
         // Give a UI caller one MainActor turn to suspend index-based interaction before

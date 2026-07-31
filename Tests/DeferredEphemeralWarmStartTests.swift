@@ -120,6 +120,20 @@ struct DeferredEphemeralWarmStartTests {
         return layout
     }
 
+    /// Nineteen cached items: the 25% item budget admits four. Each changed root is
+    /// estimated at two cached items; after adding one file to each, Phase A stages three
+    /// items per tier. The first tier fits, while the cumulative 3 + 3 does not.
+    private func cumulativeBudgetLayout() -> [String: UInt64] {
+        var layout: [String: UInt64] = [
+            "interactive/old.txt": 10,
+            "ephemeral/old.txt": 20,
+        ]
+        for index in 0..<7 {
+            layout["pad\(index)/seed.txt"] = 1
+        }
+        return layout
+    }
+
     private func realDirectoryPath(_ path: String) -> String {
         var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
         guard realpath(path, &buffer) != nil else { return path }
@@ -975,6 +989,99 @@ struct DeferredEphemeralWarmStartTests {
             finalCache.tree,
             freshColdTree,
             "supersedingColdCache"
+        )
+        state.stopLiveMonitoring()
+    }
+
+    @Test("Interactive and trailing tiers share one staged-item budget")
+    func tiersShareOneStagedItemBudget() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.tiersShareOneStagedItemBudgetBody()
+        }
+    }
+
+    @MainActor
+    private func tiersShareOneStagedItemBudgetBody() async throws {
+        let (rawRoot, cleanup) = try createTempTree(cumulativeBudgetLayout())
+        defer { cleanup() }
+        let root = realDirectoryPath(rawRoot)
+        let interactiveRoot = root + "/interactive"
+        let ephemeralRoot = root + "/ephemeral"
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+
+        try await settleFixtureJournal(root: root)
+        let savedEventId = FSEventsJournal.currentEventId()
+        let bootstrapTree = FileTree()
+        await FileScanner().scan(
+            path: root,
+            progress: ScanProgress(),
+            tree: bootstrapTree
+        )
+        #expect(bootstrapTree.count == 19)
+        try TreeCache.save(
+            tree: bootstrapTree,
+            lastEventId: savedEventId
+        )
+
+        try Data(count: 30).write(
+            to: URL(fileURLWithPath: interactiveRoot + "/new.txt")
+        )
+        try Data(count: 40).write(
+            to: URL(fileURLWithPath: ephemeralRoot + "/new.txt")
+        )
+        #expect(await waitForJournalChanges(
+            root: root,
+            since: savedEventId
+        ))
+
+        let gatedFilesystem = GatedFilesystemProvider(gatedPath: ephemeralRoot)
+        defer { gatedFilesystem.release() }
+        let state = AppState(
+            defaults: defaults,
+            ephemeralPaths: syntheticEphemeralPaths(root: root),
+            warmPatchScannerFactory: {
+                FileScanner(filesystem: gatedFilesystem)
+            }
+        )
+        state.selectedVolume = URL(fileURLWithPath: root)
+        state.startSelectedVolumeScan()
+
+        await waitUntil { gatedFilesystem.didReachGate }
+        #expect(
+            gatedFilesystem.didReachGate,
+            "the planner must admit the cached four-item estimate and reach tier two"
+        )
+        let interactiveTree = try #require(state.fileTree)
+        #expect(interactiveTree.nodeIndex(forPath: interactiveRoot + "/new.txt") != nil)
+        #expect(interactiveTree.nodeIndex(forPath: ephemeralRoot + "/new.txt") == nil)
+
+        gatedFilesystem.release()
+        await waitUntil(timeout: 30) {
+            state.scanProgress.scanComplete
+                && !state.scanProgress.isScanning
+                && !state.isBundleSizingRunning
+        }
+
+        #expect(
+            state.lastScanSummary?
+                .contains("~32% of files changed since last scan") == true
+        )
+        #expect(state.lastScanSummary?.contains("changed locations") != true)
+        let historyReason = WarmStartHistory.load(for: root).last?.reason
+        #expect(historyReason == "~32% of files changed since last scan")
+
+        let finalTree = try #require(state.fileTree)
+        let freshColdTree = FileTree()
+        await FileScanner().scan(
+            path: root,
+            progress: ScanProgress(),
+            tree: freshColdTree
+        )
+        assertTreesEquivalent(
+            finalTree,
+            freshColdTree,
+            "cumulativeBudgetColdFallback"
         )
         state.stopLiveMonitoring()
     }

@@ -108,17 +108,16 @@ struct WarmStartPlannerTests {
         }
     }
 
-    @Test("Unknown directory count still warms under the defensive backstop")
-    func nilDirectoryCountWarmsUnderBackstop() {
-        // Kept under the plan-042 `maxPatchRoots` default (48) - that gate is always on
-        // and unrelated to what this test exercises (the unknownDirectoryCountBackstop,
-        // 5,000, which only applies once `cachedDirectoryCount` is nil). 40 is still
-        // comfortably "many roots" for that purpose.
-        let paths = (0..<40).map { "/root/dir\($0)" }
+    @Test("Unknown directory count still warms at the defensive backstop")
+    func nilDirectoryCountWarmsAtBackstop() {
+        // Lift the independent 512-root sanity backstop so this test reaches the
+        // unchanged unknownDirectoryCountBackstop itself.
+        let paths = (0..<5_000).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            cachedDirectoryCount: nil
+            cachedDirectoryCount: nil,
+            maxPatchRoots: 6_000
         )
         #expect(decision == .warm(targets: paths))
     }
@@ -129,12 +128,14 @@ struct WarmStartPlannerTests {
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            cachedDirectoryCount: nil
+            cachedDirectoryCount: nil,
+            maxPatchRoots: 6_000
         )
-        guard case .coldFallback = decision else {
+        guard case .coldFallback(let reason) = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
         }
+        #expect(reason == "too many changed directories (5001 > 5000)")
     }
 
     @Test("1000+ raw events collapsing to 3 real folders still warms - the bug this fixes")
@@ -194,6 +195,8 @@ struct WarmStartPlannerTests {
 
     @Test("Item fraction exactly at the 25% boundary still warms")
     func itemFractionAtBoundaryStillWarms() {
+        // Cost model: 26.42 * 0.25 + 0.15 = 6.755s predicted warm versus
+        // 26.42s cold, so the inclusive 25% boundary remains conservative.
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(["/root/a"]),
@@ -219,6 +222,45 @@ struct WarmStartPlannerTests {
         }
     }
 
+    @Test("Item fraction reason wins when the directory fraction also fails")
+    func itemFractionPrecedesDirectoryFraction() {
+        let paths = (0..<10).map { "/root/dir\($0)" }
+        let decision = WarmStartPlanner.decide(
+            cacheAvailable: true,
+            replay: .changes(paths),
+            cachedDirectoryCount: 20,
+            cachedTotalItemCount: 1_000,
+            estimatedPatchItems: 300
+        )
+        #expect(
+            decision
+                == .coldFallback(
+                    reason: "~30% of files changed since last scan"
+                )
+        )
+    }
+
+    @Test("Derived staged-item budget floors the fraction and remains inclusive")
+    func stagedItemBudgetFloorAndReasonBoundary() {
+        #expect(
+            WarmStartPlanner.maximumStagedItemCount(
+                cachedTotalItemCount: 19
+            ) == 4
+        )
+        #expect(
+            WarmStartPlanner.itemBudgetFallbackReason(
+                stagedItems: 4,
+                cachedTotalItemCount: 19
+            ) == nil
+        )
+        #expect(
+            WarmStartPlanner.itemBudgetFallbackReason(
+                stagedItems: 5,
+                cachedTotalItemCount: 19
+            ) == "~26% of files changed since last scan"
+        )
+    }
+
     @Test("Cost-based rule is inert when the caller doesn't supply the new parameters")
     func costBasedRuleInertWithoutNewParameters() {
         // Same inputs as `tooManyChangesFallsBackToCold` above, proving the default
@@ -236,54 +278,51 @@ struct WarmStartPlannerTests {
         }
     }
 
-    @Test("A passing item fraction still defers to the root-count rule as a secondary cap")
-    func itemFractionPassingStillSubjectToRootCountCap() {
-        // 500 tiny changed roots (1 item apiece) sail under the 25% item threshold but
-        // blow through the 20% root-count cap - the cost-based rule isn't a replacement,
-        // it's an ADDITIONAL gate.
+    @Test("Five hundred tiny roots stay warm below the sanity backstop")
+    func manyTinyRootsBelowSanityBackstopWarm() {
+        // The item gate admits this 0.05% patch, 500 is below the 512-root pathological
+        // backstop, and the large cached directory count keeps the independent
+        // directory-fraction rule from being the deciding factor.
         let manyTinyRoots = (0..<500).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(manyTinyRoots),
-            cachedDirectoryCount: 1_000,
+            cachedDirectoryCount: 10_000,
             cachedTotalItemCount: 1_000_000,
             estimatedPatchItems: 500
         )
-        guard case .coldFallback = decision else {
-            Issue.record("expected coldFallback from the root-count cap despite a tiny item fraction, got \(decision)")
-            return
-        }
+        #expect(decision == .warm(targets: manyTinyRoots))
     }
 
-    // MARK: - maxPatchRoots (plan 042 revision: removeChildren is O(tree) PER CALL)
+    // MARK: - maxPatchRoots (post-batched-splice pathological sanity backstop)
 
-    @Test("Exactly maxPatchRoots (48) changed roots still warms - the cap's boundary")
+    @Test("Exactly maxPatchRoots (512) changed roots still warms - the backstop boundary")
     func maxPatchRootsBoundaryStillWarms() {
         // cachedDirectoryCount/cachedTotalItemCount chosen so neither the percentage rule
-        // nor the item-fraction rule is anywhere near its own threshold - isolates the
-        // NEW absolute root-count cap specifically.
-        let paths = (0..<48).map { "/root/dir\($0)" }
+        // nor the item-fraction rule is anywhere near its own threshold, isolating the
+        // pathological root-count backstop specifically.
+        let paths = (0..<512).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            cachedDirectoryCount: 1_000
+            cachedDirectoryCount: 5_000
         )
         #expect(decision == .warm(targets: paths))
     }
 
     @Test("One root past maxPatchRoots falls back to cold, reason names the count")
     func maxPatchRootsJustOverBoundaryFallsBackToCold() {
-        let paths = (0..<49).map { "/root/dir\($0)" }
+        let paths = (0..<513).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            cachedDirectoryCount: 1_000
+            cachedDirectoryCount: 5_000
         )
         guard case .coldFallback(let reason) = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
         }
-        #expect(reason.contains("49"), "reason should mention the changed-root count: \(reason)")
+        #expect(reason == "513 changed locations - full scan is faster")
     }
 
     @Test("A custom maxPatchRoots is honored")
@@ -301,30 +340,20 @@ struct WarmStartPlannerTests {
         }
     }
 
-    @Test("50 scattered roots with a trivially small item fraction still falls back to cold - the root-count cap is necessary on its own")
-    func fiftyScatteredRootsTinyFractionStillFallsBackToCold() {
-        // Mirrors 042's benchmark fixture shape (many changed roots, most individually
-        // tiny): the item-fraction rule alone would WARM this (0.05% changed), and the
-        // OLD percentage-of-directories rule alone would also warm it (50 of 1,000 = 5%,
-        // under the 20% threshold) - only `maxPatchRoots` catches it, because
-        // `removeChildren`'s cost scales with ROOT COUNT, not with how much each root
-        // individually contributes.
-        let paths = (0..<50).map { "/root/dir\($0)" }
+    @Test("The measured 131-root holdback shape warms when its item fraction is tiny")
+    func measuredHoldbackRootCountTinyFractionWarms() {
+        let paths = (0..<131).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
             cachedDirectoryCount: 1_000,
             cachedTotalItemCount: 200_000,
-            estimatedPatchItems: 100
+            estimatedPatchItems: 131
         )
-        guard case .coldFallback(let reason) = decision else {
-            Issue.record("expected coldFallback from the root-count cap alone, got \(decision)")
-            return
-        }
-        #expect(reason.contains("50"), "reason should mention the changed-root count: \(reason)")
+        #expect(decision == .warm(targets: paths))
     }
 
-    @Test("50 roots with a large item fraction (the incident shape) falls back to cold via whichever gate fires first")
+    @Test("Many roots with a large item fraction fall back cold via the item gate")
     func incidentShapedFiftyRootsBigFractionFallsBackToCold() {
         let paths = (0..<50).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
@@ -334,10 +363,11 @@ struct WarmStartPlannerTests {
             cachedTotalItemCount: 200_000,
             estimatedPatchItems: 150_000
         )
-        guard case .coldFallback = decision else {
+        guard case .coldFallback(let reason) = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
         }
+        #expect(reason == "~75% of files changed since last scan")
     }
 }
 
@@ -372,6 +402,44 @@ struct WarmStartPlannerEstimatedPatchItemCountTests {
             cachedTree: tree
         )
         #expect(count == 4 + 1 + 32, "unresolved root should contribute the small fallback constant (32)")
+    }
+
+    @Test("Per-root estimates preserve collapsed-path attribution")
+    func perRootEstimatesPreserveAttribution() {
+        let tree = FileTree()
+        tree.setRootPath("/root")
+        var root = FileNode()
+        root.isDirectory = true
+        tree.addNode(root, name: "root")
+
+        var dirA = FileNode()
+        dirA.isDirectory = true
+        var dirB = FileNode()
+        dirB.isDirectory = true
+        let firstChild = tree.addChildren(
+            [(node: dirA, name: "a"), (node: dirB, name: "b")],
+            parentIndex: 0
+        )
+        tree.addChildren(
+            [(node: FileNode(), name: "f1"), (node: FileNode(), name: "f2")],
+            parentIndex: firstChild
+        )
+
+        let estimates = WarmStartPlanner.estimatedPatchItemCounts(
+            forChangedPaths: [
+                "/root/a/f1",
+                "/root/a",
+                "/root/b",
+                "/root/new",
+            ],
+            cachedTree: tree
+        )
+
+        #expect(estimates == [
+            "/root/a": 3,
+            "/root/b": 1,
+            "/root/new": 32,
+        ])
     }
 
     @Test("Nested changed paths collapse to their outermost root before summing")

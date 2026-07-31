@@ -407,9 +407,22 @@ struct SubtreeRescanCancellationTests {
         let rescanScanner = FileScanner(filesystem: cancelOnFirstList)
         cancelOnFirstList.scannerToCancel = rescanScanner
 
-        let report = await rescanScanner.rescanSubtrees(["/vol/a", "/vol/b"], tree: tree, progress: ScanProgress())
+        let report = await rescanScanner.rescanSubtrees(
+            ["/vol/a", "/vol/b"],
+            tree: tree,
+            progress: ScanProgress(),
+            options: SubtreeRescanOptions(
+                priority: .interactive,
+                resetsCancellation: true,
+                maximumStagedItemCount: -1
+            )
+        )
 
         #expect(report.wasCancelled, "cancelling on the very first directory listing must be reflected honestly")
+        #expect(
+            report.stagedItemBudgetExceeded == nil,
+            "cancellation must win even when any coherent staging result would exceed the supplied budget"
+        )
 
         // The tree must remain structurally valid regardless of how much finished
         // applying: every child range must stay inside bounds and start after some real

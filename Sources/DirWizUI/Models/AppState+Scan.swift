@@ -351,10 +351,19 @@ extension AppState {
             // Cost-based rule (plan 042): estimate how much of the cached tree the
             // changed roots actually represent, not just how many of them there are - a
             // handful of collapsed roots can still be a subtree of 100k+ files.
-            let estimatedPatchItems: Int? = {
+            let estimatedItemsByRoot: [String: Int]? = {
                 guard case .changes(let targets) = replay.outcome else { return nil }
-                return WarmStartPlanner.estimatedPatchItemCount(forChangedPaths: targets, cachedTree: cached.tree)
+                return WarmStartPlanner.estimatedPatchItemCounts(
+                    forChangedPaths: targets,
+                    cachedTree: cached.tree
+                )
             }()
+            let estimatedPatchItems: Int? = estimatedItemsByRoot.map { estimates in
+                estimates.values.reduce(into: 0) { total, estimate in
+                    let sum = total.addingReportingOverflow(estimate)
+                    total = sum.overflow ? Int.max : sum.partialValue
+                }
+            }
             let decision = WarmStartPlanner.decide(
                 cacheAvailable: true,
                 replay: replay.outcome,
@@ -378,7 +387,8 @@ extension AppState {
                     path: path,
                     targets: targets,
                     newEventId: replay.newEventId,
-                    runPostScanAnalyses: shouldRunPostScanAnalyses
+                    runPostScanAnalyses: shouldRunPostScanAnalyses,
+                    estimatedItemsByRequestedPath: estimatedItemsByRoot ?? [:]
                 )
             }
         }
@@ -445,19 +455,27 @@ extension AppState {
 
     /// Publishes the cached tree, patches only the directories the journal says changed,
     /// and re-establishes the exact post-conditions a cold scan produces. Any sign the
-    /// patch can't be trusted - an unresolved path, or a target that bottomed out at the
-    /// root because nothing narrower resolved - abandons the warm attempt and restarts
-    /// cold instead of publishing a partial result.
+    /// patch can't be trusted or has outgrown its admitted item budget - an unresolved
+    /// path, a target that bottomed out at the root because nothing narrower resolved, or
+    /// exact Phase A work above the shared ceiling - abandons the warm attempt and
+    /// restarts cold instead of publishing a partial result.
     private func commitWarmStart(
         cached: TreeCache.Payload,
         path: String,
         targets: [String],
         newEventId: UInt64,
-        runPostScanAnalyses shouldRunPostScanAnalyses: Bool
+        runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
+        estimatedItemsByRequestedPath: [String: Int]
     ) async {
         let tree = cached.tree
         let scanner = warmPatchScannerFactory()
         let tiers = ephemeralPaths.partition(targets)
+        let cachedTotalItemCount = tree.count
+        let maximumStagedItemCount = WarmStartPlanner.maximumStagedItemCount(
+            cachedTotalItemCount: cachedTotalItemCount
+        )
+        var remainingStagedItemCount = maximumStagedItemCount
+        var cumulativeStagedItemCount = 0
         let preservingStaleView = staleViewAsOf != nil
         // Captured before resetForNewScan() below clears selection/navigation - reused
         // after the first splice, or handed to its cold fallback if the patch itself
@@ -511,7 +529,11 @@ extension AppState {
                 tiers.interactive,
                 tree: tree,
                 progress: scanProgress,
-                options: .interactive,
+                options: SubtreeRescanOptions(
+                    priority: .interactive,
+                    resetsCancellation: true,
+                    maximumStagedItemCount: remainingStagedItemCount
+                ),
                 onWillCommit: { [weak self] in
                     guard let self, self.scanToken == token else { return }
                     self.isWarmPatchCommitInProgress = true
@@ -522,6 +544,15 @@ extension AppState {
                 isWarmPatchCommitInProgress = false
             }
             guard scanToken == token else { return }
+            cumulativeStagedItemCount = addingWithoutOverflow(
+                cumulativeStagedItemCount,
+                stagedItemCount(in: interactiveReport)
+            )
+            logWarmPatchTier(
+                "interactive",
+                report: interactiveReport,
+                estimatedItemsByRequestedPath: estimatedItemsByRequestedPath
+            )
             // Cancellation can race after Phase B committed. Invalidate whenever a
             // mutation actually landed, even though this attempt will not advance the
             // cache horizon or claim successful completion.
@@ -529,20 +560,30 @@ extension AppState {
                 invalidateAfterTreeMutation(restoring: preservedExploration)
                 computeExtensionStats()
             }
-            if let reason = warmPatchAbandonmentReason(interactiveReport, scanRoot: path) {
+            // A user cancellation can land after the scanner's final Phase A check but
+            // before this MainActor continuation observes the report. ScanSession drops
+            // its active scanner immediately on cancellation, so consult both signals
+            // before turning any simultaneous policy failure into a new cold scan.
+            guard !interactiveReport.wasCancelled,
+                  scanSession.activeScanner === scanner else {
+                finishCancelledWarmPatch(
+                    path: path,
+                    cachedAt: cached.savedAt,
+                    tree: tree
+                )
+                return
+            }
+            if let reason = warmPatchAbandonmentReason(
+                interactiveReport,
+                scanRoot: path,
+                cumulativeStagedItemCount: cumulativeStagedItemCount,
+                cachedTotalItemCount: cachedTotalItemCount
+            ) {
                 abandonWarmPatch(
                     path: path,
                     reason: reason,
                     shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
                     preservedExploration: preservedExploration
-                )
-                return
-            }
-            guard !interactiveReport.wasCancelled else {
-                finishCancelledWarmPatch(
-                    path: path,
-                    cachedAt: cached.savedAt,
-                    tree: tree
                 )
                 return
             }
@@ -555,8 +596,12 @@ extension AppState {
                 computeExtensionStats()
             }
             refreshedRootCount += interactiveReport.rescannedRoots.count
-
-            logWarmPatchTier("interactive", report: interactiveReport)
+            if let maximumStagedItemCount {
+                remainingStagedItemCount = max(
+                    0,
+                    maximumStagedItemCount - cumulativeStagedItemCount
+                )
+            }
         } else if preservingStaleView {
             restoreExploration(preservedExploration, in: tree)
         } else {
@@ -604,7 +649,11 @@ extension AppState {
             tiers.ephemeral,
             tree: tree,
             progress: scanProgress,
-            options: .trailing,
+            options: SubtreeRescanOptions(
+                priority: .utility,
+                resetsCancellation: false,
+                maximumStagedItemCount: remainingStagedItemCount
+            ),
             onWillCommit: { [weak self] in
                 guard let self, self.scanToken == token else { return }
                 self.isWarmPatchCommitInProgress = true
@@ -618,6 +667,15 @@ extension AppState {
         let trailingExploration = warmPatchExploration
         warmPatchExploration = nil
         warmPatchExplorationToken = nil
+        cumulativeStagedItemCount = addingWithoutOverflow(
+            cumulativeStagedItemCount,
+            stagedItemCount(in: trailingReport)
+        )
+        logWarmPatchTier(
+            "trailing",
+            report: trailingReport,
+            estimatedItemsByRequestedPath: estimatedItemsByRequestedPath
+        )
 
         // Both splices renumber indices. This second call is not optional: it clears
         // every index-keyed overlay, re-resolves navigation by path, and forces the
@@ -626,20 +684,26 @@ extension AppState {
             invalidateAfterTreeMutation(restoring: trailingExploration)
             computeExtensionStats()
         }
-        if let reason = warmPatchAbandonmentReason(trailingReport, scanRoot: path) {
+        guard !trailingReport.wasCancelled,
+              scanSession.activeScanner === scanner else {
+            finishCancelledWarmPatch(
+                path: path,
+                cachedAt: cached.savedAt,
+                tree: tree
+            )
+            return
+        }
+        if let reason = warmPatchAbandonmentReason(
+            trailingReport,
+            scanRoot: path,
+            cumulativeStagedItemCount: cumulativeStagedItemCount,
+            cachedTotalItemCount: cachedTotalItemCount
+        ) {
             abandonWarmPatch(
                 path: path,
                 reason: reason,
                 shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
                 preservedExploration: trailingExploration
-            )
-            return
-        }
-        guard !trailingReport.wasCancelled else {
-            finishCancelledWarmPatch(
-                path: path,
-                cachedAt: cached.savedAt,
-                tree: tree
             )
             return
         }
@@ -652,7 +716,6 @@ extension AppState {
         // unnecessarily detach a fully settled tree.
         warmPatchMutatesDisplayedTree = false
         refreshedRootCount += trailingReport.rescannedRoots.count
-        logWarmPatchTier("trailing", report: trailingReport)
 
         guard let persistableEventId = WarmPatchCacheHorizon.eventIdForPersistence(
             replayedThrough: newEventId,
@@ -679,7 +742,9 @@ extension AppState {
     /// scan wholesale; unresolved paths likewise make a partial patch untrustworthy.
     private func warmPatchAbandonmentReason(
         _ report: SubtreeRescanReport,
-        scanRoot: String
+        scanRoot: String,
+        cumulativeStagedItemCount: Int,
+        cachedTotalItemCount: Int
     ) -> String? {
         if !report.unresolvedPaths.isEmpty {
             let count = report.unresolvedPaths.count
@@ -687,6 +752,12 @@ extension AppState {
         }
         if report.rescannedRoots.contains(scanRoot) {
             return "a changed path resolved to the scan root - nothing narrower to patch"
+        }
+        if report.stagedItemBudgetExceeded != nil {
+            return WarmStartPlanner.itemBudgetFallbackReason(
+                stagedItems: cumulativeStagedItemCount,
+                cachedTotalItemCount: cachedTotalItemCount
+            )
         }
         return nil
     }
@@ -773,14 +844,40 @@ extension AppState {
 
     private func logWarmPatchTier(
         _ name: String,
-        report: SubtreeRescanReport
+        report: SubtreeRescanReport,
+        estimatedItemsByRequestedPath: [String: Int]
     ) {
-        let stagedItems = report.metrics.rootStaging.reduce(0) {
-            $0 + $1.actualStagedItemCount
+        for root in report.metrics.rootStaging {
+            var estimatedItems = 0
+            var estimateAvailable = true
+            for requestedPath in root.contributingRequestedPaths {
+                guard let estimate = estimatedItemsByRequestedPath[requestedPath] else {
+                    estimateAvailable = false
+                    break
+                }
+                estimatedItems = addingWithoutOverflow(estimatedItems, estimate)
+            }
+            let estimatedItemsDescription =
+                estimateAvailable ? String(estimatedItems) : "unavailable"
+            log.info(
+                "Warm patch \(name, privacy: .public) root: path=\(root.path, privacy: .public), estimated_items=\(estimatedItemsDescription, privacy: .public), actual_items=\(root.actualStagedItemCount)"
+            )
         }
+        let stagedItems = stagedItemCount(in: report)
         log.info(
             "Warm patch \(name, privacy: .public) tier: roots=\(report.rescannedRoots.count), staged_items=\(stagedItems), seconds=\(report.metrics.totalSeconds, format: .fixed(precision: 3))"
         )
+    }
+
+    private func stagedItemCount(in report: SubtreeRescanReport) -> Int {
+        report.metrics.rootStaging.reduce(into: 0) {
+            $0 = addingWithoutOverflow($0, $1.actualStagedItemCount)
+        }
+    }
+
+    private func addingWithoutOverflow(_ lhs: Int, _ rhs: Int) -> Int {
+        let sum = lhs.addingReportingOverflow(rhs)
+        return sum.overflow ? Int.max : sum.partialValue
     }
 
     private func finishSuccessfulWarmPatch(
