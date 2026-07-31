@@ -16,6 +16,8 @@ import Foundation
 /// roughly double the build time, not quadruple it. Under the reverted exact-reserve pattern
 /// the ratio blows past the bound (quadratic ≈ 4×+); the geometric fix keeps it near linear
 /// (≈ 2×). `.serialized` so the timing loop isn't fighting sibling tests in this suite for cores.
+extension PerformanceSensitiveSuites {
+
 @Suite("FileNode Growth Tests", .serialized)
 struct FileNodeGrowthTests {
 
@@ -105,4 +107,6 @@ struct FileNodeGrowthTests {
             """
         )
     }
+}
+
 }

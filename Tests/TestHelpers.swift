@@ -92,21 +92,85 @@ enum PerformanceSensitiveSuites {}
 ///
 /// Returns false on timeout so a caller can report a clear failure instead of proceeding
 /// with an empty journal and asserting something confusing downstream.
+struct JournalChangeWaitResult: Equatable, Sendable, CustomStringConvertible {
+    enum Outcome: Equatable, Sendable {
+        case changes([String])
+        case poisoned(String)
+        case timedOut(lastObservedPathCount: Int)
+    }
+
+    let outcome: Outcome
+    let attempts: Int
+    let elapsedMilliseconds: Int
+
+    var observedChanges: Bool {
+        guard case .changes(let paths) = outcome else { return false }
+        return !paths.isEmpty
+    }
+
+    var description: String {
+        let outcomeDescription: String
+        switch outcome {
+        case .changes(let paths):
+            outcomeDescription = "changes: \(paths.count) path(s)"
+        case .poisoned(let reason):
+            outcomeDescription = "poisoned: \(reason)"
+        case .timedOut(let count):
+            outcomeDescription = "timed out; last replay had \(count) path(s)"
+        }
+        return "\(outcomeDescription), attempts=\(attempts), elapsed_ms=\(elapsedMilliseconds)"
+    }
+}
+
+func waitForJournalChangesResult(
+    root: String,
+    since sinceId: UInt64,
+    timeout: TimeInterval = 20
+) async -> JournalChangeWaitResult {
+    let startedAt = Date()
+    let deadline = startedAt.addingTimeInterval(timeout)
+    var attempts = 0
+    var lastObservedPathCount = 0
+    while Date() < deadline {
+        attempts += 1
+        let replay = await FSEventsJournal.replay(root: root, since: sinceId, timeout: 5)
+        switch replay.outcome {
+        case .changes(let paths):
+            lastObservedPathCount = paths.count
+            if !paths.isEmpty {
+                return JournalChangeWaitResult(
+                    outcome: .changes(paths),
+                    attempts: attempts,
+                    elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)
+                )
+            }
+        case .poisoned(let reason):
+            return JournalChangeWaitResult(
+                outcome: .poisoned(reason),
+                attempts: attempts,
+                elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)
+            )
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+    }
+    return JournalChangeWaitResult(
+        outcome: .timedOut(lastObservedPathCount: lastObservedPathCount),
+        attempts: attempts,
+        elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000)
+    )
+}
+
 @discardableResult
 func waitForJournalChanges(
     root: String,
     since sinceId: UInt64,
     timeout: TimeInterval = 20
 ) async -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        let replay = await FSEventsJournal.replay(root: root, since: sinceId, timeout: 5)
-        if case .changes(let paths) = replay.outcome, !paths.isEmpty { return true }
-        // A poisoned journal will never become clean by waiting, so stop rather than spin.
-        if case .poisoned = replay.outcome { return false }
-        try? await Task.sleep(for: .milliseconds(150))
-    }
-    return false
+    await waitForJournalChangesResult(
+        root: root,
+        since: sinceId,
+        timeout: timeout
+    ).observedChanges
 }
 
 /// Point DIRWIZ_APP_SUPPORT_DIR at a scratch directory for the duration of a test,

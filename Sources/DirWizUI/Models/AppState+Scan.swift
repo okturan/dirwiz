@@ -257,6 +257,8 @@ extension AppState {
         // repair since nothing here gets published.
         guard !isApplyingChanges else { return }
 
+        scanSupervisionTrace = ScanSupervisionTrace()
+
         let mustDetachSupersededWarmTree = warmPatchMutatesDisplayedTree
         scanSession.cancelActiveScan()
         isWarmPatchCommitInProgress = false
@@ -344,7 +346,7 @@ extension AppState {
         }
 
         Task {
-            let replay = await FSEventsJournal.replay(root: path, since: cached.lastEventId)
+            let replay = await warmStartJournalReplay(path, cached.lastEventId)
             // A true folder count for the threshold, not the cache's raw node count -
             // computed fresh each attempt since the cached tree itself never changes here.
             let cachedDirectoryCount = Self.directoryCount(in: cached.tree)
@@ -373,15 +375,20 @@ extension AppState {
             )
 
             guard self.scanSession.token == attemptToken else { return }
+            self.scanSupervisionTrace.journalReplayOutcome =
+                Self.describeJournalReplayOutcome(replay.outcome)
 
             switch decision {
             case .coldFallback(let reason):
+                self.scanSupervisionTrace.plannerDecision = "cold fallback: \(reason)"
                 log.notice("Warm start fallback for \(path, privacy: .public): \(reason, privacy: .public)")
                 self.beginColdScan(
                     path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason,
                     preservedExploration: self.captureExplorationIfPreserving()
                 )
             case .warm(let targets):
+                self.scanSupervisionTrace.plannerDecision =
+                    "warm patch: \(targets.count) target(s)"
                 await self.commitWarmStart(
                     cached: cached,
                     path: path,
@@ -768,6 +775,7 @@ extension AppState {
         shouldRunPostScanAnalyses: Bool,
         preservedExploration: ExplorationCapture?
     ) {
+        scanSupervisionTrace.abandonmentReason = reason
         warmPatchMutatesDisplayedTree = false
         warmPatchExploration = nil
         warmPatchExplorationToken = nil
@@ -971,6 +979,7 @@ extension AppState {
         coldFallbackReason: String? = nil,
         preservedExploration: ExplorationCapture? = nil
     ) {
+        scanSupervisionTrace.coldFallbackReason = coldFallbackReason
         // Captured before the scan starts: any filesystem activity on this volume from
         // here on is exactly what the *next* warm start needs to replay.
         let eventIdAtScanStart = FSEventsJournal.currentEventId()
@@ -1067,6 +1076,17 @@ extension AppState {
     /// (~ms at millions of nodes) to recompute per warm-start attempt instead.
     private static func directoryCount(in tree: FileTree) -> Int {
         tree.nodesSnapshot().reduce(0) { $0 + ($1.isDirectory ? 1 : 0) }
+    }
+
+    private static func describeJournalReplayOutcome(
+        _ outcome: JournalReplay.Outcome
+    ) -> String {
+        switch outcome {
+        case .changes(let paths):
+            return "changes: \(paths.count) path(s)"
+        case .poisoned(let reason):
+            return "poisoned: \(reason)"
+        }
     }
 
     private func beginDeferredBundleSizing(

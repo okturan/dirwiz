@@ -2,6 +2,15 @@ import SwiftUI
 import DirWizCore
 import Quartz
 
+/// Test-visible breadcrumb trail for diagnosing scan-supervision failures without
+/// inferring an async path from whichever assertion happened to fire last.
+struct ScanSupervisionTrace: Equatable, Sendable {
+    var journalReplayOutcome = "not attempted"
+    var plannerDecision = "not reached"
+    var abandonmentReason: String?
+    var coldFallbackReason: String?
+}
+
 /// Central observable state for the application.
 /// All properties are MainActor-isolated - the compiler enforces that mutations
 /// only happen on the main thread. Background work uses `Task.detached` +
@@ -65,6 +74,11 @@ public final class AppState {
 
     /// Scan lifecycle state and active scanner ownership.
     public var scanSession = ScanSession()
+
+    /// Diagnostics only: reset for each admitted scan flow, then populated at the actual
+    /// replay/decision/abandonment boundaries. Kept out of observation so collecting
+    /// evidence cannot perturb view updates or supervision timing.
+    @ObservationIgnored var scanSupervisionTrace = ScanSupervisionTrace()
 
     /// Long-running analysis task ownership.
     public var analysisCoordinator = AnalysisCoordinator()
@@ -306,6 +320,12 @@ public final class AppState {
     /// interactive publication and the deferred splice.
     @ObservationIgnored let warmPatchScannerFactory: @Sendable () -> FileScanner
 
+    /// Journal replay seam for deterministic supervision tests. Production always uses
+    /// the real FSEvents journal; tests can hold that prerequisite constant while they
+    /// exercise AppState's warm/cold supervision transitions.
+    @ObservationIgnored let warmStartJournalReplay:
+        @Sendable (_ root: String, _ sinceEventId: UInt64) async -> JournalReplay
+
     /// A warm patch mutates the displayed cached tree in place. A superseding scan uses
     /// this bit to detach that tree synchronously before the old scanner can commit after
     /// cancellation and leave newly-renumbered nodes under stale index-keyed UI state.
@@ -335,12 +355,19 @@ public final class AppState {
     public init(
         defaults: UserDefaults = .standard,
         ephemeralPaths: EphemeralPaths = .current(),
-        warmPatchScannerFactory: @escaping @Sendable () -> FileScanner = { FileScanner() }
+        warmPatchScannerFactory: @escaping @Sendable () -> FileScanner = { FileScanner() },
+        warmStartJournalReplay: @escaping @Sendable (
+            _ root: String,
+            _ sinceEventId: UInt64
+        ) async -> JournalReplay = { root, eventId in
+            await FSEventsJournal.replay(root: root, since: eventId)
+        }
     ) {
         self.defaults = defaults
         self.sessionStore = SessionStateStore(defaults: defaults)
         self.ephemeralPaths = ephemeralPaths
         self.warmPatchScannerFactory = warmPatchScannerFactory
+        self.warmStartJournalReplay = warmStartJournalReplay
         // Read persisted preferences from the INJECTED store. Doing this here rather than
         // in a property default is what keeps an isolated test suite from writing into the
         // user's real defaults domain (it did, once).

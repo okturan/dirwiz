@@ -28,6 +28,64 @@ struct ScanSupervisionTests {
 
     private static let lastScannedVolumePathKey = "lastScannedVolumePath"
 
+    /// Real filesystem wrapper that pauses one warm-patch Phase A enumeration. The tests
+    /// no longer need thousands of files merely to create a pollable timing window.
+    private final class GatedFilesystemProvider: @unchecked Sendable, FilesystemProvider {
+        private let inner = RealFilesystemProvider()
+        private let gatedPath: String
+        private let releaseGate = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var reachedGate = false
+
+        init(gatedPath: String) {
+            self.gatedPath = gatedPath
+        }
+
+        var didReachGate: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return reachedGate
+        }
+
+        func release() {
+            releaseGate.signal()
+        }
+
+        func listDirectory(path: String) -> [DirectoryEntry]? {
+            inner.listDirectory(path: path)
+        }
+
+        func forEachDirectoryEntry(
+            path: String,
+            _ body: (DirectoryEntry) -> Bool
+        ) -> Bool {
+            if path == gatedPath {
+                lock.lock()
+                reachedGate = true
+                lock.unlock()
+                releaseGate.wait()
+            }
+            return inner.forEachDirectoryEntry(path: path, body)
+        }
+
+        func computeBundleSize(
+            path: String,
+            isCancelled: () -> Bool
+        ) -> (fileSize: UInt64, allocatedSize: UInt64) {
+            inner.computeBundleSize(path: path, isCancelled: isCancelled)
+        }
+
+        func deviceAndInode(
+            forPath path: String
+        ) -> (device: Int32, inode: UInt64)? {
+            inner.deviceAndInode(forPath: path)
+        }
+
+        func volumeStats(forPath path: String) -> StatfsResult? {
+            inner.volumeStats(forPath: path)
+        }
+    }
+
     private func makeEphemeralDefaults() -> (defaults: UserDefaults, cleanup: () -> Void) {
         let suiteName = "test-\(UUID())"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -64,6 +122,38 @@ struct ScanSupervisionTests {
         let tree = FileTree()
         await scanner.scan(path: path, progress: progress, tree: tree)
         return tree
+    }
+
+    /// Snapshot the evidence requested by scan-supervision-flake task 1.2 at the exact
+    /// assertion boundary. This is diagnostic text only; it does not wait for or mutate
+    /// any state and therefore cannot turn a red run green.
+    @MainActor
+    private func supervisionDiagnostics(
+        state: AppState,
+        root: String,
+        preflightJournal: JournalChangeWaitResult
+    ) -> String {
+        let trace = state.scanSupervisionTrace
+        let historyDescription: String
+        if let history = WarmStartHistory.load(for: root).last {
+            historyDescription = history.wasWarm
+                ? "warm"
+                : "cold(reason=\(history.reason ?? "nil"))"
+        } else {
+            historyDescription = "none"
+        }
+        return [
+            "preflight=[\(preflightJournal)]",
+            "app_replay=\(trace.journalReplayOutcome)",
+            "planner=\(trace.plannerDecision)",
+            "abandonment=\(trace.abandonmentReason ?? "nil")",
+            "cold_fallback=\(trace.coldFallbackReason ?? "nil")",
+            "progress={path=\(String(reflecting: state.scanProgress.currentPath)), scanning=\(state.scanProgress.isScanning), complete=\(state.scanProgress.scanComplete), cancelled=\(state.scanProgress.isCancelled), preparing=\(state.isPreparingScan)}",
+            "stale=\(state.staleViewAsOf != nil)",
+            "hardlinks={groups=\(state.hardlink.hardlinkGroups.count), running=\(state.hardlink.isHardlinkScanRunning)}",
+            "summary=\(state.lastScanSummary ?? "nil")",
+            "history=\(historyDescription)",
+        ].joined(separator: "; ")
     }
 
     /// A large-ish real fixture, big enough that a real on-disk scan is still running a
@@ -232,8 +322,6 @@ struct ScanSupervisionTests {
         let (rawRoot, cleanup) = try createTempTree(layout)
         defer { cleanup() }
         let root = realDirectoryPath(rawRoot)
-        try await settleFSEventsJournal()  // let the fixture's own creation land first
-        let idBeforeChurn = FSEventsJournal.currentEventId()
 
         let savedEventId = FSEventsJournal.currentEventId()
         let tree = await scanFixture(at: root)
@@ -246,42 +334,116 @@ struct ScanSupervisionTests {
         // `commitWarmStart` abandons the patch for a cold fallback (028/040's documented
         // "prefer a full rescan over patching the whole tree through the splice path it
         // wasn't designed to replace wholesale" rule).
-        let idBeforeMutation = FSEventsJournal.currentEventId()
         let newDir = URL(fileURLWithPath: root).appendingPathComponent("brandnew")
         try FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
         try Data(count: 77).write(to: newDir.appendingPathComponent("f.txt"))
-        // Warm start below replays the journal; if the daemon has not flushed yet it sees
-        // no changes, patches nothing, and the abandonment this test is about never
-        // happens. Wait for the event rather than for a fixed 500ms.
-        #expect(await waitForJournalChanges(root: root, since: idBeforeMutation),
-                "FSEvents never journaled the new directory within the timeout")
+        let injectedReplay = JournalReplay(
+            outcome: .changes([newDir.path]),
+            newEventId: FSEventsJournal.currentEventId()
+        )
+        let journalWait = JournalChangeWaitResult(
+            outcome: .changes([newDir.path]),
+            attempts: 0,
+            elapsedMilliseconds: 0
+        )
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
         defaults.set(root, forKey: Self.lastScannedVolumePathKey)
 
-        let state = AppState(defaults: defaults)
+        let state = AppState(
+            defaults: defaults,
+            warmStartJournalReplay: { _, _ in injectedReplay }
+        )
         state.restoreOnLaunch()
 
         await waitUntil(timeout: 20) { !state.scanProgress.isScanning && state.staleViewAsOf == nil }
 
-        #expect(!state.scanProgress.isScanning)
-        #expect(state.staleViewAsOf == nil)
+        #expect(
+            !state.scanProgress.isScanning,
+            "\(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
+        #expect(
+            state.staleViewAsOf == nil,
+            "\(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
         guard let finalTree = state.fileTree else {
             Issue.record("expected a tree after the warm→cold fallback settled")
             return
         }
         // Prove the cold fallback actually ran to completion (not just an early abandon
         // with a stale/partial tree left behind): the brand-new directory is reflected.
-        #expect(nodeIndex(in: finalTree, pathSuffix: "/brandnew/f.txt") != nil,
-            "expected the fallback cold scan to have picked up the new top-level directory")
+        #expect(
+            nodeIndex(in: finalTree, pathSuffix: "/brandnew/f.txt") != nil,
+            "expected the fallback cold scan to have picked up the new top-level directory; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
 
         // warm-start-observability: the abandonment reason must reach the visible
         // summary, not just settle into a plain "Scanned N items" with no explanation -
         // this is exactly the silent-cold-fallback gap the change fixes.
         #expect(
             state.lastScanSummary?.contains("nothing narrower to patch") == true,
-            "expected the root-level-rescan abandonment reason in the summary, got \(state.lastScanSummary ?? "nil")"
+            "expected the root-level-rescan abandonment reason in the summary; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
+    }
+
+    @Test("A poisoned journal falls back cold with the exact recorded reason")
+    func poisonedJournalFallsBackCoherently() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.poisonedJournalFallsBackCoherentlyBody()
+        }
+    }
+
+    @MainActor
+    private func poisonedJournalFallsBackCoherentlyBody() async throws {
+        let (rawRoot, cleanup) = try createTempTree(Self.layout)
+        defer { cleanup() }
+        let root = realDirectoryPath(rawRoot)
+        let tree = await scanFixture(at: root)
+        try TreeCache.save(
+            tree: tree,
+            lastEventId: FSEventsJournal.currentEventId()
+        )
+
+        let poisonedReplay = JournalReplay(
+            outcome: .poisoned("MustScanSubDirs"),
+            newEventId: FSEventsJournal.currentEventId()
+        )
+        let journalEvidence = JournalChangeWaitResult(
+            outcome: .poisoned("MustScanSubDirs"),
+            attempts: 0,
+            elapsedMilliseconds: 0
+        )
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = AppState(
+            defaults: defaults,
+            warmStartJournalReplay: { _, _ in poisonedReplay }
+        )
+        state.selectedVolume = URL(fileURLWithPath: root)
+        state.startSelectedVolumeScan()
+
+        await waitUntil(timeout: 20) {
+            state.scanProgress.scanComplete && !state.isBundleSizingRunning
+        }
+
+        let diagnostics = supervisionDiagnostics(
+            state: state,
+            root: root,
+            preflightJournal: journalEvidence
+        )
+        #expect(state.fileTree != nil, "\(diagnostics)")
+        #expect(
+            state.lastScanSummary?.contains("change journal unavailable") == true,
+            "\(diagnostics)"
+        )
+        let history = try #require(WarmStartHistory.load(for: root).last)
+        #expect(!history.wasWarm, "\(diagnostics)")
+        #expect(history.reason == "change journal unavailable", "\(diagnostics)")
+        #expect(
+            state.scanSupervisionTrace.journalReplayOutcome
+                == "poisoned: MustScanSubDirs",
+            "\(diagnostics)"
         )
     }
 
@@ -376,12 +538,9 @@ struct ScanSupervisionTests {
     @MainActor
     private func warmPatchNeverShowsFalseEmptyHardlinksBody() async throws {
         var layout: [String: UInt64] = [:]
-        // Padding + churn: same two-part shape `warmPatchIsCancellableMidFlightBody`
-        // uses, for the same two reasons. Padding keeps the changed-item-fraction
-        // threshold comfortably satisfied (the decision judges the changed set against
-        // the CACHED size, before the mutation below grows it). Churn gives
-        // `rescanSubtrees` genuine work, wide enough for this test's polling loop to
-        // reliably land inside the patch window instead of racing a near-instant no-op.
+        // Padding keeps the cached estimate warm-eligible. Two new files per churn root
+        // keep the exact staged count under the existing 25% guard; a filesystem gate,
+        // not thousands of files or scheduler luck, creates the observation window.
         for i in 0..<300 {
             layout["pad\(i)/seed.txt"] = 1
         }
@@ -398,63 +557,72 @@ struct ScanSupervisionTests {
         try Data(repeating: 0xAB, count: 256).write(to: original)
         let link = URL(fileURLWithPath: root).appendingPathComponent("pad0/hardlink.txt")
         try FileManager.default.linkItem(at: original, to: link)
-        try await settleFSEventsJournal()
-        let idBeforeChurn = FSEventsJournal.currentEventId()
 
         let savedEventId = FSEventsJournal.currentEventId()
         let tree = await scanFixture(at: root)
         #expect(tree.linkCountsCaptured)
         try TreeCache.save(tree: tree, lastEventId: savedEventId)
 
-        // Grow each churn directory substantially - real work for the patch to chew
-        // through, even though the warm decision (based on the cache above) sees only a
-        // small fraction of the tree as changed.
+        let changedRoots = (0..<40).map { root + "/churn\($0)" }
         for i in 0..<40 {
             let dirURL = URL(fileURLWithPath: root).appendingPathComponent("churn\(i)")
-            for f in 0..<100 {
+            for f in 0..<2 {
                 try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
             }
         }
-        #expect(await waitForJournalChanges(root: root, since: idBeforeChurn),
-                "FSEvents never journaled the churn within the timeout")
+        let injectedReplay = JournalReplay(
+            outcome: .changes(changedRoots),
+            newEventId: FSEventsJournal.currentEventId()
+        )
+        let journalWait = JournalChangeWaitResult(
+            outcome: .changes(changedRoots),
+            attempts: 0,
+            elapsedMilliseconds: 0
+        )
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
         defaults.set(root, forKey: Self.lastScannedVolumePathKey)
 
-        let state = AppState(defaults: defaults)
+        let phaseAGate = GatedFilesystemProvider(gatedPath: changedRoots[0])
+        defer { phaseAGate.release() }
+        let state = AppState(
+            defaults: defaults,
+            warmPatchScannerFactory: {
+                FileScanner(filesystem: phaseAGate)
+            },
+            warmStartJournalReplay: { _, _ in injectedReplay }
+        )
         state.restoreOnLaunch()
 
         // restoreOnLaunch's own post-restore refreshHardlinkGroups() call needs a beat
         // to complete before the (fast, in-memory) hardlink group is actually populated.
         await waitUntil(timeout: 5) { !state.hardlink.hardlinkGroups.isEmpty }
-        #expect(state.hardlink.hardlinkGroups.count == 1, "fixture must have exactly the one seeded hardlink group before the patch begins")
+        #expect(
+            state.hardlink.hardlinkGroups.count == 1,
+            "fixture must have exactly the one seeded hardlink group before the patch begins; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
 
-        // Wait past the "preparing"/replay-wait sub-state into the actual patch, where
-        // commitWarmStart has registered its scanner via markStarted - same proven idiom
-        // as `warmPatchIsCancellableMidFlightBody`. This is the exact, reliable
-        // checkpoint right after commitWarmStart's synchronous top-of-function work
-        // (reset + this fix's immediate refreshHardlinkGroups()) has run and before the
-        // real `await rescanSubtrees(...)` suspension - the precise moment the OLD,
-        // unfixed code would have shown the misleading empty state.
         await waitUntil(timeout: 10, pollInterval: .milliseconds(1)) {
-            state.scanProgress.isScanning && !state.isPreparingScan
+            phaseAGate.didReachGate
         }
+        #expect(phaseAGate.didReachGate, "warm patch never reached the deterministic Phase A gate")
 
         // Confirm this is actually exercising a WARM patch, not a cold fallback that
         // would make the rest of this test pass for the wrong reason.
         #expect(state.scanProgress.currentPath.contains("last scan")
             || state.scanProgress.currentPath.contains("changed folders"),
-            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" - did the fixture stop qualifying as warm?")
+            "expected a warm-patch-specific status; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))")
 
         #expect(
             !(state.hardlink.hardlinkGroups.isEmpty && !state.hardlink.isHardlinkScanRunning),
-            "hardlinkGroups read (empty && not running) right at patch entry - the exact bug_002 window"
+            "hardlinkGroups read (empty && not running) right at patch entry - the exact bug_002 window; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
         )
 
         // Keep watching through the remainder of the (real, churn-sized) patch - belt
         // and suspenders alongside the entry-point checkpoint above.
         var observedFalseEmpty = false
+        phaseAGate.release()
         while state.scanProgress.isScanning {
             if state.hardlink.hardlinkGroups.isEmpty && !state.hardlink.isHardlinkScanRunning {
                 observedFalseEmpty = true
@@ -464,9 +632,13 @@ struct ScanSupervisionTests {
         }
 
         #expect(!observedFalseEmpty,
-            "hardlinkGroups must never read (empty && not running) while a warm patch is in flight behind a stale view")
+            "hardlinkGroups must never read (empty && not running) while a warm patch is in flight behind a stale view; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))")
         #expect(!state.scanProgress.isScanning)
-        #expect(state.hardlink.hardlinkGroups.count == 1, "the group must still be present after the patch settles")
+        await waitUntil(timeout: 5) { !state.hardlink.isHardlinkScanRunning }
+        #expect(
+            state.hardlink.hardlinkGroups.count == 1,
+            "the group must still be present after the patch settles; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
     }
 
     // MARK: - 5. Every flow's scanner is cancellable
@@ -561,49 +733,57 @@ struct ScanSupervisionTests {
         for i in 0..<300 {
             layout["pad\(i)/seed.txt"] = 1
         }
-        // Forty real changed roots, far below the 512-root pathological backstop, each
-        // starting tiny in the CACHED tree. The warm-start decision judges the changed
-        // set by this small cached size (exactly like the reported incident: the decision
-        // can't know ahead of time how much new content a root is about to gain on disk),
-        // so it still warms even though the mutation below gives Phase A/B real work.
+        // Forty real changed roots, far below the 512-root pathological backstop. The
+        // deterministic filesystem gate below supplies the cancellable window, so this
+        // fixture can remain below the staged-item guard instead of manufacturing load.
         for i in 0..<40 {
             layout["churn\(i)/seed.txt"] = 1
         }
         let (rawRoot, cleanup) = try createTempTree(layout)
         defer { cleanup() }
         let root = realDirectoryPath(rawRoot)
-        try await settleFSEventsJournal()
-        let idBeforeChurn = FSEventsJournal.currentEventId()
 
         let savedEventId = FSEventsJournal.currentEventId()
         let tree = await scanFixture(at: root)
         try TreeCache.save(tree: tree, lastEventId: savedEventId)
 
-        // Grow each churn directory substantially - real work for the parallel patch to
-        // chew through, even though the warm decision (based on the cache above) sees
-        // only a small fraction of the tree as changed.
+        let changedRoots = (0..<40).map { root + "/churn\($0)" }
         for i in 0..<40 {
             let dirURL = URL(fileURLWithPath: root).appendingPathComponent("churn\(i)")
-            for f in 0..<100 {
+            for f in 0..<2 {
                 try Data(count: f + 1).write(to: dirURL.appendingPathComponent("new\(f).dat"))
             }
         }
-        #expect(await waitForJournalChanges(root: root, since: idBeforeChurn),
-                "FSEvents never journaled the churn within the timeout")
+        let injectedReplay = JournalReplay(
+            outcome: .changes(changedRoots),
+            newEventId: FSEventsJournal.currentEventId()
+        )
+        let journalWait = JournalChangeWaitResult(
+            outcome: .changes(changedRoots),
+            attempts: 0,
+            elapsedMilliseconds: 0
+        )
 
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
         defaults.set(root, forKey: Self.lastScannedVolumePathKey)
 
-        let state = AppState(defaults: defaults)
+        let phaseAGate = GatedFilesystemProvider(gatedPath: changedRoots[0])
+        defer { phaseAGate.release() }
+        let state = AppState(
+            defaults: defaults,
+            warmPatchScannerFactory: {
+                FileScanner(filesystem: phaseAGate)
+            },
+            warmStartJournalReplay: { _, _ in injectedReplay }
+        )
         state.selectedVolume = URL(fileURLWithPath: root)
 
         state.startSelectedVolumeScan()
-        // Wait past the "preparing"/replay-wait sub-state into the actual patch, where
-        // `commitWarmStart` has registered its scanner via `markStarted`.
         await waitUntil(timeout: 10, pollInterval: .milliseconds(1)) {
-            state.scanProgress.isScanning && !state.isPreparingScan
+            phaseAGate.didReachGate
         }
+        #expect(phaseAGate.didReachGate, "warm patch never reached the deterministic Phase A gate")
 
         // Confirm this is actually exercising a WARM patch, not a cold fallback that
         // would make the rest of this test pass for the wrong reason (a real risk: any
@@ -613,19 +793,20 @@ struct ScanSupervisionTests {
         // its scanner, before any Phase A work begins; cold's `beginColdScan` never does.
         #expect(state.scanProgress.currentPath.contains("last scan")
             || state.scanProgress.currentPath.contains("changed folders"),
-            "expected a warm-patch-specific status, got \"\(state.scanProgress.currentPath)\" - did the fixture stop qualifying as warm?")
+            "expected a warm-patch-specific status; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))")
 
         state.cancelScan()
+        phaseAGate.release()
         await waitUntil(timeout: 20) { !state.scanProgress.isScanning }
 
         #expect(!state.scanProgress.isScanning)
         #expect(
             state.scanProgress.isCancelled,
-            "a user cancellation must remain cancellation, never turn into a cold fallback"
+            "a user cancellation must remain cancellation, never turn into a cold fallback; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
         )
         #expect(
             WarmStartHistory.load(for: root).isEmpty,
-            "cancelling a warm patch must not record a cold-fallback decision"
+            "cancelling a warm patch must not record a cold-fallback decision; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
         )
 
         // Not just momentarily quiet: no patch work should still be updating counters in
