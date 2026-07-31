@@ -46,7 +46,7 @@ It records three repeats in rotated age order.
 The 30-minute first/cold sample was 0.385664 seconds. No measured window
 approached the production 10-second timeout or emitted a poison flag.
 
-### Initially derived policy
+### Initially derived policy (superseded)
 
 - **Default interval: 15 minutes.**
 - **Maximum held cache horizon: 30 minutes.**
@@ -61,7 +61,7 @@ Four scheduled sweeps/hour plus navigation-triggered sweeps is still a throttle,
 not the rejected skip design. The safe holdback is also long enough to win
 materially at the journal layer.
 
-### Production planner conflict - STOP
+### Production planner conflict - historical STOP
 
 The journal curve is not the whole safety gate. `WarmStartPlanner.decide` still has
 an always-on `maxPatchRoots` limit of 48, checked before its item and directory-fraction
@@ -83,7 +83,7 @@ No interval or horizon is approved for production by this record. Either
 `retire-root-count-cap` must land first, or this change needs a new design that can
 prove an in-memory applied-through horizon without replaying the full held target set.
 
-### Total-work gate
+### Historical total-work gate
 
 | Schedule | Patch execution throughput | Sweeps/minute | Enumerated items/minute | Time-averaged items/second |
 | --- | ---: | ---: | ---: | ---: |
@@ -97,3 +97,68 @@ gate before the item budget, so there is no valid post-change combined patch thr
 to report. Substituting cold-scan throughput would hide the failure rather than measure
 the requested throttle. The real-volume latency and full-suite gates were not run after
 this STOP.
+
+## Post-cap production-path remeasurement
+
+Measured on 2026-07-31 after `retire-root-count-cap` landed on master as `9431689`.
+Every run started from a fresh cold `/` cache; later samples within a multi-refresh
+run loaded the cache saved by the preceding successful refresh. All used production
+per-host `FSEventsJournal.replay`, path collapse, `WarmStartPlanner.decide`, the exact
+post-Phase-A staged-item guard, the two-tier splice, and cache persistence. The red
+`wip/throttled-ephemeral-sweep` branch was not used.
+
+Journal replay never timed out or poisoned. Root count also never approached the new
+512-root sanity backstop. The binding constraint was the primary 25% item fraction:
+
+| Holdback | Replay | Collapsed roots | Estimated items | Exact staged items | Decision | Patch/fallback |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| 1 minute | 0.020741 s | 8 | 335,797 (7.0%) | 335,801 | warm | 3.792838 s |
+| 5 minutes | 0.019937 s | 27 | 415,710 (8.7%) | 415,682 | warm | 4.200718 s |
+| 15 minutes | 0.030087 s | 13 | 3,657,243 (76%) | n/a | cold | 19.043020 s |
+| 30 minutes | 0.261236 s | 73 | 3,960,562 (82%) | n/a | cold | 20.077519 s |
+| 10 minutes | 0.032102 s | 19 | 3,816,289 (79%) | n/a | cold | 21.775126 s |
+| 5-minute repeat | 0.044139 s | 10 | 3,817,865 (79%) | n/a | cold | 20.288934 s |
+| 1-minute repeat A | 0.040673 s | 42 | 356,398 (7.4%) | 356,199 | warm | 3.777860 s |
+| 1-minute repeat B | 0.014135 s | 91 | 370,894 (7.7%) | 370,840 | warm | 4.000122 s |
+| 1-minute repeat C | 0.022823 s | 71 | 547,284 (11.4%) | 547,225 | warm | 4.375849 s |
+| 30-second repeat A | 0.017660 s | 22 | 503,464 (10.5%) | 503,441 | warm | 3.796861 s |
+| 30-second repeat B | 0.018040 s | 7 | 3,813,950 (79%) | n/a | cold | 21.034151 s |
+| 30-second repeat C | 0.027483 s | 59 | 394,971 (8.2%) | 394,855 | warm | 3.752027 s |
+
+Operator-recorded shell load1 samples were at or below 3 before every run. Harness
+samples were 1.67 for the initial 1/5/15-minute run, 2.34 for 30 minutes, 2.28 for
+10 minutes, 2.36 for the independent 5-minute repeat, and 2.07 for the direct
+30-second repeats. The three one-minute repeat decisions are behavioral evidence
+rather than absolute timing evidence: that harness's own post-launch sample ticked
+from the operator-recorded 2.93 to 3.17.
+
+### Decision - STOP; no policy approved
+
+The first re-derivation tentatively treated four green one-minute samples as a
+60-second horizon and divided it by two for one guard-delayed retry. The direct
+30-second run disproved that boundary: one of three samples produced a seven-root
+change set estimated at 79% of the cached tree and correctly fell back cold.
+
+The result is non-monotonic because FSEvents reports changed paths, not a stable amount
+of work per elapsed second. A shorter window can still contain a high-level changed
+path whose cached subtree exceeds the 25% budget. Fast, unpoisoned replay therefore
+does not establish that the resulting patch is safe.
+
+Had the 30-second candidate survived, its automatic scheduled cadence (excluding
+navigation-triggered sweeps) would have fallen from at most six to two sweeps per
+minute: `6 * 159,415 = 956,490` versus `2 * 159,415 = 318,830` enumerated temp items,
+a 66.7% reduction. It did not survive. The warm samples themselves took
+3.752027-3.796861 seconds of patch work, approximately 12.5% of a 30-second period
+before cache load/save overhead.
+
+Preserving one guard-delayed retry after this failure would require a measured-safe
+horizon below 30 seconds and a default below 15 seconds. That is too close to the
+existing 10-second cadence to justify the scheduling machinery, and no measured
+boundary provides safety margin. Task 1.5 fires. No default interval or forced-sweep
+horizon is approved, and sections 2 and 3 must not be implemented under the current
+scheduling-only design.
+
+The next design must avoid replaying already-applied high-level interactive roots into
+the ephemeral sweep decision, or provide an equivalent independently-applied horizon.
+That is a design change, not an interval adjustment, and is outside this measurement
+record.

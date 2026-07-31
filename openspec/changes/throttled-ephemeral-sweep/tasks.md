@@ -1,32 +1,36 @@
-> **BLOCKED (2026-07-31) - do not implement in this order.**
+> **STOPPED AFTER DEPENDENCY RESOLUTION (2026-07-31).**
 >
-> Section 1 is complete and its findings stand: see `measurement.md`. The horizon
-> risk this change was designed around does not bind (replay never poisoned through
-> a 30-minute holdback, costing 0.15 s there). A different gate blocks it instead.
+> `retire-root-count-cap` landed on master as `9431689`. The old 15-minute default is
+> superseded by the post-cap production-path remeasurement in `measurement.md`.
 >
-> `WarmStartPlanner.decide` checks `maxPatchRoots` (48) BEFORE its item budget, and
-> collapsed roots exceed that at every useful interval: 84 at 1 minute, 99 at 5, and
-> 131 at the derived 15-minute default. Every scheduled sweep would therefore cold-
-> fall back, which is the outcome this change is required never to cause.
+> Root count no longer blocks the sweep. The item gate now exposes the real bound:
+> 10-, 15-, and 30-minute holdbacks fell back cold at approximately 79%, 76%, and
+> 82% of cached items. Five minutes was non-repeatable (one warm sample, one 79%
+> cold fallback). Four one-minute samples stayed warm at 7.0-11.4%, but a direct
+> three-sample 30-second run produced two warm patches and one 79% cold fallback.
 >
-> `retire-root-count-cap` must land FIRST. That resequencing corrects an error in
-> this proposal and in `deferred-ephemeral-roots`, both of which listed the cap work
-> as coming afterwards. The 6/19/7 root counts that justified deprioritising the cap
-> were measured on live patches at a ~10-second cadence; throttling to 15 minutes
-> accumulates 131.
+> FSEvents path collapse is non-monotonic under ambient churn, so four green
+> one-minute samples do not establish a safe one-minute horizon. Task 1.5 fires:
+> there is no repeatedly patchable measured boundary at or above 30 seconds. Any
+> shorter boundary remains unmeasured, while retaining one guard-delayed retry would
+> require a default below 15 seconds. That is too close to the existing 10-second
+> cadence to justify the scheduling machinery, especially when a successful combined
+> warm patch takes approximately 3.75-4.38 seconds.
+> No default interval or forced-sweep horizon is approved.
 >
-> Sections 2 and 3 are unchecked here because that code is NOT on master. A prototype
-> exists on branch `wip/throttled-ephemeral-sweep`, where the full suite is red: the
-> root-level-rescan abandonment test fails and master passes the same suite 3/3 at
-> higher load, so it is a real regression rather than the documented FSEvents flake.
-> Reuse it as reference, not as a base, and re-derive the interval after the cap
-> changes, since the cap is what bounds the usable holdback.
+> Sections 2 and 3 remain unchecked and MUST NOT resume under this scheduling-only
+> design. A follow-up must first separate already-applied interactive roots from the
+> held ephemeral horizon, or provide an equivalent proof that a sweep cannot replay
+> a high-level non-ephemeral root into the item gate. The red
+> `wip/throttled-ephemeral-sweep` branch remains reference only, not a base.
 
 ## 1. Derive the interval and horizon bound from measurement
 
 - [x] 1.1 Confirm on an idle machine that `sysctl -n vm.loadavg` is low before taking any timing
 - [x] 1.2 Measure the ephemeral tier's current cadence: sweeps per minute, items per sweep, observed churn interval of the temp root
-- [x] 1.3 Measure journal replay cost at holdback ages of 1, 5, 15 and 30 minutes, recording duration, changed-root count, and whether replay poisons
+- [x] 1.3 Measure the production replay and planner at holdback ages of 1, 5, 15 and
+      30 minutes, recording duration, changed-root count, item fraction, decision,
+      and whether replay poisons
 - [x] 1.4 Derive the default interval and horizon bound from 1.3 and record the arithmetic in the policy's doc comment
 - [x] 1.5 STOP and report if 1.3 shows the safe holdback is too short for the throttle to win anything
 - [x] 1.6 STOP and report if the useful interval is so long that this is the rejected skip design, and propose skipping outright with the equivalence gate rescoped
@@ -57,7 +61,7 @@
 - [ ] 4.5 Confirm cold-scan totals are byte-identical to before this change
 - [ ] 4.6 Run the full suite plus a `CI=true` parity run, stashing to confirm any `ScanSupervisionTests` failure also occurs on master
 
-### Total-work result - STOP (2026-07-31)
+### Historical pre-cap total-work result - STOP (2026-07-31)
 
 The journal horizon itself is safe: the Release replay stayed fast and unpoisoned through
 30 minutes, the bound is a policy input, and the synthetic persist/relaunch gate remained
@@ -81,6 +85,32 @@ it is not adequate evidence for a production default.
 Keep sections 1-3 as preparatory work, stack `retire-root-count-cap` next, then return and
 rerun 4.1-4.6 before accepting or shipping either change. No product commit from this
 change is safe on its own.
+
+### Post-cap interval re-derivation - STOP (2026-07-31)
+
+The landed planner was remeasured from fresh cold caches on `/`, never from the red
+prototype branch. Journal replay remained fast and unpoisoned throughout, but the
+item fraction—not root count—became the binding constraint:
+
+| Holdback | Samples | Outcome |
+| --- | ---: | --- |
+| 30 seconds | 3 | two warm at 8.2-10.5%; one cold at approximately 79% |
+| 1 minute | 4 | all warm; 7.0-11.4% of cached items |
+| 5 minutes | 2 | one warm at 8.7%; one cold at approximately 79% |
+| 10 minutes | 1 | cold at approximately 79% |
+| 15 minutes | 1 | cold at approximately 76% |
+| 30 minutes | 1 | cold at approximately 82% |
+
+There is no repeatedly patchable measured boundary at or above 30 seconds. The
+apparently green one-minute curve did not replicate when the boundary was narrowed:
+one direct 30-second sample produced a seven-root change set representing approximately
+79% of the cache and correctly chose cold.
+
+The original one-retry derivation would now require a horizon below 30 seconds and a
+default below 15 seconds. That provides no measured safety margin and is too close to
+the current 10-second cadence to win enough work to justify the throttle. Task 1.5
+therefore fires and no production policy is approved. Task 1.6 does not fire: this
+did not become the rejected skip design; it failed at the opposite end of the curve.
 
 ## 5. Documentation
 

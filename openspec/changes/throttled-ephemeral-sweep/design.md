@@ -22,7 +22,14 @@ Measured context: the per-user Darwin temp root holds ~157,665 items across 12,2
 
 2. **The horizon is a policy INPUT, not a post-hoc clamp.** When the held-back event id ages past its bound, the policy returns `.sweep` regardless of the interval. *Alternative considered*: throttle purely on elapsed time and clamp the persisted id afterwards. Rejected because it leaves replay length unbounded and the failure is invisible until a user's next launch cold-scans for 26 s with no explanation, which is exactly the silent-fallback class `warm-start-observability` exists to prevent.
 
-3. **Interval derived from measurement, not chosen.** Task 1 measures replay cost against holdback age (1, 5, 15, 30 minutes) and the interval falls out of that curve alongside the horizon bound. *Alternative considered*: pick a round number like 5 minutes and tune later. Rejected because the deciding constraint is replay poisoning, which is not guessable from churn rate alone.
+3. **Interval derived from measurement, not chosen.** Task 1 measures production replay
+   and planner outcomes against holdback age (1, 5, 15, 30 minutes), then narrows the
+   boundary when the initial curve crosses a warm-start gate. The interval falls out
+   of the longest repeatedly patchable holdback alongside the horizon bound.
+   *Alternative considered*: pick a round number like 5 minutes and tune later.
+   Rejected because FSEvents path shape is non-monotonic: an unpoisoned replay can
+   still include a high-level subtree whose cached item estimate correctly requires
+   a cold scan.
 
 4. **Sweep on navigation as well as on interval.** Entering a stale ephemeral subtree sweeps it. This is cheap given the tiering exists and removes most of the honesty cost, since the staleness is only user-visible at the moment it gets resolved.
 
@@ -30,7 +37,10 @@ Measured context: the per-user Darwin temp root holds ~157,665 items across 12,2
 
 ## Risks / Trade-offs
 
-- **Widened horizon poisons journal replay, converting warm starts into cold scans** → Decision 2 makes the horizon force a sweep; task 2 writes the failing test first and carries a STOP if the bound cannot be held. A throttle that causes cold scans is worse than no throttle.
+- **Widened horizon poisons replay or exceeds the patch item budget, converting warm
+  starts into cold scans** → Decision 2 makes the horizon force a sweep; task 2
+  writes the failing test first and carries a STOP if the measured bound cannot be
+  held. A throttle that causes cold scans is worse than no throttle.
 - **Equivalence weakens from "after the trailing pass" to "after a sweep"** → The equivalence tests are re-expressed to force a sweep and then assert, so the gate keeps its teeth instead of being loosened.
 - **Throttle-as-skip** → If the derived interval is very long, this is the skip design the previous proposal rejected, wearing extra machinery. Task 1.4 makes that a reportable finding rather than something to ship quietly.
 - **Stale sizes shown as current** → Decision 4 plus explicit staleness representation; between sweeps the temp subtree's size is knowingly old, which is acceptable only because it is visible.

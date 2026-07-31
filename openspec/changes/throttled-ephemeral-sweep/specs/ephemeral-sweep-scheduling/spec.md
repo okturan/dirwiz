@@ -31,7 +31,7 @@ The system SHALL expose a human-readable reason whenever an ephemeral sweep is w
 - **THEN** the policy declines with a reason naming the guard, and the decision is re-evaluated on the next tick rather than latching
 
 ### Requirement: A throttled sweep never converts a warm start into a cold scan
-The system SHALL bound how far the persisted cache horizon is held back by unswept ephemeral changes, and SHALL sweep regardless of the interval once that bound is reached, so a subsequent warm start's journal replay stays within what FSEvents will serve.
+The system SHALL bound how far the persisted cache horizon is held back by unswept ephemeral changes, and SHALL sweep regardless of the interval once that bound is reached, so a subsequent warm start's journal replay stays both serviceable by FSEvents and patchable under the warm-start item budget.
 
 #### Scenario: Horizon ages past its bound
 - **WHEN** unswept ephemeral changes have held the persisted event id back to the configured bound
@@ -39,7 +39,7 @@ The system SHALL bound how far the persisted cache horizon is held back by unswe
 
 #### Scenario: Warm start after a throttled session
 - **WHEN** the app relaunches after a session in which ephemeral sweeps were throttled
-- **THEN** the journal replay succeeds and the scan stays warm rather than falling back cold on a replay spanning too much history
+- **THEN** the journal replay succeeds, the planner accepts its item fraction, and the scan stays warm rather than falling back cold on a replay spanning too much history
 
 ### Requirement: Navigating into a stale ephemeral subtree sweeps it
 The system SHALL sweep an ephemeral subtree on demand when the user navigates into it while it has pending unswept changes, regardless of the interval.
