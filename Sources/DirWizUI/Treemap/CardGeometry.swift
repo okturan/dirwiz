@@ -91,8 +91,15 @@ public enum CardGeometry {
     /// WinDirStat inheritance and the point of the map - so depth only modulates the neutral
     /// chrome of folder panels, giving stacked levels separation without stealing meaning
     /// from the colours that carry data.
+    ///
+    /// The step is sized against what competes with it. These are sRGB values, so 0.021 per
+    /// level was about 5 of 255 - while the shader's own top-left to bottom-right card
+    /// gradient swings roughly 18% across every panel. The depth cue was quieter than the
+    /// shading laid over it, so stacked folders read as one flat slab. 0.034 puts a level
+    /// change near 9 of 255, above the gradient's local variation, while depth 7 still lands
+    /// at 0.49 - a mid panel, not a light one, so file colour keeps its contrast.
     public static func containerFill(depth: Int) -> SIMD4<Float> {
-        let step = Float(depth & 7) * 0.021
+        let step = Float(depth & 7) * 0.034
         return SIMD4<Float>(0.25 + step, 0.27 + step, 0.32 + step, 1.0)
     }
 
@@ -103,7 +110,11 @@ public enum CardGeometry {
     /// Padding a directory container keeps around its children so its own fill stays
     /// visible as a border. Scales with the container and reaches zero, for the same
     /// reason `radius`/`gap` do: a small container must not spend all its pixels on frame.
-    public static let maxContainerPad: Float = 3
+    /// 5, not 3: the pad IS the visible border between a folder and its contents, and at
+    /// 3pt a deep stack of large containers showed almost no frame at all. Only containers
+    /// at least 250pt on their short side reach this, since the `minSide * 0.02` term gates
+    /// it, so small folders still spend their pixels on children rather than on frame.
+    public static let maxContainerPad: Float = 5
 
     public static func containerPad(width: Float, height: Float) -> Float {
         let minSide = min(width, height)

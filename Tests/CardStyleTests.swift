@@ -584,6 +584,18 @@ struct SubdivideGateTests {
         let a = CardGeometry.containerFill(depth: 0)
         let b = CardGeometry.containerFill(depth: 3)
         #expect(a != b, "nesting levels must be distinguishable")
+
+        // ADJACENT levels are what a stacked folder view actually shows, and comparing
+        // depth 0 against depth 3 passed happily while neighbours were indistinguishable.
+        // These are sRGB, so pin the step in 8-bit terms: below ~6/255 a large flat panel
+        // reads as one slab, especially under the shader's own ~18% card gradient.
+        for depth in 0..<7 {
+            let here = CardGeometry.containerFill(depth: depth)
+            let next = CardGeometry.containerFill(depth: depth + 1)
+            let step = abs(next.x - here.x) * 255
+            #expect(step >= 6,
+                "depth \(depth) -> \(depth + 1) differs by only \(step)/255 - too close to read")
+        }
         for depth in 0..<16 {
             let c = CardGeometry.containerFill(depth: depth)
             // neutral: the three channels stay close together, so it never reads as a hue
