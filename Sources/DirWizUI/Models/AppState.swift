@@ -326,6 +326,12 @@ public final class AppState {
     @ObservationIgnored let warmStartJournalReplay:
         @Sendable (_ root: String, _ sinceEventId: UInt64) async -> JournalReplay
 
+    /// Persistence seam for the cold scan's final cache write. Production always uses
+    /// `TreeCache.save`; tests can stop at this exact boundary instead of treating the
+    /// bundle-sizing flag as proof that the following asynchronous write has finished.
+    @ObservationIgnored let coldCacheSave:
+        @Sendable (_ tree: FileTree, _ lastEventId: UInt64) throws -> Void
+
     /// A warm patch mutates the displayed cached tree in place. A superseding scan uses
     /// this bit to detach that tree synchronously before the old scanner can commit after
     /// cancellation and leave newly-renumbered nodes under stale index-keyed UI state.
@@ -361,6 +367,12 @@ public final class AppState {
             _ sinceEventId: UInt64
         ) async -> JournalReplay = { root, eventId in
             await FSEventsJournal.replay(root: root, since: eventId)
+        },
+        coldCacheSave: @escaping @Sendable (
+            _ tree: FileTree,
+            _ lastEventId: UInt64
+        ) throws -> Void = { tree, eventId in
+            try TreeCache.save(tree: tree, lastEventId: eventId)
         }
     ) {
         self.defaults = defaults
@@ -368,6 +380,7 @@ public final class AppState {
         self.ephemeralPaths = ephemeralPaths
         self.warmPatchScannerFactory = warmPatchScannerFactory
         self.warmStartJournalReplay = warmStartJournalReplay
+        self.coldCacheSave = coldCacheSave
         // Read persisted preferences from the INJECTED store. Doing this here rather than
         // in a property default is what keeps an isolated test suite from writing into the
         // user's real defaults domain (it did, once).

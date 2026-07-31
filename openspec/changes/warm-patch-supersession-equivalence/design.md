@@ -42,4 +42,23 @@ No persisted-format change. The fix, if any, is confined to commit and detach or
 
 ## Open Questions
 
-- Whether the ephemeral and interactive losses share one cause or are two instances of the same ordering bug appearing once per tier. One file from each tier is suggestive of the latter.
+- None. The two absent cache entries share one cause: both were created after the bootstrap cache horizon.
+
+## Findings
+
+The failing GitHub run identified the object precisely. The first equivalence check,
+`newerColdScanSupersedesTrailingTier`, passed. All eight issues came from the second check,
+`supersedingColdCache`. The displayed cold tree was complete; the test loaded the previous atomic
+cache before the cold scan's asynchronous replacement write finished.
+
+The deterministic reproduction holds four boundaries independently: trailing Phase A, the second
+tier's post-commit/pre-token window, synchronous detach, and the cold cache save. At the save gate,
+the displayed tree has 127 nodes and matches a fresh cold scan. The still-valid previous cache has
+125 nodes and is missing exactly `interactive/new.txt` and `ephemeral/new.txt`. Releasing the save
+gate replaces it with a 127-node equivalent cache.
+
+This is a test synchronization defect, not a product under-reporting defect. The test treated
+`isBundleSizingRunning == false` as cache-persistence completion, but AppState clears that flag
+before the following `TreeCache.save` call. The assertion itself remains correct and unchanged; the
+test now observes the actual persistence boundary. No warm-patch commit, token, splice, or detach
+ordering changed.

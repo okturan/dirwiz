@@ -75,6 +75,10 @@ for the already-visible hardlink recomputation to finish. `waitForJournalChanges
 - [ ] 4.3 Confirm GitHub CI green across at least five consecutive pushes
 - [x] 4.4 Confirm the protective value survives: temporarily reintroduce a supervision violation and assert the tests still catch it
 
+Task 4.3 is blocked on `warm-patch-supersession-equivalence` landing. The first post-fix push was
+red only because that separate test read the previous atomic cache before the superseding cold
+scan's asynchronous cache write finished; the scan-supervision assertions themselves stayed green.
+
 Fourteen consecutive `CI=true swift test --skip-build --quiet` runs passed 703/703 tests in 101
 suites. A separate full-suite run passed 703/703 while a finite `/tmp` worker created and explicitly
 unlinked 30,000 files; starting load was `{ 6.85 5.92 5.38 }`. For task 4.4, temporarily removing

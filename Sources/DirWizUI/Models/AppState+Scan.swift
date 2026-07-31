@@ -1094,6 +1094,7 @@ extension AppState {
     ) {
         bundleSizingTask?.cancel()
         isBundleSizingRunning = true
+        let saveCache = coldCacheSave
 
         bundleSizingTask = Task.detached(priority: .utility) {
             let report = await scanner.resolveDeferredBundleSizes(in: tree)
@@ -1118,7 +1119,7 @@ extension AppState {
             // means the next scan falls back cold, exactly today's behavior.
             guard shouldSaveCache else { return }
             do {
-                try TreeCache.save(tree: tree, lastEventId: eventIdAtScanStart)
+                try saveCache(tree, eventIdAtScanStart)
             } catch {
                 log.error("TreeCache save failed after cold scan: \(error.localizedDescription, privacy: .public)")
             }

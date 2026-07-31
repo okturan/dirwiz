@@ -109,6 +109,46 @@ struct DeferredEphemeralWarmStartTests {
         }
     }
 
+    /// Stops the superseding cold scan at its final atomic cache write. The displayed
+    /// tree has already completed by this point. Holding this gate makes it possible to
+    /// prove that the old cache is still valid but stale, then prove the replacement is
+    /// equivalent after the write, without depending on which task the scheduler resumes.
+    private final class ColdCacheSaveGate: @unchecked Sendable {
+        private let releaseGate = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var reachedSave = false
+        private var finishedSave = false
+
+        var didReachSave: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return reachedSave
+        }
+
+        var didFinishSave: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return finishedSave
+        }
+
+        func save(tree: FileTree, lastEventId: UInt64) throws {
+            lock.lock()
+            reachedSave = true
+            lock.unlock()
+            releaseGate.wait()
+            defer {
+                lock.lock()
+                finishedSave = true
+                lock.unlock()
+            }
+            try TreeCache.save(tree: tree, lastEventId: lastEventId)
+        }
+
+        func release() {
+            releaseGate.signal()
+        }
+    }
+
     private func paddedTwoTierLayout() -> [String: UInt64] {
         var layout: [String: UInt64] = [
             "interactive/old.txt": 10,
@@ -903,14 +943,15 @@ struct DeferredEphemeralWarmStartTests {
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
 
-        try await settleFixtureJournal(root: root)
-        let savedEventId = FSEventsJournal.currentEventId()
+        let savedEventId: UInt64 = 100
+        let replayEventId: UInt64 = 200
         let bootstrapTree = FileTree()
         await FileScanner().scan(
             path: root,
             progress: ScanProgress(),
             tree: bootstrapTree
         )
+        #expect(bootstrapTree.count == 125)
         try TreeCache.save(
             tree: bootstrapTree,
             lastEventId: savedEventId
@@ -922,26 +963,43 @@ struct DeferredEphemeralWarmStartTests {
         try Data(count: 40).write(
             to: URL(fileURLWithPath: ephemeralRoot + "/new.txt")
         )
-        #expect(await waitForJournalChanges(
-            root: root,
-            since: savedEventId
-        ))
 
+        let phaseAGate = GatedFilesystemProvider(gatedPath: ephemeralRoot)
+        defer { phaseAGate.release() }
         let postCommitGate = SecondPostCommitGate()
         defer { postCommitGate.release() }
+        let cacheSaveGate = ColdCacheSaveGate()
+        defer { cacheSaveGate.release() }
         let state = AppState(
             defaults: defaults,
             ephemeralPaths: syntheticEphemeralPaths(root: root),
             warmPatchScannerFactory: {
                 FileScanner(
+                    filesystem: phaseAGate,
                     subtreeRescanPostCommitHook: {
                         postCommitGate.postCommit()
                     }
                 )
+            },
+            warmStartJournalReplay: { _, _ in
+                JournalReplay(
+                    outcome: .changes([interactiveRoot, ephemeralRoot]),
+                    newEventId: replayEventId
+                )
+            },
+            coldCacheSave: { tree, eventId in
+                try cacheSaveGate.save(tree: tree, lastEventId: eventId)
             }
         )
         state.selectedVolume = URL(fileURLWithPath: root)
         state.startSelectedVolumeScan()
+
+        await waitUntil { phaseAGate.didReachGate }
+        #expect(
+            phaseAGate.didReachGate,
+            "the trailing tier never reached its deterministic Phase-A gate"
+        )
+        phaseAGate.release()
         await waitUntil { postCommitGate.didReachSecondCommit }
         #expect(
             postCommitGate.didReachSecondCommit,
@@ -962,11 +1020,11 @@ struct DeferredEphemeralWarmStartTests {
             "a post-commit supersession must not keep displaying the mutated old tree"
         )
         postCommitGate.release()
-        await waitUntil(timeout: 30) {
-            state.scanProgress.scanComplete
-                && !state.scanProgress.isScanning
-                && !state.isBundleSizingRunning
-        }
+        await waitUntil(timeout: 30) { cacheSaveGate.didReachSave }
+        #expect(
+            cacheSaveGate.didReachSave,
+            "the superseding cold scan never reached its cache-persistence boundary"
+        )
 
         #expect(!state.scanProgress.isCancelled)
         #expect(state.staleViewAsOf == nil)
@@ -978,12 +1036,34 @@ struct DeferredEphemeralWarmStartTests {
             progress: ScanProgress(),
             tree: freshColdTree
         )
+        #expect(freshColdTree.count == 127)
         assertTreesEquivalent(
             finalTree,
             freshColdTree,
             "newerColdScanSupersedesTrailingTier"
         )
 
+        // The CI failure sampled here: bundle sizing had ended, but its Task had not yet
+        // executed the following cache save. The 125-node object was the untouched
+        // bootstrap cache, not the 127-node tree AppState displayed. Only the two files
+        // created after that cache horizon can be absent from it.
+        let cacheBeforeColdSave = try #require(TreeCache.load(for: root))
+        let cachedPaths = Set(summarizeTree(cacheBeforeColdSave.tree).keys)
+        let coldPaths = Set(summarizeTree(freshColdTree).keys)
+        #expect(cacheBeforeColdSave.lastEventId == savedEventId)
+        #expect(cacheBeforeColdSave.tree.count == 125)
+        #expect(coldPaths.subtracting(cachedPaths) == [
+            interactiveRoot + "/new.txt",
+            ephemeralRoot + "/new.txt",
+        ])
+        #expect(cachedPaths.subtracting(coldPaths).isEmpty)
+
+        cacheSaveGate.release()
+        await waitUntil { cacheSaveGate.didFinishSave }
+        #expect(
+            cacheSaveGate.didFinishSave,
+            "the superseding cold cache write did not finish"
+        )
         let finalCache = try #require(TreeCache.load(for: root))
         assertTreesEquivalent(
             finalCache.tree,
