@@ -124,13 +124,6 @@ extension AppState {
         scanProgress.isScanning && scanSession.activeScanner == nil
     }
 
-    /// Cheap existence check (no decode) for whether a warm-start cache is on disk for
-    /// `path` - lets the UI show the "Full Rescan" affordance without paying for a full
-    /// `TreeCache.load`.
-    public func hasCachedTree(for path: String) -> Bool {
-        FileManager.default.fileExists(atPath: TreeCache.cacheURL(for: path).path)
-    }
-
     /// Rescan the selected volume from scratch (e.g., after trashing a file). Always
     /// cold - the caller already knows what changed (it just changed it), so a warm
     /// start's "what changed since the cache" question doesn't apply here.

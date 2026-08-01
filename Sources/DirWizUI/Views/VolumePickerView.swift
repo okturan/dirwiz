@@ -89,51 +89,43 @@ public struct VolumePickerView: View {
         }
     }
 
-    /// Primary "Scan Volume" + subordinate "Full Rescan" affordances. While a scan runs,
-    /// the primary button swaps its label for a live running state (a small `ProgressView`
-    /// plus text distinguishing "Checking changes…" - the FSEvents replay-wait,
-    /// `appState.isPreparingScan` - from generic "Scanning…" once real enumeration has
-    /// begun) instead of just going gray: a disabled-with-no-explanation button is exactly
-    /// what read as "does nothing" to the user this plan exists for.
+    /// One state-driven control: an undisplayed selected volume can be scanned, while a volume
+    /// that owns the displayed tree can only be rebuilt from scratch. Launch refresh and living
+    /// view auto-apply own incremental freshness, so presenting both actions would be a false
+    /// choice. Active work keeps this same control visible and explains why it is unavailable.
     private var scanButton: some View {
-        VStack(spacing: 6) {
-            Button(action: onScan) {
-                HStack {
-                    if appState.scanProgress.isScanning {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(appState.isPreparingScan ? "Checking changes…" : "Scanning…")
-                    } else {
-                        Image(systemName: "magnifyingglass")
-                        Text("Scan Volume")
-                    }
+        let state = scanControlState
+        return Button {
+            state.perform(onScan: onScan, onFullRescan: onFullRescan)
+        } label: {
+            HStack {
+                if state.showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let systemImage = state.systemImage {
+                    Image(systemName: systemImage)
                 }
-                .frame(maxWidth: .infinity)
+                Text(state.title)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(appState.selectedVolume == nil || appState.scanProgress.isScanning)
-
-            if fullRescanAvailable {
-                Button(action: onFullRescan) {
-                    Label("Full Rescan", systemImage: "arrow.clockwise")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .disabled(appState.scanProgress.isScanning)
-                .help("Ignore the last scan's cache and re-enumerate everything")
-            }
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(!state.isEnabled)
+        .accessibilityLabel(Text(state.title))
+        .help(state.helpText)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    /// Only offer the escape hatch when there's actually a cache to bypass - a warm
-    /// start wouldn't be attempted otherwise, so "Full Rescan" would be a no-op button.
-    private var fullRescanAvailable: Bool {
-        guard let url = appState.selectedVolume else { return false }
-        return appState.hasCachedTree(for: url.path)
+    private var scanControlState: VolumeScanControlState {
+        VolumeScanControlState.resolve(
+            selectedVolume: appState.selectedVolume,
+            displayedTreeRootPath: appState.fileTree?.rootPath,
+            isScanning: appState.scanProgress.isScanning,
+            isPreparingScan: appState.isPreparingScan,
+            isApplyingChanges: appState.isApplyingChanges
+        )
     }
 
     // MARK: - Helpers
