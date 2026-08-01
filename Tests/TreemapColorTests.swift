@@ -680,6 +680,27 @@ struct ExtensionPaletteTests {
         #expect(palette.generation == initial + 2, "generation should increment again")
     }
 
+    @Test("Different independent palettes cannot hide behind the same generation")
+    func renderingIdentityUsesAssignments() {
+        func palette(name: String, hash: UInt32) -> ExtensionPalette {
+            var value = ExtensionPalette()
+            value.assign(from: [
+                FileTypeStat(extensionName: name, extensionHash: hash, category: .other,
+                             totalSize: 100, fileCount: 1, percentage: 1)
+            ])
+            return value
+        }
+
+        let oldVolume = palette(name: "zst", hash: extensionHash(".zst"))
+        let newVolume = palette(name: "mkv", hash: extensionHash(".mkv"))
+
+        #expect(oldVolume.generation == newVolume.generation,
+                "control: independent one-assignment palettes reproduce the shipped collision")
+        #expect(!oldVolume.hasSameColorAssignments(as: newVolume),
+                "different volume palettes must invalidate the renderer despite equal counters")
+        #expect(oldVolume.hasSameColorAssignments(as: oldVolume))
+    }
+
     // MARK: unknown hash falls back
 
     @Test("color(forHash:) with unrecognized hash returns fallbackColor")

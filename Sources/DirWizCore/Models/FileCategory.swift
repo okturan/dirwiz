@@ -144,7 +144,10 @@ public struct ExtensionPalette {
     /// Fast lookup: extension hash → palette color.
     private var hashToColor: [UInt32: SIMD4<Float>] = [:]
 
-    /// Increments on each `assign()`, used for change detection.
+    /// Increments on each `assign()` within one palette instance. This counter is useful for
+    /// observing repeated mutation of that value, but it is NOT a cross-instance identity: two
+    /// independently built palettes both begin at zero and can have the same generation while
+    /// assigning different extensions. Cross-instance render decisions must compare assignments.
     public private(set) var generation: UInt64 = 0
 
     /// Neutral fallback for extensions not in the top 17.
@@ -278,6 +281,24 @@ public struct ExtensionPalette {
     /// Get the palette color for an extension hash.
     public func color(forHash hash: UInt32) -> SIMD4<Float> {
         hashToColor[hash] ?? Self.fallbackColor
+    }
+
+    /// Whether two palettes paint every ranked extension the same way.
+    ///
+    /// Aggregate sizes and counts drive the legend but do not affect Metal colors. Extensions below
+    /// the ranked set all use the same fallback, so the ordered ranked ids and their colors are the
+    /// complete rendering identity. Comparing `generation` here is incorrect because it is local to
+    /// each value and restarts when AppState constructs a fresh palette for a new tree.
+    public func hasSameColorAssignments(as other: ExtensionPalette) -> Bool {
+        guard entries.count == other.entries.count else { return false }
+        for (lhs, rhs) in zip(entries, other.entries) {
+            guard lhs.id == rhs.id,
+                  lhs.color.x == rhs.color.x,
+                  lhs.color.y == rhs.color.y,
+                  lhs.color.z == rhs.color.z,
+                  lhs.color.w == rhs.color.w else { return false }
+        }
+        return true
     }
 
 }

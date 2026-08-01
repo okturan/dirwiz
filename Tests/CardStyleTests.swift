@@ -134,19 +134,34 @@ struct CardStyleTests {
         #expect(grid.hitTest(point: (x: 30, y: 30), rects: rects) == 1)
     }
 
-    /// Folders style settles file colour toward the neutral chrome so a saturated tile does
-    /// not read as pasted on top of its folder. The thing that must NOT change is hue: that
-    /// is the meaning the map carries, and washing it out would trade a legibility win for a
-    /// legibility loss.
-    @Test("Leaf fill reduces saturation without moving hue")
-    func leafFillKeepsHue() {
-        let samples: [SIMD4<Float>] = [
-            SIMD4(0.30, 0.55, 0.95, 1.0),   // blue
-            SIMD4(0.35, 0.80, 0.35, 1.0),   // green
-            SIMD4(0.90, 0.30, 0.30, 1.0),   // red
-        ]
-        for base in samples {
-            let out = CardGeometry.leafFill(base)
+    /// This uses the actual 17-color production palette rather than hand-picked moderate samples.
+    /// The first attempt passed synthetic inputs while the near-primary real colors still looked
+    /// pasted onto the grey folder surface. Folders must pull both chroma and tone toward the parent
+    /// chrome, while retaining channel order and enough separation to read extensions apart.
+    @Test("Every production palette color settles into Folders chrome and stays distinct")
+    func productionLeafColorsBelongToChrome() {
+        var palette = ExtensionPalette()
+        let stats = (0..<17).map { index in
+            FileTypeStat(
+                extensionName: "ext\(index)",
+                extensionHash: UInt32(index + 1),
+                category: .other,
+                totalSize: UInt64(17 - index),
+                fileCount: 1,
+                percentage: 0
+            )
+        }
+        palette.assign(from: stats)
+
+        let containerDepth = 0
+        let chrome = CardGeometry.containerFill(depth: containerDepth)
+        let chromeNeutral = (chrome.x + chrome.y + chrome.z) / 3
+        let productionColors = stats.map { palette.color(forHash: $0.extensionHash) }
+        let outputs = productionColors.map {
+            CardGeometry.leafFill($0, containerDepth: containerDepth)
+        }
+
+        for (base, out) in zip(productionColors, outputs) {
 
             // Channel ORDER is hue's coarse signature: whichever channel dominated still
             // dominates, so a blue file never drifts toward green.
@@ -154,18 +169,53 @@ struct CardStyleTests {
             let outOrder = [out.x, out.y, out.z].enumerated().sorted { $0.element > $1.element }.map(\.offset)
             #expect(baseOrder == outOrder, "channel dominance must survive desaturation")
 
-            // Saturation genuinely drops - otherwise this does nothing for the jarring jump.
+            // Retain 40-50% of the original channel spread: substantially quieter than the
+            // shipped 75%, but not grey and still readable as an extension color.
             let spread = { (c: SIMD4<Float>) in max(c.x, max(c.y, c.z)) - min(c.x, min(c.y, c.z)) }
-            #expect(spread(out) < spread(base), "the tile must move toward grey")
-            #expect(spread(out) > spread(base) * 0.5,
-                    "but not so far that two extensions stop being distinguishable")
+            let retainedSpread = spread(out) / spread(base)
+            #expect(retainedSpread >= 0.40 && retainedSpread <= 0.50,
+                    "production chroma must settle into a narrow, intentional range")
 
-            // Luminance is preserved, so a file does not get darker or brighter than the
-            // size it represents implies.
-            let luma = { (c: SIMD4<Float>) in 0.299 * c.x + 0.587 * c.y + 0.114 * c.z }
-            #expect(abs(luma(out) - luma(base)) < 0.01, "brightness must not shift")
+            // Tone moves toward the actual surrounding chrome. Holding the old color's luma
+            // constant was part of why bright tiles still looked pasted on.
+            let mean = { (c: SIMD4<Float>) in (c.x + c.y + c.z) / 3 }
+            #expect(abs(mean(out) - chromeNeutral) < abs(mean(base) - chromeNeutral))
             #expect(out.w == base.w, "alpha untouched")
         }
+
+        // Uniform muting must preserve the production palette's existing relative separation.
+        // Some source hues are already close after Oklab gamut clipping; Folders must not make
+        // that worse beyond the same intentional 45% scale applied to every color.
+        for i in outputs.indices {
+            for j in outputs.indices where j > i {
+                let baseDelta = productionColors[i] - productionColors[j]
+                let baseSquared = baseDelta.x * baseDelta.x
+                    + baseDelta.y * baseDelta.y
+                    + baseDelta.z * baseDelta.z
+                let baseDistance = sqrt(baseSquared)
+                let delta = outputs[i] - outputs[j]
+                let squared = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
+                let distance = sqrt(squared)
+                #expect(abs(distance / baseDistance - 0.45) < 0.01,
+                        "Folders must scale, not unpredictably collapse, colors \(i) and \(j)")
+            }
+        }
+    }
+
+    @Test("Leaf tone follows the surrounding container depth")
+    func leafToneFollowsContainerDepth() {
+        let base = SIMD4<Float>(0.25, 0.60, 0.95, 1)
+        let shallow = CardGeometry.leafFill(base, containerDepth: 0)
+        let deep = CardGeometry.leafFill(base, containerDepth: 7)
+        let mean = { (c: SIMD4<Float>) in (c.x + c.y + c.z) / 3 }
+
+        #expect(mean(deep) > mean(shallow), "a leaf should follow its lighter depth-7 chrome")
+        let shallowSpread = max(shallow.x, max(shallow.y, shallow.z))
+            - min(shallow.x, min(shallow.y, shallow.z))
+        let deepSpread = max(deep.x, max(deep.y, deep.z))
+            - min(deep.x, min(deep.y, deep.z))
+        #expect(abs(shallowSpread - deepSpread) < 0.0001,
+                "container tone may change, extension chroma must not")
     }
 
     /// The bug this pins shipped: `SpatialGrid` was built from raw `SquarifyLayout` output

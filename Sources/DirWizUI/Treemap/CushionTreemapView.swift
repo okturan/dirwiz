@@ -96,7 +96,10 @@ public struct CushionTreemapView: NSViewRepresentable {
         let revisionChanged = coordinator.currentTreeRevision != treeRevision
         let rootChanged = coordinator.currentRootIndex != rootIndex
         let selectionChanged = coordinator.selectedNodeIndex != selectedNodeIndex
-        let paletteChanged = coordinator.extensionPalette.generation != extensionPalette.generation
+        // `generation` is local to an ExtensionPalette value. Two consecutive scans can each
+        // produce generation 1 with completely different ranked extensions, so compare the actual
+        // assignments that determine Metal colors instead of treating the counter as identity.
+        let paletteChanged = !coordinator.extensionPalette.hasSameColorAssignments(as: extensionPalette)
         let recencyChanged = coordinator.recencyGeneration != recencyGeneration ||
                              coordinator.isRecencyOverlayEnabled != isRecencyOverlayEnabled
         let temporalChanged = coordinator.temporalDiffGeneration != temporalDiffGeneration ||

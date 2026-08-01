@@ -111,20 +111,22 @@ public enum CardGeometry {
     /// has no lighting, so a fully saturated blue sitting inside a graduated grey panel
     /// reads as a different picture pasted on top rather than as contents of that folder.
     ///
-    /// Hue is preserved exactly, because hue IS the meaning - it is the WinDirStat
-    /// inheritance and the reason the map is worth looking at. Only the distance from grey
-    /// is reduced, and only by a quarter, which is enough to stop the jump without making
-    /// two extensions harder to tell apart. Luminance is the standard Rec. 601 weighting so
-    /// a desaturated red and a desaturated green keep their relative weight.
-    public static let leafDesaturation: Float = 0.25
+    /// The first version moved only 25% toward the color's OWN luminance. That preserved the
+    /// brightness mismatch which made the tile look pasted on, and the near-primary production
+    /// palette retained 75% of its chroma. Blend 55% toward a neutral sampled from the surrounding
+    /// container instead: 45% of the extension signal remains, channel order is preserved exactly,
+    /// and both tone and chroma now belong to the folder surface. The parent depth keeps files
+    /// coherent with the deliberately depth-shaded chrome around them.
+    public static let leafChromeBlend: Float = 0.55
 
-    public static func leafFill(_ base: SIMD4<Float>) -> SIMD4<Float> {
-        let luma = 0.299 * base.x + 0.587 * base.y + 0.114 * base.z
-        let k = leafDesaturation
+    public static func leafFill(_ base: SIMD4<Float>, containerDepth: Int = 0) -> SIMD4<Float> {
+        let chrome = containerFill(depth: containerDepth)
+        let neutral = (chrome.x + chrome.y + chrome.z) / 3
+        let k = leafChromeBlend
         return SIMD4<Float>(
-            base.x + (luma - base.x) * k,
-            base.y + (luma - base.y) * k,
-            base.z + (luma - base.z) * k,
+            base.x + (neutral - base.x) * k,
+            base.y + (neutral - base.y) * k,
+            base.z + (neutral - base.z) * k,
             base.w
         )
     }

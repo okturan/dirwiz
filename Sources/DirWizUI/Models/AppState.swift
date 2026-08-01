@@ -483,7 +483,10 @@ public final class AppState {
         hardlinkToken &+= 1
         selectedNodeIndex = nil
         fileTypeStats = []
-        extensionPalette = ExtensionPalette()
+        // Keep the palette's mutation counter monotonic across consecutive scans. Replacing the
+        // value restarted generation at zero; the next assignment returned to generation 1, which
+        // could collide with the previous tree and leave its color mapping in the renderer.
+        extensionPalette.assign(from: [])
         recencyFactors = []
         recencyGeneration = 0
         isRecencyOverlayEnabled = false

@@ -51,4 +51,37 @@ struct AppStateStatsTests {
 
         #expect(state.fileTypeStats.first?.extensionName == "md")
     }
+
+    /// The renderer used to compare only `ExtensionPalette.generation`. Replacing the palette
+    /// during scan reset restarted that counter at zero, so two different consecutive scans both
+    /// published generation 1. SwiftUI then left the old volume's color assignments in the Metal
+    /// coordinator and every extension unique to the new volume fell back grey.
+    @Test("Consecutive scans keep palette revision monotonic across reset")
+    func paletteRevisionSurvivesTreeReset() {
+        let state = AppState()
+        state.fileTree = treeWithOneFile(name: "archive.zst")
+        state.computeExtensionStats(loadTemporalSnapshot: false)
+        let firstGeneration = state.extensionPalette.generation
+
+        state.resetTreeDerivedState()
+        state.fileTree = treeWithOneFile(name: "movie.mkv")
+        state.computeExtensionStats(loadTemporalSnapshot: false)
+
+        #expect(state.extensionPalette.generation > firstGeneration,
+                "a new tree's palette must not collide with the previous scan's revision")
+        #expect(state.extensionPalette.entries.first?.extensionName == "mkv")
+        #expect(state.extensionPalette.color(forHash: extensionHash(".mkv"))
+                    != ExtensionPalette.fallbackColor)
+    }
+
+    private func treeWithOneFile(name: String) -> FileTree {
+        let tree = FileTree()
+        tree.setRootPath("/tmp/dirwiz-palette-revision")
+        var root = FileNode()
+        root.isDirectory = true
+        _ = tree.addNode(root, name: "root")
+        _ = tree.addChildren([(FileNode(fileSize: 10, allocatedSize: 12), name)], parentIndex: 0)
+        tree.propagateSizes()
+        return tree
+    }
 }

@@ -474,7 +474,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 // colour those contents gave it - but like every other coloured tile in
                 // Folders style it is settled toward the neutral chrome around it, because
                 // this style has no lighting to tie a saturated tile to its surroundings.
-                drawColor = CardGeometry.leafFill(baseColor)
+                drawColor = CardGeometry.leafFill(
+                    baseColor,
+                    containerDepth: max(0, tmRect.depth - 1)
+                )
             } else {
                 drawColor = baseColor
             }
