@@ -4,19 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DirWiz - See every byte on your Mac</title>
-<meta name="description" content="DirWiz is a fast disk space analyzer for macOS. Live Metal treemap, byte-verified duplicates, snapshot diffs, hardlink analysis, and a scriptable CLI - native Swift, zero dependencies.">
+<meta name="description" content="DirWiz maps millions of files in seconds, stays current as your disk changes, finds verified duplicates, and compares a timeline of snapshots - native Swift and Metal for macOS.">
 <link rel="canonical" href="https://dirwiz.app/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="DirWiz">
 <meta property="og:url" content="https://dirwiz.app/">
 <meta property="og:title" content="DirWiz - See every byte on your Mac">
-<meta property="og:description" content="Every byte on your Mac, mapped. Live Metal treemap, byte-verified duplicates, snapshot diffs, and a scriptable CLI.">
+<meta property="og:description" content="Map your Mac, find the space hogs, compare what changed, and clean up byte-verified duplicates.">
 <meta property="og:image" content="https://dirwiz.app/assets/dirwiz-social-preview.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="DirWiz - See every byte on your Mac">
-<meta name="twitter:description" content="Every byte on your Mac, mapped. Live Metal treemap, byte-verified duplicates, snapshot diffs, and a scriptable CLI.">
+<meta name="twitter:description" content="Map your Mac, find the space hogs, compare what changed, and clean up byte-verified duplicates.">
 <meta name="twitter:image" content="https://dirwiz.app/assets/dirwiz-social-preview.png">
 <meta name="theme-color" content="#fdfdfb">
 <link rel="icon" type="image/png" href="assets/dirwiz-logo.png">
@@ -359,9 +359,8 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
   <div class="wrap">
     <img class="hero-icon rv" src="assets/dirwiz-logo.png" alt="DirWiz app icon - a folder containing a blue treemap" width="120" height="120">
     <h1 class="rv" style="--d:.1s">Every byte on your Mac, <em>mapped</em>.</h1>
-    <p class="sub rv" style="--d:.15s">DirWiz scans millions of files in seconds and draws each one as a
-    rectangle, sized by the space it actually takes on disk. Find what’s eating
-    your Mac, then send it to the Trash with a clear conscience.</p>
+    <p class="sub rv" style="--d:.15s">DirWiz scans millions of files in seconds and turns your disk into a map you can explore.
+    Find the space hogs, compare what changed, and move what you no longer need to the Trash.</p>
     <div class="hero-ctas rv" style="--d:.2s">
       <a class="btn btn-primary btn-lg" href="https://github.com/okturan/dirwiz/releases/latest">Download for macOS</a>
       <a class="btn btn-quiet" href="#demo">Try the live demo&ensp;↓</a>
@@ -407,9 +406,9 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
     </div>
     <div class="card rv" style="--d:.18s">
       <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2.2"/></svg></div>
-      <h3>Snapshots &amp; diffs</h3>
-      <p>Save a baseline today. Diff next month and the treemap tints what’s new,
-      what grew, what shrank, and what’s gone.</p>
+      <h3>Snapshot timeline</h3>
+      <p>Scans build a compressed timeline you can compare against any recorded point.
+      Pin the moments worth keeping; pinned checkpoints are never thinned away.</p>
     </div>
     <div class="card rv" style="--d:.24s">
       <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9.5 3 3-3 3M13.5 15.5H17"/></svg></div>
@@ -430,6 +429,18 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
         <span class="chip"><i style="background:#4db359"></i>Code</span>
         <span class="chip"><i style="background:#bfbf80"></i>Caches</span>
       </div>
+    </div>
+    <div class="card rv" style="--d:.34s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6"/><path d="M4 4v4.6h4.6"/><path d="M12 7v5l3 2"/></svg></div>
+      <h3>Living view</h3>
+      <p>The tree keeps watching after the scan. DirWiz waits for filesystem activity to settle,
+      patches the folders that changed, and keeps your selection and zoom in place. Pause it any time.</p>
+    </div>
+    <div class="card rv" style="--d:.38s">
+      <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 4v5M16 4v5"/></svg></div>
+      <h3>Mac-native controls</h3>
+      <p>The macOS menu bar has Find plus Back, Forward, Enclosing Folder, and Root. The window toolbar
+      puts recency heatmap, snapshot pinning, temporal diff, CSV/JSON export, and the legend one click away.</p>
     </div>
   </div>
 </section>
@@ -682,6 +693,7 @@ const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
 /* ----- the app's 17 Oklab-equalized WinDirStat hues (ExtensionPalette) ----- */
 const EXT17 = ["#5588fc","#fd3a2c","#0bad09","#95950b","#13a3a3","#e607e6","#c08007","#5089fd","#ff2c5c","#36ab01","#b657fd","#08ad38","#f905a7","#0e98e2","#f25002","#11a971","#7b7cfe"];
 const FALLBACK = "#9aa3b5";
+const FOLDER_LEAF_CHROME_BLEND = .75;
 
 function hexRgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
 function rgbCss(r,g,b,a=1){return `rgba(${r|0},${g|0},${b|0},${a})`}
@@ -731,6 +743,14 @@ function dirColor(n, extMap){
     else if(m.size>bestSz){bestSz=m.size;best=m.ext} })(n);
   const base=[120,132,155];
   return best ? mix(base, hexRgb(extMap.get(best)||FALLBACK), .55) : base;
+}
+
+/* Folders has no cushion lighting to bind vivid extension colors into one surface.
+   Match CardGeometry.leafFill: keep 25% extension signal against the parent chrome. */
+function folderLeafColor(rgb, containerDepth=0){
+  const step = (containerDepth & 7) * .034;
+  const neutral = ((.25+step)+(.27+step)+(.32+step))/3*255;
+  return rgb.map(c => c + (neutral-c)*FOLDER_LEAF_CHROME_BLEND);
 }
 
 /* ----- squarified treemap (Bruls et al.) ----- */
@@ -989,7 +1009,7 @@ function makeTreemap(cfg){
         const col = n.children ? dirColor(n,extMap) : hexRgb(extMap.get(n.ext)||FALLBACK);
         const v = ((n.id*2654435761)>>>16 & 255)/255*.14-.07;
         entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:true,
-          col:shade(col,v), anc});
+          col:shade(col,v), depth, anc});
       }
     }
   }
@@ -1032,7 +1052,8 @@ function makeTreemap(cfg){
       const o=n*13;
       glData[o]=d.x; glData[o+1]=d.y; glData[o+2]=d.w; glData[o+3]=d.h;
       glData[o+4]=c[0]; glData[o+5]=c[1]; glData[o+6]=c[2]; glData[o+7]=c[3];
-      glData[o+8]=e.col[0]/255; glData[o+9]=e.col[1]/255; glData[o+10]=e.col[2]/255; glData[o+11]=1;
+      const shownColor = mapStyle===1 ? folderLeafColor(e.col,e.depth) : e.col;
+      glData[o+8]=shownColor[0]/255; glData[o+9]=shownColor[1]/255; glData[o+10]=shownColor[2]/255; glData[o+11]=1;
       glData[o+12]=n;
       if (hovered===e.id) hoveredIdx=n;
       n++;
@@ -1169,7 +1190,7 @@ function makeTreemap(cfg){
       const b = document.createElement("button");
       b.textContent = label;
       b.style.cssText = "border:0;padding:4px 10px;border-radius:6px;cursor:pointer;background:transparent;color:#3d4557";
-      b.onclick = () => { mapStyle = val; paint(); needsDraw = true; };
+      b.onclick = () => { mapStyle = val; paint(); renderMeta(); needsDraw = true; };
       return b;
     };
     const b0 = mk("Cushions",0), b1 = mk("Cards",1);
@@ -1247,12 +1268,18 @@ function makeTreemap(cfg){
     ranked.slice(0,7).forEach(([ext,sz])=>{
       const chip=document.createElement("span"); chip.className="chip";
       chip.title = fmtGB(sz);
-      const dot=document.createElement("i"); dot.style.background = extMap.get(ext);
+      const dot=document.createElement("i");
+      const raw=hexRgb(extMap.get(ext));
+      const shown=mapStyle===1 ? folderLeafColor(raw,0) : raw;
+      dot.style.background=rgbCss(shown[0],shown[1],shown[2],1);
       chip.appendChild(dot); chip.appendChild(document.createTextNode(ext));
       cfg.legend.appendChild(chip);
     });
     const o=document.createElement("span"); o.className="chip";
-    const od=document.createElement("i"); od.style.background=FALLBACK;
+    const od=document.createElement("i");
+    const otherRaw=hexRgb(FALLBACK);
+    const otherShown=mapStyle===1 ? folderLeafColor(otherRaw,0) : otherRaw;
+    od.style.background=rgbCss(otherShown[0],otherShown[1],otherShown[2],1);
     o.appendChild(od); o.appendChild(document.createTextNode("other"));
     cfg.legend.appendChild(o);
     const live=document.createElement("span"); live.className="live";

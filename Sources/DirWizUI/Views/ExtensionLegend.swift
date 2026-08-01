@@ -9,6 +9,7 @@ import DirWizCore
 public struct ExtensionLegend: View {
     let palette: ExtensionPalette
     let totalSize: UInt64
+    let renderStyle: TreemapRenderStyle
     /// Invoked with the tapped row; "Other" is handled by the shared seam.
     let onSelect: ((ExtensionRowModel) -> Void)?
     let onSeeAll: (() -> Void)?
@@ -16,17 +17,27 @@ public struct ExtensionLegend: View {
     public init(
         palette: ExtensionPalette,
         totalSize: UInt64,
+        renderStyle: TreemapRenderStyle = .cushion,
         onSelect: ((ExtensionRowModel) -> Void)? = nil,
         onSeeAll: (() -> Void)? = nil
     ) {
         self.palette = palette
         self.totalSize = totalSize
+        self.renderStyle = renderStyle
         self.onSelect = onSelect
         self.onSeeAll = onSeeAll
     }
 
     private var models: [ExtensionRowModel] {
-        palette.entries.map(ExtensionRowModel.init)
+        palette.entries.map { entry in
+            ExtensionRowModel(
+                id: entry.id,
+                rawName: entry.extensionName,
+                color: CardGeometry.paletteColor(entry.color, for: renderStyle),
+                totalSize: entry.totalSize,
+                fileCount: entry.fileCount
+            )
+        }
     }
 
     public var body: some View {

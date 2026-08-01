@@ -667,6 +667,7 @@ struct ContentView: View {
                 ExtensionLegend(
                     palette: appState.extensionPalette,
                     totalSize: appState.fileTree?.rootDisplaySize ?? 0,
+                    renderStyle: appState.treemapRenderStyle,
                     onSelect: { model in
                         appState.drillDownToExtension(hash: model.id, displayName: model.displayName)
                     },

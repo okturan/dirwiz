@@ -169,11 +169,12 @@ struct CardStyleTests {
             let outOrder = [out.x, out.y, out.z].enumerated().sorted { $0.element > $1.element }.map(\.offset)
             #expect(baseOrder == outOrder, "channel dominance must survive desaturation")
 
-            // Retain 40-50% of the original channel spread: substantially quieter than the
-            // shipped 75%, but not grey and still readable as an extension color.
+            // Retain 20-30% of the original channel spread. The real Samsung8TB scan proved
+            // that the previous 45% still made large blue, red, green, and magenta regions
+            // dominate the neutral hierarchy instead of reading as accents within it.
             let spread = { (c: SIMD4<Float>) in max(c.x, max(c.y, c.z)) - min(c.x, min(c.y, c.z)) }
             let retainedSpread = spread(out) / spread(base)
-            #expect(retainedSpread >= 0.40 && retainedSpread <= 0.50,
+            #expect(retainedSpread >= 0.20 && retainedSpread <= 0.30,
                     "production chroma must settle into a narrow, intentional range")
 
             // Tone moves toward the actual surrounding chrome. Holding the old color's luma
@@ -185,7 +186,7 @@ struct CardStyleTests {
 
         // Uniform muting must preserve the production palette's existing relative separation.
         // Some source hues are already close after Oklab gamut clipping; Folders must not make
-        // that worse beyond the same intentional 45% scale applied to every color.
+        // that worse beyond the same intentional 25% scale applied to every color.
         for i in outputs.indices {
             for j in outputs.indices where j > i {
                 let baseDelta = productionColors[i] - productionColors[j]
@@ -196,10 +197,22 @@ struct CardStyleTests {
                 let delta = outputs[i] - outputs[j]
                 let squared = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
                 let distance = sqrt(squared)
-                #expect(abs(distance / baseDistance - 0.45) < 0.01,
+                #expect(abs(distance / baseDistance - 0.25) < 0.01,
                         "Folders must scale, not unpredictably collapse, colors \(i) and \(j)")
             }
         }
+    }
+
+    @Test("Only Folders transforms the palette used for its visible color key")
+    func palettePresentationFollowsStyle() {
+        let base = SIMD4<Float>(0.15, 0.65, 0.95, 1)
+        let cushion = CardGeometry.paletteColor(base, for: .cushion)
+        let folders = CardGeometry.paletteColor(base, for: .cards)
+
+        #expect(cushion == base, "Cushion must keep the production palette untouched")
+        #expect(folders == CardGeometry.leafFill(base, containerDepth: 0),
+                "the Folders key must use the same stable depth-zero transform as the map")
+        #expect(folders != base)
     }
 
     @Test("Leaf tone follows the surrounding container depth")

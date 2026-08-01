@@ -113,11 +113,12 @@ public enum CardGeometry {
     ///
     /// The first version moved only 25% toward the color's OWN luminance. That preserved the
     /// brightness mismatch which made the tile look pasted on, and the near-primary production
-    /// palette retained 75% of its chroma. Blend 55% toward a neutral sampled from the surrounding
-    /// container instead: 45% of the extension signal remains, channel order is preserved exactly,
-    /// and both tone and chroma now belong to the folder surface. The parent depth keeps files
-    /// coherent with the deliberately depth-shaded chrome around them.
-    public static let leafChromeBlend: Float = 0.55
+    /// palette retained 75% of its chroma. The second version moved 55% toward the surrounding
+    /// chrome, but a real 5.34 TB Folders view still read as solid fields of primary blue, red,
+    /// green, and magenta. Blend 75% instead: the extension remains a stable 25% accent, channel
+    /// order is preserved exactly, and folder structure becomes the dominant visual signal.
+    /// Parent depth keeps files coherent with the deliberately depth-shaded chrome around them.
+    public static let leafChromeBlend: Float = 0.75
 
     public static func leafFill(_ base: SIMD4<Float>, containerDepth: Int = 0) -> SIMD4<Float> {
         let chrome = containerFill(depth: containerDepth)
@@ -129,6 +130,19 @@ public enum CardGeometry {
             base.z + (neutral - base.z) * k,
             base.w
         )
+    }
+
+    /// Representative palette color for UI surfaces that act as the treemap's visible key.
+    /// Folders uses depth zero because one legend cannot represent every nested chrome shade;
+    /// Cushion keeps the raw palette that its shared lighting integrates on the map.
+    public static func paletteColor(
+        _ base: SIMD4<Float>,
+        for style: TreemapRenderStyle
+    ) -> SIMD4<Float> {
+        switch style {
+        case .cushion: base
+        case .cards: leafFill(base, containerDepth: 0)
+        }
     }
 
     public static func headerHeight(width: Float, height: Float) -> Float {

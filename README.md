@@ -23,11 +23,11 @@ macOS disk usage analyzer with a Metal cushion treemap, fast filesystem scans, d
 
 ![DirWiz tree table and Metal treemap after scanning a Mac boot volume](docs/assets/dirwiz-showcase.webp)
 
-<p align="center"><em>An actual scan of a Mac boot volume - 4,669,384 files in 21.8 seconds. Every rectangle is sized by the blocks it occupies on disk, not its logical length.</em></p>
+<p align="center"><em>An actual Mac boot-volume scan: 4,669,384 files mapped in 21.8 seconds.</em></p>
 
 ## What It Does
 
-DirWiz scans a volume or folder and builds a compact file tree using on-disk sizes, not just logical file lengths. The app is built for large local volumes where Finder size calculation is too slow or too shallow.
+DirWiz scans a volume or folder and turns millions of files into a map you can explore. It is built for large local volumes where Finder size calculation is too slow or too shallow.
 
 The main UI combines a WinDirStat-style treemap, a sortable file tree, extension breakdowns, search, duplicate groups, hardlink groups, and space insights. Full Disk Access is detected at launch, with clear guidance when macOS privacy permissions will hide files.
 
@@ -44,6 +44,7 @@ The main UI combines a WinDirStat-style treemap, a sortable file tree, extension
 - **Instant search across the whole volume**: Every keystroke re-queries the full tree - **20-40 ms across 4.6 million files** (~31 ms with filters stacked), no separate index to build or maintain. If you miss [Everything](https://www.voidtools.com/) from Windows, this is the equivalent: it matches the substring you typed rather than guessing at intent like Spotlight. Filter by several file types at once, a size range, a modified-date window, and a folder scope; "Search in this folder" is on the right-click menu of any directory. The tree is restored from cache at launch, so search is live the moment the app opens.
 - **Space insights**: Collapsible cards covering where your disk went, file ages, size distributions, iCloud status, APFS clone checks, and local snapshot information.
 - **Timeline snapshots**: Every scan can record a checkpoint, compressed to roughly a tenth of its size. Compare today against any recorded point, and pin the moments worth keeping - pinned checkpoints are never thinned away.
+- **Mac-native controls**: Use the Find and Go menus for search and navigation. Window-toolbar controls expose recency, snapshot pinning, temporal comparison, CSV/JSON export, and the file-type legend.
 - **Quick Look and Finder actions**: Preview files, reveal them in Finder, copy paths, or move selected items to Trash.
 - **CLI**: `dirwiz-cli` supports scripted scans, JSON export, duplicate checks, volume info, snapshot timelines, and benchmark runs. It shares its snapshot store with the app, so a checkpoint taken in either shows up in both.
 
@@ -69,12 +70,12 @@ The package script creates `dist/DirWiz.app` and `dist/DirWiz-<version>-macos.zi
 Grab the latest build from [dirwiz.app](https://dirwiz.app) or the
 [releases page](https://github.com/okturan/dirwiz/releases/latest).
 
-**v1.1.1** - universal (`arm64` + `x86_64`), macOS 15+, ~2.9 MB zipped / ~11 MB installed.
+**v1.2.1** - universal (`arm64` + `x86_64`), macOS 15+, ~3.9 MB zipped / ~11 MB installed.
 Signed with a Developer ID and notarized by Apple, so it opens without a Gatekeeper
 override.
 
 ```text
-e8e04c446506d137b4f8b61e8daae94f47b91d22b33ceaa973eab0cda9cd07fd  DirWiz-1.1.1-macos.zip
+0acc8061d65b247c7e16f799a605a2e90f92dc982ee7214a80d58379c9013f09  DirWiz-1.2.1-macos.zip
 ```
 
 Verify before opening - and don't take the checksum above on faith either; the same
@@ -142,7 +143,7 @@ The app path favors quick first results. It skips inline recursive sizing for bu
 
 The app also builds the tree live during a cold scan (immediate materialization): the treemap and tree table fill in as directories are scanned instead of appearing all at once at the end. The CLI scans deferred by default (nodes accumulate off to the side and the tree is installed in one shot at the end) since it has no live view to fill in. `DIRWIZ_DEFER_TREE` overrides either default explicitly - `0` forces immediate, anything else forces deferred - so it doubles as the app's instant rollback to the old all-at-once behavior if immediate mode ever misbehaves on an exotic volume.
 
-After a scan completes, the app saves the tree to a small on-disk cache keyed by the scanned root path. The next time you scan that same volume, if the cache is still valid it replays the FSEvents journal since the cache was saved, patches just the directories that actually changed, and republishes the tree in a fraction of the time a full scan would take. Anything that makes the replay untrustworthy - a poisoned journal (e.g. the volume was unmounted, or too much changed to enumerate cheaply), a stale/corrupt cache, or a changed path that can't be resolved - falls back to an ordinary cold scan automatically; nothing about the cold path changes, and the sidebar names the specific reason instead of just running a full scan silently. Use the "Full Rescan" button next to "Scan Volume" to bypass the cache and force a cold scan on demand (shown only when a cache exists), or set `DIRWIZ_NO_WARM_START=1` to disable warm start entirely. This is app-only; the CLI's `scan` subcommand always scans cold.
+After a scan completes, the app saves the tree to a small on-disk cache keyed by the scanned root path. The next time you scan that same volume, if the cache is still valid it replays the FSEvents journal since the cache was saved, patches just the directories that actually changed, and republishes the tree in a fraction of the time a full scan would take. Anything that makes the replay untrustworthy - a poisoned journal (e.g. the volume was unmounted, or too much changed to enumerate cheaply), a stale/corrupt cache, or a changed path that can't be resolved - falls back to an ordinary cold scan automatically; nothing about the cold path changes, and the sidebar names the specific reason instead of just running a full scan silently. The sidebar has one persistent scan control: it says "Scan Volume" before data is displayed, "Full Rescan" when the selected volume's tree is already on screen, and names active scan or apply work while busy. `DIRWIZ_NO_WARM_START=1` disables warm start entirely. This is app-only; the CLI's `scan` subcommand always scans cold.
 
 Useful scan toggles:
 
