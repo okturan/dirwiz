@@ -24,7 +24,8 @@
 - [x] 4.1 The deterministic reproduction from task 1 now passes; the pre-save negative control failed deterministically with the same eight issues and two missing paths
 - [x] 4.2 Full suite green locally: one local-heavy 703/703 pass plus five consecutive correctness-mode 703/703 passes under loads 39.01-47.92
 - [x] 4.3 `CI=true` parity run green in five consecutive full-suite runs
-- [ ] 4.4 GitHub CI green, which is the authoritative signal here because the local machine does not reproduce this at all
+- [x] 4.4 GitHub CI green, which is the authoritative signal here because the local machine does not reproduce this at all
+  Satisfied 2026-08-01: 7e81549 green, and four further green pushes on top of it.
 - [x] 4.5 Warm-start and subtree-rescan equivalence gates still hold
 - [x] 4.6 `ScanSupervisionTests` still green, so the `8eac839` fix is not regressed
 

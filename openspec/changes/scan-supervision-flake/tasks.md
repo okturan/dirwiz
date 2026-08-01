@@ -72,7 +72,8 @@ for the already-visible hardlink recomputation to finish. `waitForJournalChanges
 
 - [x] 4.1 Run the full suite 14 consecutive times with zero failures, since a 20% rate gives `0.8^14 ≈ 0.044`, and fewer runs cannot distinguish a fix from luck
 - [x] 4.2 Run under deliberate contention, not only on a quiet machine, since contention is the trigger
-- [ ] 4.3 Confirm GitHub CI green across at least five consecutive pushes
+- [x] 4.3 Confirm GitHub CI green across at least five consecutive pushes
+  Satisfied 2026-08-01: five consecutive green pushes on master - 8a4be41, 7e81549, a6c97a3, 046dd0b, 7100f9a.
 - [x] 4.4 Confirm the protective value survives: temporarily reintroduce a supervision violation and assert the tests still catch it
 
 Task 4.3 is blocked on `warm-patch-supersession-equivalence` landing. The first post-fix push was
