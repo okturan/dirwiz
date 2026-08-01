@@ -103,6 +103,32 @@ public enum CardGeometry {
         return SIMD4<Float>(0.25 + step, 0.27 + step, 0.32 + step, 1.0)
     }
 
+    /// Folders style only: settle a file's extension colour into the same tonal family as
+    /// the neutral folder chrome around it.
+    ///
+    /// Cushion style has lighting to tie the map together - every tile carries the same
+    /// parabolic shading, so a saturated tile still reads as part of one surface. Folders
+    /// has no lighting, so a fully saturated blue sitting inside a graduated grey panel
+    /// reads as a different picture pasted on top rather than as contents of that folder.
+    ///
+    /// Hue is preserved exactly, because hue IS the meaning - it is the WinDirStat
+    /// inheritance and the reason the map is worth looking at. Only the distance from grey
+    /// is reduced, and only by a quarter, which is enough to stop the jump without making
+    /// two extensions harder to tell apart. Luminance is the standard Rec. 601 weighting so
+    /// a desaturated red and a desaturated green keep their relative weight.
+    public static let leafDesaturation: Float = 0.25
+
+    public static func leafFill(_ base: SIMD4<Float>) -> SIMD4<Float> {
+        let luma = 0.299 * base.x + 0.587 * base.y + 0.114 * base.z
+        let k = leafDesaturation
+        return SIMD4<Float>(
+            base.x + (luma - base.x) * k,
+            base.y + (luma - base.y) * k,
+            base.z + (luma - base.z) * k,
+            base.w
+        )
+    }
+
     public static func headerHeight(width: Float, height: Float) -> Float {
         (width >= minWidthForHeader && height >= minHeightForHeader) ? headerHeight : 0
     }

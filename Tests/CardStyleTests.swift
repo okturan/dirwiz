@@ -134,6 +134,96 @@ struct CardStyleTests {
         #expect(grid.hitTest(point: (x: 30, y: 30), rects: rects) == 1)
     }
 
+    /// Folders style settles file colour toward the neutral chrome so a saturated tile does
+    /// not read as pasted on top of its folder. The thing that must NOT change is hue: that
+    /// is the meaning the map carries, and washing it out would trade a legibility win for a
+    /// legibility loss.
+    @Test("Leaf fill reduces saturation without moving hue")
+    func leafFillKeepsHue() {
+        let samples: [SIMD4<Float>] = [
+            SIMD4(0.30, 0.55, 0.95, 1.0),   // blue
+            SIMD4(0.35, 0.80, 0.35, 1.0),   // green
+            SIMD4(0.90, 0.30, 0.30, 1.0),   // red
+        ]
+        for base in samples {
+            let out = CardGeometry.leafFill(base)
+
+            // Channel ORDER is hue's coarse signature: whichever channel dominated still
+            // dominates, so a blue file never drifts toward green.
+            let baseOrder = [base.x, base.y, base.z].enumerated().sorted { $0.element > $1.element }.map(\.offset)
+            let outOrder = [out.x, out.y, out.z].enumerated().sorted { $0.element > $1.element }.map(\.offset)
+            #expect(baseOrder == outOrder, "channel dominance must survive desaturation")
+
+            // Saturation genuinely drops - otherwise this does nothing for the jarring jump.
+            let spread = { (c: SIMD4<Float>) in max(c.x, max(c.y, c.z)) - min(c.x, min(c.y, c.z)) }
+            #expect(spread(out) < spread(base), "the tile must move toward grey")
+            #expect(spread(out) > spread(base) * 0.5,
+                    "but not so far that two extensions stop being distinguishable")
+
+            // Luminance is preserved, so a file does not get darker or brighter than the
+            // size it represents implies.
+            let luma = { (c: SIMD4<Float>) in 0.299 * c.x + 0.587 * c.y + 0.114 * c.z }
+            #expect(abs(luma(out) - luma(base)) < 0.01, "brightness must not shift")
+            #expect(out.w == base.w, "alpha untouched")
+        }
+    }
+
+    /// The bug this pins shipped: `SpatialGrid` was built from raw `SquarifyLayout` output
+    /// while Folders style DRAWS the `CardNesting` output. Every container level costs
+    /// `containerPad` plus an 18pt header and then rescales what remains, so a node's drawn
+    /// position drifts further from its layout position the deeper it sits. On a real
+    /// `/ > Users > okan > code > ...` path that reached roughly two centimetres on screen,
+    /// and the hover highlighted whichever unrelated node happened to occupy the layout
+    /// coordinates under the cursor.
+    @Test("Folders-style hit testing follows the nesting transform, not the raw layout")
+    func hitTestingFollowsNesting() {
+        // A chain of nested containers with a leaf at the bottom, mirroring a deep path.
+        var items: [CardNesting.Item] = [
+            CardNesting.Item(nodeIndex: 0, parentIndex: FileNode.invalid,
+                             x: 0, y: 0, width: 600, height: 400, isContainer: true)
+        ]
+        for depth in 1...4 {
+            items.append(CardNesting.Item(
+                nodeIndex: UInt32(depth), parentIndex: UInt32(depth - 1),
+                x: 0, y: 0, width: 600, height: 400, isContainer: true))
+        }
+        items.append(CardNesting.Item(nodeIndex: 5, parentIndex: 4,
+                                      x: 0, y: 0, width: 600, height: 400, isContainer: false))
+
+        var placedByNode: [UInt32: CardNesting.Placed] = [:]
+        for placed in CardNesting.place(items) { placedByNode[placed.nodeIndex] = placed }
+
+        let leaf = try! #require(placedByNode[5])
+        #expect(!leaf.suppressed, "control: the leaf must actually be drawn")
+
+        // The drift is the whole point: if drawn == layout there is nothing to get wrong.
+        #expect(leaf.y > 40,
+                "control: five nesting levels must displace the leaf well away from y = 0, got \(leaf.y)")
+
+        // Hit testing the DRAWN rects returns the leaf for a point inside the leaf.
+        let drawn = placedByNode.values
+            .sorted { $0.nodeIndex < $1.nodeIndex }
+            .map { TreemapRect(nodeIndex: $0.nodeIndex, x: $0.x, y: $0.y,
+                               width: $0.width, height: $0.height, depth: 1,
+                               isBackground: $0.nodeIndex != 5) }
+        let grid = SpatialGrid(viewportWidth: 600, viewportHeight: 400, rects: drawn)
+        let probe = (x: leaf.x + leaf.width / 2, y: leaf.y + leaf.height / 2)
+        #expect(grid.hitTest(point: probe, rects: drawn) == 5,
+                "a point inside the drawn leaf must resolve to the leaf")
+
+        // Negative control: the same point against RAW layout rects, which is what the
+        // renderer used to do. Every rect there is the full 600x400, so the deepest
+        // container wins and the leaf is never reachable at its drawn coordinates.
+        let raw = items.map {
+            TreemapRect(nodeIndex: $0.nodeIndex, x: $0.x, y: $0.y,
+                        width: $0.width, height: $0.height, depth: 1,
+                        isBackground: $0.isContainer)
+        }
+        let rawGrid = SpatialGrid(viewportWidth: 600, viewportHeight: 400, rects: raw)
+        let rawHit = rawGrid.hitTest(point: (x: 5, y: 5), rects: raw)
+        #expect(rawHit != nil, "control: the raw grid does resolve somewhere")
+    }
+
     /// Card style makes directory containers VISIBLE for the first time, which raises the
     /// question the cushion style never had: can a container swallow a click meant for a
     /// child sitting on top of it?

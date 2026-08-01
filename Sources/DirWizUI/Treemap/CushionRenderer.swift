@@ -33,6 +33,20 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Spatial grid rebuilt after each layout for fast hit testing.
     private var spatialGrid: SpatialGrid?
 
+    /// Folders style hit testing. `CardNesting` remaps every child into its parent's inner
+    /// rect, so a node's DRAWN position is not its layout position, and the displacement
+    /// accumulates with depth (each container level costs `containerPad` plus an 18pt
+    /// header, then rescales what is left). Eight levels deep that is a visible offset, and
+    /// hit testing against `cachedLayout` returns whatever unrelated node happens to sit at
+    /// those coordinates. These hold the post-nesting geometry so the answer matches what
+    /// the cursor is actually over. Empty in cushion style, where drawn == layout.
+    ///
+    /// Note this is NOT the inset `CardStyleTests.hitTestingIgnoresVisualInset` forbids:
+    /// that one is the fragment shader's `CardGeometry.gap`, which is never applied here, so
+    /// sibling gaps and card edges stay clickable exactly as that test pins.
+    private var cardHitRects: [TreemapRect] = []
+    private var cardHitGrid: SpatialGrid?
+
     /// Current data inputs, tracked for change detection.
     var currentFileTree: FileTree?
     var currentRootIndex: UInt32 = 0
@@ -179,6 +193,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             cachedLayout = []
             cachedSnapshot = []
             spatialGrid = nil
+            cardHitGrid = nil
+            cardHitRects = []
             return
         }
 
@@ -210,6 +226,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 cachedLayout[i].height *= sy
             }
             spatialGrid = nil // Stale; rebuilt when background layout completes.
+            cardHitGrid = nil // Same, and rebuilt from displayRects on the next instance build.
+            cardHitRects = []
             instanceBufferDirty = true
             layoutIdentity &+= 1
         }
@@ -451,9 +469,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             let drawColor: SIMD4<Float>
             if nestCards && tmRect.isBackground && !isCollapsedFolder {
                 drawColor = CardGeometry.containerFill(depth: tmRect.depth)
-            } else {
+            } else if nestCards {
                 // A collapsed folder is standing in for its contents, so it keeps the
-                // colour those contents gave it.
+                // colour those contents gave it - but like every other coloured tile in
+                // Folders style it is settled toward the neutral chrome around it, because
+                // this style has no lighting to tie a saturated tile to its surroundings.
+                drawColor = CardGeometry.leafFill(baseColor)
+            } else {
                 drawColor = baseColor
             }
 
@@ -512,6 +534,21 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 guard let src = raw.baseAddress else { return }
                 buffer.contents().copyMemory(from: src, byteCount: requiredSize)
             }
+        }
+
+        // Hit testing must consume the geometry actually drawn, for the same reason the
+        // overlays below do. Built here rather than beside the layout-time grid because
+        // nesting is applied here and nowhere earlier.
+        if nestCards, !displayRects.isEmpty {
+            cardHitRects = displayRects
+            cardHitGrid = SpatialGrid(
+                viewportWidth: Float(currentViewportSize.width),
+                viewportHeight: Float(currentViewportSize.height),
+                rects: displayRects
+            )
+        } else {
+            cardHitGrid = nil
+            cardHitRects = []
         }
 
         instanceBufferDirty = false
@@ -680,6 +717,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         let py = Float(point.y)
 
         // Use spatial grid if available for fast lookup.
+        // Folders style: the drawn geometry is the nested one, so hit test against that.
+        if let grid = cardHitGrid, !cardHitRects.isEmpty {
+            return visibleAncestor(of: grid.hitTest(point: (x: px, y: py), rects: cardHitRects))
+        }
         if let grid = spatialGrid {
             return visibleAncestor(of: grid.hitTest(point: (x: px, y: py), rects: cachedLayout))
         }
