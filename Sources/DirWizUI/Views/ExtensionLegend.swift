@@ -19,7 +19,7 @@ public struct ExtensionLegend: View {
         palette: ExtensionPalette,
         totalSize: UInt64,
         renderStyle: TreemapRenderStyle = .cushion,
-        foldersColorScheme: FoldersColorScheme = .clean,
+        foldersColorScheme: FoldersColorScheme = .pearl,
         onSelect: ((ExtensionRowModel) -> Void)? = nil,
         onSeeAll: (() -> Void)? = nil
     ) {

@@ -26,31 +26,31 @@ public enum TreemapRenderStyle: String, CaseIterable, Sendable {
 /// option runs through the same Metal instances, nesting, overlays, hit testing, and extension
 /// palette as production. The numbered names make feedback unambiguous while the review is open.
 public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
-    case clean = 1
-    case crisp
-    case balanced
-    case whisper
-    case soft
-    case bridge
-    case tinted
-    case coolSlate
-    case warmGraphite
-    case darkContrast
+    case pearl = 1
+    case frost
+    case silver
+    case graphite
+    case midnight
+    case sand
+    case clay
+    case sage
+    case lavender
+    case inkAndPaper
 
     public var id: Int { rawValue }
 
     public var displayName: String {
         switch self {
-        case .clean:         return "Clean"
-        case .crisp:         return "Crisp"
-        case .balanced:      return "Balanced"
-        case .whisper:       return "Whisper"
-        case .soft:          return "Soft"
-        case .bridge:        return "Bridge"
-        case .tinted:        return "Tinted"
-        case .coolSlate:     return "Cool Slate"
-        case .warmGraphite:  return "Warm Graphite"
-        case .darkContrast:  return "Dark Contrast"
+        case .pearl:       return "Pearl"
+        case .frost:       return "Frost"
+        case .silver:      return "Silver"
+        case .graphite:    return "Graphite"
+        case .midnight:    return "Midnight"
+        case .sand:        return "Sand"
+        case .clay:        return "Clay"
+        case .sage:        return "Sage"
+        case .lavender:    return "Lavender"
+        case .inkAndPaper: return "Ink & Paper"
         }
     }
 
@@ -58,71 +58,92 @@ public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
 
     public var explanation: String {
         switch self {
-        case .clean:         return "Neutral panels and full-strength file colours"
-        case .crisp:         return "Neutral panels with lightly settled files"
-        case .balanced:      return "Neutral panels with calmer file colours"
-        case .whisper:       return "Barely tinted panels and crisp files"
-        case .soft:          return "A small content bridge with softer files"
-        case .bridge:        return "A visible content bridge without the current wash"
-        case .tinted:        return "The current all-over tint, kept as the comparison control"
-        case .coolSlate:     return "Cool blue-grey structure and vivid files"
-        case .warmGraphite:  return "Warm graphite structure and vivid files"
-        case .darkContrast:  return "Dark neutral structure and unmuted files"
+        case .pearl:       return "Light cool folders that darken inward"
+        case .frost:       return "Ice-blue folders that lighten inward"
+        case .silver:      return "Alternating mid-grey folder layers"
+        case .graphite:    return "Dark neutral folders that lighten inward"
+        case .midnight:    return "Deep navy folders that open into blue-grey"
+        case .sand:        return "Light warm folders that darken inward"
+        case .clay:        return "Earthy folders that lighten inward"
+        case .sage:        return "Light muted-green folders that darken inward"
+        case .lavender:    return "Light muted-violet folders that darken inward"
+        case .inkAndPaper: return "Strong alternating dark and light folder layers"
         }
     }
 
     struct Recipe: Equatable, Sendable {
-        let chromeBase: SIMD3<Float>
-        let depthStep: Float
-        let leafChromeBlend: Float
-        let panelAccentStrength: Float
-        let collapsedChromeBlend: Float
+        /// One structural colour for every `depth & 7` value. An explicit table is
+        /// intentional: a shared base-plus-step equation made ten numerically different
+        /// recipes look like one dark scheme with ten strength settings.
+        let chromeLevels: [SIMD3<Float>]
     }
 
-    var recipe: Recipe {
-        switch self {
-        case .clean:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.00, panelAccentStrength: 0.00,
-                          collapsedChromeBlend: 0.00)
-        case .crisp:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.12, panelAccentStrength: 0.00,
-                          collapsedChromeBlend: 0.08)
-        case .balanced:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.28, panelAccentStrength: 0.00,
-                          collapsedChromeBlend: 0.15)
-        case .whisper:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.10, panelAccentStrength: 0.06,
-                          collapsedChromeBlend: 0.08)
-        case .soft:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.18, panelAccentStrength: 0.12,
-                          collapsedChromeBlend: 0.10)
-        case .bridge:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.25, panelAccentStrength: 0.18,
-                          collapsedChromeBlend: 0.12)
-        case .tinted:
-            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
-                          leafChromeBlend: 0.40, panelAccentStrength: 0.30,
-                          collapsedChromeBlend: 0.10)
-        case .coolSlate:
-            return Recipe(chromeBase: SIMD3(0.21, 0.25, 0.33), depthStep: 0.032,
-                          leafChromeBlend: 0.10, panelAccentStrength: 0.00,
-                          collapsedChromeBlend: 0.08)
-        case .warmGraphite:
-            return Recipe(chromeBase: SIMD3(0.29, 0.27, 0.24), depthStep: 0.030,
-                          leafChromeBlend: 0.10, panelAccentStrength: 0.02,
-                          collapsedChromeBlend: 0.08)
-        case .darkContrast:
-            return Recipe(chromeBase: SIMD3(0.16, 0.18, 0.22), depthStep: 0.028,
-                          leafChromeBlend: 0.00, panelAccentStrength: 0.00,
-                          collapsedChromeBlend: 0.00)
-        }
-    }
+    /// Static storage avoids allocating an eight-element Array for every visible folder
+    /// while rebuilding a multi-million-item tree's Metal instances.
+    private static let recipes: [Recipe] = [
+            Recipe(chromeLevels: [
+                SIMD3(0.78, 0.79, 0.82), SIMD3(0.73, 0.74, 0.78),
+                SIMD3(0.68, 0.69, 0.73), SIMD3(0.63, 0.64, 0.68),
+                SIMD3(0.58, 0.59, 0.63), SIMD3(0.53, 0.54, 0.58),
+                SIMD3(0.48, 0.49, 0.53), SIMD3(0.43, 0.44, 0.48),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.52, 0.61, 0.72), SIMD3(0.57, 0.66, 0.76),
+                SIMD3(0.62, 0.71, 0.80), SIMD3(0.67, 0.76, 0.84),
+                SIMD3(0.72, 0.80, 0.87), SIMD3(0.77, 0.84, 0.90),
+                SIMD3(0.81, 0.87, 0.92), SIMD3(0.85, 0.90, 0.94),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.51, 0.53, 0.57), SIMD3(0.66, 0.67, 0.70),
+                SIMD3(0.47, 0.49, 0.53), SIMD3(0.70, 0.71, 0.74),
+                SIMD3(0.43, 0.45, 0.49), SIMD3(0.74, 0.75, 0.78),
+                SIMD3(0.39, 0.41, 0.45), SIMD3(0.78, 0.79, 0.82),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.20, 0.22, 0.26), SIMD3(0.24, 0.26, 0.30),
+                SIMD3(0.28, 0.30, 0.34), SIMD3(0.32, 0.34, 0.38),
+                SIMD3(0.36, 0.38, 0.42), SIMD3(0.40, 0.42, 0.46),
+                SIMD3(0.44, 0.46, 0.50), SIMD3(0.48, 0.50, 0.54),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.13, 0.19, 0.29), SIMD3(0.18, 0.25, 0.35),
+                SIMD3(0.23, 0.31, 0.41), SIMD3(0.28, 0.37, 0.47),
+                SIMD3(0.33, 0.43, 0.53), SIMD3(0.38, 0.49, 0.59),
+                SIMD3(0.43, 0.55, 0.65), SIMD3(0.48, 0.61, 0.71),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.76, 0.69, 0.58), SIMD3(0.72, 0.65, 0.54),
+                SIMD3(0.68, 0.61, 0.50), SIMD3(0.64, 0.57, 0.46),
+                SIMD3(0.60, 0.53, 0.42), SIMD3(0.56, 0.49, 0.38),
+                SIMD3(0.52, 0.45, 0.34), SIMD3(0.48, 0.41, 0.30),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.43, 0.31, 0.29), SIMD3(0.47, 0.35, 0.32),
+                SIMD3(0.51, 0.39, 0.35), SIMD3(0.55, 0.43, 0.38),
+                SIMD3(0.59, 0.47, 0.41), SIMD3(0.63, 0.51, 0.44),
+                SIMD3(0.67, 0.55, 0.47), SIMD3(0.71, 0.59, 0.50),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.64, 0.72, 0.65), SIMD3(0.60, 0.68, 0.61),
+                SIMD3(0.56, 0.64, 0.57), SIMD3(0.52, 0.60, 0.53),
+                SIMD3(0.48, 0.56, 0.49), SIMD3(0.44, 0.52, 0.45),
+                SIMD3(0.40, 0.48, 0.41), SIMD3(0.36, 0.44, 0.37),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.69, 0.65, 0.76), SIMD3(0.65, 0.61, 0.72),
+                SIMD3(0.61, 0.57, 0.68), SIMD3(0.57, 0.53, 0.64),
+                SIMD3(0.53, 0.49, 0.60), SIMD3(0.49, 0.45, 0.56),
+                SIMD3(0.45, 0.41, 0.52), SIMD3(0.41, 0.37, 0.48),
+            ]),
+            Recipe(chromeLevels: [
+                SIMD3(0.16, 0.18, 0.22), SIMD3(0.72, 0.73, 0.76),
+                SIMD3(0.23, 0.25, 0.29), SIMD3(0.78, 0.79, 0.82),
+                SIMD3(0.30, 0.32, 0.36), SIMD3(0.68, 0.69, 0.72),
+                SIMD3(0.37, 0.39, 0.43), SIMD3(0.82, 0.83, 0.86),
+            ]),
+    ]
+
+    var recipe: Recipe { Self.recipes[rawValue - 1] }
 }
 
 /// Corner radius and gap for card style, as pure functions of a rect's smaller side.
@@ -190,93 +211,56 @@ public enum CardGeometry {
         width > minSubdivideWidth && height > minSubdivideHeight
     }
 
-    /// Depth-varied container fill. SpaceMonger colours by nesting depth
-    /// (`BoxColors[depth & 7]` with bright/dark variants) rather than by file type, which is
-    /// what makes its nesting legible. DirWiz keeps extension colour for FILES - that is the
-    /// WinDirStat inheritance and the point of the map - so depth only modulates the neutral
-    /// chrome of folder panels, giving stacked levels separation without stealing meaning
-    /// from the colours that carry data.
-    ///
-    /// The Clean/Crisp/Balanced family keeps the measured 0.034 step. These are sRGB values,
-    /// so 0.021 per
-    /// level was about 5 of 255 - while the shader's own top-left to bottom-right card
-    /// gradient swings roughly 18% across every panel. The depth cue was quieter than the
-    /// shading laid over it, so stacked folders read as one flat slab. 0.034 puts a level
-    /// change near 9 of 255, above the gradient's local variation. Temperature/contrast
-    /// candidates own a slightly different base and step as explicit recipe inputs.
+    /// Complete depth palette for expanded folder panels. SpaceMonger also indexes a table
+    /// with `depth & 7`; keeping the table explicit is load-bearing here. The first native
+    /// comparison used one dark base plus a linear step and accidentally offered ten
+    /// strength variants of the same hierarchy. Each current scheme owns all eight colours.
     public static func containerFill(
         depth: Int,
-        scheme: FoldersColorScheme = .clean
+        scheme: FoldersColorScheme = .pearl
     ) -> SIMD4<Float> {
-        let recipe = scheme.recipe
-        let step = Float(depth & 7) * recipe.depthStep
+        let color = scheme.recipe.chromeLevels[depth & 7]
         return SIMD4<Float>(
-            recipe.chromeBase.x + step,
-            recipe.chromeBase.y + step,
-            recipe.chromeBase.z + step,
+            color.x,
+            color.y,
+            color.z,
             1.0
         )
     }
 
-    /// Folders style only: bring a file's extension colour into the same tonal family as
-    /// the folder surface without turning the extension key into grey.
-    ///
-    /// Cushion style has lighting to tie the map together - every tile carries the same
-    /// parabolic shading, so a saturated tile still reads as part of one surface. Folders
-    /// has no lighting, so a fully saturated blue sitting inside a graduated grey panel
-    /// reads as a different picture pasted on top rather than as contents of that folder.
-    ///
-    /// The supplied real-tree screenshots rejected both a 75% grey blend and a 30% panel
-    /// accent. During the native review, the selected scheme owns these strengths so the
-    /// user compares the production renderer rather than synthetic swatches.
+    /// File colour is data, not structural theme chrome. Two real-tree attempts to settle
+    /// it toward folder grey produced either a grey wash or a subtree veil, so every review
+    /// scheme now passes the production extension colour through unchanged.
     public static func leafFill(
         _ base: SIMD4<Float>,
         containerDepth: Int = 0,
-        scheme: FoldersColorScheme = .clean
+        scheme: FoldersColorScheme = .pearl
     ) -> SIMD4<Float> {
-        let chrome = containerFill(depth: containerDepth, scheme: scheme)
-        let neutral = (chrome.x + chrome.y + chrome.z) / 3
-        let k = scheme.recipe.leafChromeBlend
-        return SIMD4<Float>(
-            base.x + (neutral - base.x) * k,
-            base.y + (neutral - base.y) * k,
-            base.z + (neutral - base.z) * k,
-            base.w
-        )
+        _ = containerDepth
+        _ = scheme
+        return base
     }
 
-    /// Subtle content tint for an expanded folder's structural panel.
+    /// Expanded folders are structure only. Descendant colour on a large nested panel is
+    /// precisely the all-over veil the native screenshots rejected.
     public static func folderContainerFill(
         representativeColor: SIMD4<Float>?,
         depth: Int,
-        scheme: FoldersColorScheme = .clean
+        scheme: FoldersColorScheme = .pearl
     ) -> SIMD4<Float> {
-        let chrome = containerFill(depth: depth, scheme: scheme)
-        guard let representativeColor else { return chrome }
-        let t = scheme.recipe.panelAccentStrength
-        return SIMD4<Float>(
-            chrome.x + (representativeColor.x - chrome.x) * t,
-            chrome.y + (representativeColor.y - chrome.y) * t,
-            chrome.z + (representativeColor.z - chrome.z) * t,
-            1.0
-        )
+        _ = representativeColor
+        return containerFill(depth: depth, scheme: scheme)
     }
 
     /// Content-bearing colour for a folder too small to subdivide.
     public static func collapsedFolderFill(
         _ representativeColor: SIMD4<Float>,
         containerDepth: Int,
-        scheme: FoldersColorScheme = .clean
+        scheme: FoldersColorScheme = .pearl
     ) -> SIMD4<Float> {
-        let chrome = containerFill(depth: containerDepth, scheme: scheme)
-        let neutral = (chrome.x + chrome.y + chrome.z) / 3
-        let k = scheme.recipe.collapsedChromeBlend
-        return SIMD4<Float>(
-            representativeColor.x + (neutral - representativeColor.x) * k,
-            representativeColor.y + (neutral - representativeColor.y) * k,
-            representativeColor.z + (neutral - representativeColor.z) * k,
-            representativeColor.w
-        )
+        _ = containerDepth
+        _ = scheme
+        return representativeColor
     }
 
     /// Representative palette color for UI surfaces that act as the treemap's visible key.
@@ -285,11 +269,11 @@ public enum CardGeometry {
     public static func paletteColor(
         _ base: SIMD4<Float>,
         for style: TreemapRenderStyle,
-        foldersScheme: FoldersColorScheme = .clean
+        foldersScheme: FoldersColorScheme = .pearl
     ) -> SIMD4<Float> {
+        _ = foldersScheme
         switch style {
-        case .cushion: base
-        case .cards: leafFill(base, containerDepth: 0, scheme: foldersScheme)
+        case .cushion, .cards: return base
         }
     }
 

@@ -39,7 +39,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         recencyGeneration: UInt64 = 0,
         isRecencyOverlayEnabled: Bool = false,
         renderStyle: TreemapRenderStyle = .cushion,
-        foldersColorScheme: FoldersColorScheme = .clean,
+        foldersColorScheme: FoldersColorScheme = .pearl,
         temporalDiffKinds: [UInt8] = [],
         temporalDiffStrengths: [Float] = [],
         isTemporalDiffEnabled: Bool = false,

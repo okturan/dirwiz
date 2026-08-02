@@ -65,7 +65,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Painting style only - both styles consume the same `SquarifyLayout` output, so hit
     /// testing, zoom and the spatial index keep working off one set of rects regardless.
     var renderStyle: TreemapRenderStyle = .cushion
-    var foldersColorScheme: FoldersColorScheme = .clean
+    var foldersColorScheme: FoldersColorScheme = .pearl
 
     /// Bumped by the view whenever anything COLOUR-affecting changes (palette, recency,
     /// temporal diff). Style changes deliberately do not bump it: switching cushion to
@@ -502,10 +502,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 guard w >= 0.5, h >= 0.5 else { continue }
             }
 
-            // Expanded folders carry a quiet descendant tint so nested content does not
-            // jump from grey straight to red/blue. A collapsed folder stands in for that
-            // content and therefore keeps file-like chroma. Cushion continues to consume
-            // the historical style-independent base colour above.
+            // Expanded folders use only the selected structural depth palette. A collapsed
+            // folder stands in for hidden content and therefore keeps its raw representative
+            // extension colour. Cushion continues to consume the historical style-independent
+            // base colour above.
             let drawColor: SIMD4<Float>
             if nestCards && tmRect.isBackground && !isCollapsedFolder {
                 drawColor = CardGeometry.folderContainerFill(

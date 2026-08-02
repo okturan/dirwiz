@@ -12,14 +12,20 @@ The renderer, not a palette swatch, is the meaningful evaluation surface. Card n
 much of every parent remains visible, large same-extension regions dominate perception, and depth
 causes several structural fills to be seen simultaneously.
 
+The first ten-option build supplied another real-tree result: it still looked like one scheme. Seven
+options used the exact same dark `chromeBase` and `depthStep`; two made small cool/warm changes and
+one was darker. Most selection changes adjusted how strongly file colours were pulled toward that
+same neutral ramp. The deterministic test called these recipes distinct because their structs were
+not equal, but it never asserted distinct outer surfaces or distinct depth sequences.
+
 ## Goals / Non-Goals
 
 **Goals:**
 
 - Give Okan ten meaningfully distinct choices in the real native view.
 - Make each choice a production-renderer recipe, not an image filter or mockup.
-- Include no-tint, low-tint, temperature, and contrast alternatives.
-- Keep extension identity readable in every candidate.
+- Include light-to-dark, dark-to-light, temperature, and alternating hierarchy alternatives.
+- Keep extension colours byte-identical in every candidate.
 - Repaint cheaply without changing layout, navigation, selection, or hit testing.
 - Preserve Cushion byte-for-byte at the color-input boundary.
 
@@ -33,60 +39,68 @@ causes several structural fills to be seen simultaneously.
 
 ## Decisions
 
-### 1. Compare ten bounded recipes
+### 1. Compare ten complete hierarchy palettes
 
-Each recipe owns chrome base, depth step, direct-leaf neutral blend, expanded-panel accent, and
-collapsed-folder neutral blend. Strengths are applied by the existing Swift instance builder before
-the unchanged Metal shader.
+Each recipe owns an explicit eight-colour folder table indexed by `depth & 7`. A table can brighten,
+darken, or alternate; it is not constrained to `darkBase + depth * step`. Values are applied by the
+existing Swift instance builder before the unchanged Metal shader.
 
-| # | Name | Leaf blend | Panel accent | Structural character |
-|---|---|---:|---:|---|
-| 1 | Clean | 0% | 0% | Current slate, neutral panels, raw leaves |
-| 2 | Crisp | 12% | 0% | Neutral panels, lightly settled leaves |
-| 3 | Balanced | 28% | 0% | Neutral panels, calmer leaves |
-| 4 | Whisper | 10% | 6% | Barely tinted panels |
-| 5 | Soft | 18% | 12% | Small content bridge |
-| 6 | Bridge | 25% | 18% | Visible but bounded bridge |
-| 7 | Tinted | 40% | 30% | Rejected installed treatment, retained as control |
-| 8 | Cool Slate | 10% | 0% | Cooler blue-grey structure |
-| 9 | Warm Graphite | 10% | 2% | Warmer graphite structure |
-| 10 | Dark Contrast | 0% | 0% | Dark neutral structure, raw leaves |
+| # | Name | Outermost surface | Depth behaviour |
+|---|---|---|---|
+| 1 | Pearl | light cool neutral | steadily darkens inward |
+| 2 | Frost | medium ice blue | steadily lightens inward |
+| 3 | Silver | middle neutral | alternates around the midpoint |
+| 4 | Graphite | dark neutral | steadily lightens inward |
+| 5 | Midnight | dark navy | lightens through blue-grey |
+| 6 | Sand | light warm neutral | steadily darkens inward |
+| 7 | Clay | medium terracotta neutral | steadily lightens inward |
+| 8 | Sage | light muted green | steadily darkens inward |
+| 9 | Lavender | light muted violet | steadily darkens inward |
+| 10 | Ink & Paper | dark ink | deliberately alternates dark and light |
 
-No leaf blend exceeds 40%, so every candidate retains at least 60% source channel spread and
-pairwise RGB distance. Candidate 7 is not endorsed; it makes the failure directly comparable.
+Every outer colour is pairwise distinct. Across the set, outer luminance spans light and dark; at
+least one palette brightens, one darkens, and one alternates. This makes each option a different
+hierarchy treatment rather than a different amount of the same wash.
 
-### 2. Default to the falsifiable no-veil baseline
+### 2. File colours are not a theme variable
 
-An absent preference resolves to Scheme 1. Its panel accent is exactly zero, so it cannot reproduce
-the reported subtree veil through representative colors. This gives the next screenshot a clean
-control rather than silently preserving the rejected candidate.
+Direct files and collapsed content-bearing folders keep the raw extension palette in every scheme.
+Expanded folder panels ignore descendant representative colour and use only the selected structural
+depth table. This removes both mechanisms that produced the reported grey wash and coloured veil.
+The comparison now asks one question only: which folder hierarchy best frames the unchanged data
+colours?
+
+An absent preference resolves to `1. Pearl`, whose light outer surface also directly falsifies the
+reported “every option starts dark” failure.
 
 ### 3. Use one persisted selection and a temporary native picker
 
 `AppState.foldersColorScheme` persists the integer in the injected defaults store and is not reset by
-scans. The picker appears only while Folders is selected and names options `1. Clean` through
-`10. Dark Contrast`, making feedback unambiguous. It is a review affordance; after Okan selects a
+scans. The picker appears only while Folders is selected and names options `1. Pearl` through
+`10. Ink & Paper`, making feedback unambiguous. It is a review affordance; after Okan selects a
 winner, a follow-up decides whether to remove the picker or retain a smaller user-facing set.
 
 ### 4. Reuse caches; repaint instances only
 
-All candidates use the same extension palette, overlay results, descendant representative cache,
-layout, and CardNesting output. Changing scheme marks only the instance buffer dirty. It does not
-bump color generation or force a descendant walk, because the cached representative color is an
-input shared by every recipe.
+All candidates use the same extension palette, overlay results, layout, and CardNesting output.
+Changing scheme marks only the instance buffer dirty. It does not bump color generation or alter
+the resolved-colour cache. The existing descendant representative cache remains available for
+collapsed folders, which still stand in for their hidden content.
 
 ### 5. Keep Cushion and website scope explicit
 
 Cushion ignores `FoldersColorScheme` and always receives the raw resolved palette. The File Types
-legend applies the selected leaf recipe only in Folders. The local website demo uses Scheme 1's zero
-leaf blend while review is open; it is not deployed and will be aligned to the chosen final recipe
-after the native decision.
+legend is raw in both styles because file colours are no longer transformed. The local website demo
+also keeps raw file colours while review is open; it is not deployed and will be aligned to the
+chosen final folder palette after the native decision.
 
 ## Risks / Trade-offs
 
 - Ten choices are too many for a final product control. This is intentional evaluation scaffolding.
 - Recipe changes are cheap but still rebuild the visible instance buffer; tests pin that they do not
   invalidate layout or Cushion's resolved-color cache.
+- Light folder panels make dark header chips and vivid files carry more contrast than before; the
+  real-tree gate decides whether that is desirable rather than treating darkness as an invariant.
 - A single screenshot may favor one volume's extension distribution. The picker persists so the
   same candidates can be checked on another volume before finalization.
 

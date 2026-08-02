@@ -37,5 +37,19 @@
 - [x] 5.2 Run the full suite, `CI=true` parity, and strict OpenSpec after the comparison implementation.
 - [x] 5.3 Build, install, and relaunch the local app from a clean recorded commit.
 - [ ] 5.4 On the restored multi-million-item tree, confirm the picker changes the actual native view
-  and Scheme 1 removes the reported panel veil.
+  and Scheme 1 removes the reported dark outer surface and panel veil.
 - [ ] 5.5 Okan selects a numbered winner; do not remove the picker or call the palette final before it.
+
+## 6. Replace the false comparison model
+
+- [x] 6.1 Record Okan's native finding: every option starts with dark outer-folder chrome and mostly
+  changes the strength or progression of one shared visual system.
+- [x] 6.2 Replace base-plus-step recipes with ten explicit eight-level hierarchy palettes whose
+  depth-zero colours and complete trajectories are genuinely distinct.
+- [x] 6.3 Keep direct files and collapsed content-bearing folders at raw production colour in every
+  option; remove descendant tint from every expanded panel.
+- [x] 6.4 Strengthen deterministic tests to require distinct outer colours, full depth tables, light
+  and dark starting points, multiple trajectory directions, and raw file-colour identity.
+- [x] 6.5 Run focused, full, `CI=true`, and strict OpenSpec verification after the replacement.
+- [ ] 6.6 Commit, build, install, and relaunch the clean local comparison build before asking Okan to
+  choose again.

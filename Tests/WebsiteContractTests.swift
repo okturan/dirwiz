@@ -41,8 +41,8 @@ struct WebsiteContractTests {
         #expect(page.contains("recency heatmap, snapshot pinning, temporal diff, CSV/JSON export"))
     }
 
-    @Test("Browser Cards demo uses the clean native-review baseline")
-    func browserCardsUseSettledPalette() throws {
+    @Test("Browser Cards demo keeps the raw native-review file palette")
+    func browserCardsKeepRawPalette() throws {
         let page = try html
         #expect(page.contains("const FOLDER_LEAF_CHROME_BLEND = .00;"))
         #expect(page.contains("function folderLeafColor"))
