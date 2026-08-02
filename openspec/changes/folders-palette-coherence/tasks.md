@@ -35,7 +35,7 @@
 
 - [x] 5.1 Run focused card-style, treemap-color, extension-palette, and website contract tests.
 - [x] 5.2 Run the full suite, `CI=true` parity, and strict OpenSpec after the comparison implementation.
-- [ ] 5.3 Build, install, and relaunch the local app from a clean recorded commit.
+- [x] 5.3 Build, install, and relaunch the local app from a clean recorded commit.
 - [ ] 5.4 On the restored multi-million-item tree, confirm the picker changes the actual native view
   and Scheme 1 removes the reported panel veil.
 - [ ] 5.5 Okan selects a numbered winner; do not remove the picker or call the palette final before it.
