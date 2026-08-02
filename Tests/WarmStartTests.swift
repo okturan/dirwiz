@@ -609,7 +609,9 @@ struct FSEventsJournalTests {
         try await settleFSEventsJournal()
 
         let savedId = FSEventsJournal.currentEventId()
-        let replay = await FSEventsJournal.replay(root: root, since: savedId, timeout: 0.001)
+        // Zero is an already-expired deadline. A positive 1ms raced the real stream's
+        // HistoryDone callback and sometimes completed honestly before the timer fired.
+        let replay = await FSEventsJournal.replay(root: root, since: savedId, timeout: 0)
 
         guard case .poisoned = replay.outcome else {
             Issue.record("expected .poisoned from an effectively-zero timeout, got \(replay.outcome)")

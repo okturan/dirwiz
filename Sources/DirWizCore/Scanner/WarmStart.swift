@@ -48,6 +48,17 @@ public enum FSEventsJournal {
         // start's replay window - a small overlap re-scan, which 028's subtree rescan
         // proves is idempotent.
         let newEventId = FSEventsGetCurrentEventId()
+
+        // An already-expired deadline is deterministic policy, not a scheduler race. The
+        // former test used 1ms against a real stream; `HistoryDone` can honestly arrive
+        // inside that window and made the alleged timeout test intermittently return
+        // `.changes([])`. Production uses 10s. Keep zero useful as the exact timeout seam.
+        guard timeout > 0 else {
+            return JournalReplay(
+                outcome: .poisoned("timed out waiting for HistoryDone"),
+                newEventId: newEventId
+            )
+        }
         let collector = JournalCollector()
 
         let outcome = await withTaskCancellationHandler {
