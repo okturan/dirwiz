@@ -104,5 +104,5 @@
 - [x] 10.3 Pin hot-unplug recovery for both an individual selection and a disappearing combined
       choice, including the no-cache automatic-scan path.
 - [x] 10.4 Run strict OpenSpec validation, focused tests, the full suite, and `CI=true` parity.
-- [ ] 10.5 Build, install, relaunch, and verify the local app from the final clean tracked source;
+- [x] 10.5 Build, install, relaunch, and verify the local app from the final clean tracked source;
       do not publish or alter the public release.
