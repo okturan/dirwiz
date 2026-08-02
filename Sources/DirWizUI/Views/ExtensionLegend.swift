@@ -10,6 +10,7 @@ public struct ExtensionLegend: View {
     let palette: ExtensionPalette
     let totalSize: UInt64
     let renderStyle: TreemapRenderStyle
+    let foldersColorScheme: FoldersColorScheme
     /// Invoked with the tapped row; "Other" is handled by the shared seam.
     let onSelect: ((ExtensionRowModel) -> Void)?
     let onSeeAll: (() -> Void)?
@@ -18,12 +19,14 @@ public struct ExtensionLegend: View {
         palette: ExtensionPalette,
         totalSize: UInt64,
         renderStyle: TreemapRenderStyle = .cushion,
+        foldersColorScheme: FoldersColorScheme = .clean,
         onSelect: ((ExtensionRowModel) -> Void)? = nil,
         onSeeAll: (() -> Void)? = nil
     ) {
         self.palette = palette
         self.totalSize = totalSize
         self.renderStyle = renderStyle
+        self.foldersColorScheme = foldersColorScheme
         self.onSelect = onSelect
         self.onSeeAll = onSeeAll
     }
@@ -33,7 +36,11 @@ public struct ExtensionLegend: View {
             ExtensionRowModel(
                 id: entry.id,
                 rawName: entry.extensionName,
-                color: CardGeometry.paletteColor(entry.color, for: renderStyle),
+                color: CardGeometry.paletteColor(
+                    entry.color,
+                    for: renderStyle,
+                    foldersScheme: foldersColorScheme
+                ),
                 totalSize: entry.totalSize,
                 fileCount: entry.fileCount
             )

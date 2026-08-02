@@ -1,88 +1,94 @@
 ## ADDED Requirements
 
-### Requirement: Folders leaves remain a readable extension key
+### Requirement: Native Folders review exposes ten real renderer schemes
 
-Folders SHALL render direct files with clearly chromatic extension colors inside folder chrome. For
-every production palette color at one container depth, the rendered direct leaf SHALL retain between
-55% and 65% of source channel spread and pairwise color distance. Cushion SHALL continue to use the
-unmodified extension palette.
+While the color decision is open, Folders SHALL expose exactly ten numbered schemes driven by the
+production Swift renderer. Switching scheme SHALL repaint the current tree without rescanning,
+relayout, navigation loss, or hit-testing changes.
 
-#### Scenario: A large same-extension region is shown in Folders
+#### Scenario: The user opens the Folders color picker
 
-- **WHEN** one extension occupies a large visible region of a Folders treemap
-- **THEN** red, blue, green, and other production colors SHALL remain visibly chromatic
-- **AND** they SHALL NOT collapse into a grey or slate-only code
+- **WHEN** Folders is selected
+- **THEN** the native view SHALL offer schemes numbered 1 through 10 with distinct names
+- **AND** each option SHALL change at least one renderer recipe input
+- **AND** the current selection SHALL be visibly identified
 
-#### Scenario: Extension identity survives the chrome transform
+#### Scenario: The user compares two schemes
 
-- **WHEN** the 17 production palette colors are transformed at the same parent depth
-- **THEN** each color SHALL preserve its channel ordering
-- **AND** pairwise distances SHALL be scaled uniformly rather than unpredictably collapsed
+- **WHEN** the user selects another numbered scheme
+- **THEN** the displayed tree and visible File Types key SHALL repaint from that scheme
+- **AND** the current root, selection, layout, labels, overlays, and hit targets SHALL remain intact
 
-#### Scenario: Cushion is selected
+#### Scenario: The app relaunches during review
 
-- **WHEN** the user switches from Folders to Cushion
-- **THEN** leaves SHALL use the raw extension palette under Cushion lighting
-- **AND** the Folders transform SHALL NOT alter cached Cushion palette assignments
+- **WHEN** a scheme has been selected and the app relaunches or scans again
+- **THEN** the same numbered scheme SHALL remain selected
+- **AND** an absent or invalid preference SHALL resolve to `1. Clean`
 
-### Requirement: Folders hierarchy carries representative content hue
+### Requirement: Every review candidate preserves extension identity
 
-Folders SHALL derive a representative extension from a non-empty directory's descendant content,
-including when no file is an immediate child. Expanded panels SHALL use that representative as a
-quiet structural tint; collapsed folders SHALL use it with file-like chroma because they stand in
-for their hidden contents. Actually empty folders SHALL remain neutral.
+Every Folders candidate SHALL preserve channel ordering and at least 60% of the production palette's
+source channel spread and pairwise RGB distance. `7. Tinted` SHALL reproduce the rejected installed
+treatment as a comparison control, not as the implied default.
 
-#### Scenario: Files exist below directory-only levels
+#### Scenario: Production palette colors are rendered by every candidate
 
-- **WHEN** a visible folder's immediate children are directories and its files occur deeper
-- **THEN** Folders SHALL follow the largest on-disk content branch to a representative extension
-- **AND** the folder SHALL NOT fall back to unrelated grey merely because it has no direct files
+- **WHEN** all 17 production colors are transformed at one container depth
+- **THEN** every candidate SHALL retain at least 60% channel spread
+- **AND** each candidate SHALL scale pairwise distances uniformly
+- **AND** red, blue, green, and other extension identities SHALL not collapse into grey aliases
 
-#### Scenario: Direct files compete with a child subtree
+#### Scenario: A fresh comparison build is launched
 
-- **WHEN** a directory contains direct files and child directories
-- **THEN** direct file bytes SHALL be aggregated by extension and compared with the largest child
-  directory's on-disk bytes
-- **AND** the larger content shape SHALL determine the representative extension
-- **AND** equal-size decisions SHALL use a stable tie-break
+- **WHEN** no stored scheme exists
+- **THEN** `1. Clean` SHALL show neutral folder panels with full-strength direct-file colors
+- **AND** representative descendant colors SHALL contribute zero expanded-panel tint
 
-#### Scenario: A folder is expanded
+### Requirement: Folder roles follow the selected recipe
 
-- **WHEN** a folder panel surrounds visible descendants
-- **THEN** it SHALL carry a quieter version of the representative content hue
-- **AND** the panel SHALL bridge rather than create an abrupt neutral-grey-to-file-color boundary
+Folders SHALL continue to derive a representative extension from non-empty descendant content,
+including directory-only chains. The selected recipe SHALL independently control direct leaves,
+expanded structural panels, collapsed content-bearing folders, chrome base, and depth step. Actually
+empty folders SHALL remain structural chrome.
 
-#### Scenario: A folder is collapsed by the Folders density rule
+#### Scenario: A recipe has zero panel accent
 
-- **WHEN** a folder is too small to subdivide and one tile represents all of its contents
-- **THEN** that tile SHALL retain file-like representative chroma
-- **AND** it SHALL NOT be painted like an empty structural panel
+- **WHEN** a non-empty expanded folder is rendered under a zero-accent scheme
+- **THEN** its panel SHALL remain the scheme's neutral chrome
+- **AND** descendant representative color SHALL not create a subtree-wide veil
 
-#### Scenario: Cushion resolves the same nested folder
+#### Scenario: A recipe has a nonzero panel accent
 
-- **WHEN** Cushion is selected for a directory with no direct file children
-- **THEN** its historical direct-child directory color behavior SHALL remain unchanged
-- **AND** the Folders-only descendant lookup SHALL NOT leak into Cushion rendering
+- **WHEN** a non-empty expanded folder is rendered under an accented scheme
+- **THEN** its tint SHALL use the deterministic largest-content-branch representative
+- **AND** the recipe's explicit bounded strength SHALL be applied
 
-### Requirement: The visible color key matches the selected render style
+#### Scenario: A folder is collapsed by density
 
-The always-visible File Types legend SHALL represent the direct-file colors used by the selected
-treemap style. Folders SHALL use a stable depth-zero representative of its transformed direct-file
-colors; Cushion SHALL use the raw palette.
+- **WHEN** one tile represents the folder's hidden contents
+- **THEN** the tile SHALL use the selected collapsed-folder treatment
+- **AND** it SHALL remain distinguishable from an actually empty structural panel
 
-#### Scenario: The user switches render style
+### Requirement: Cushion is isolated from Folders comparison
 
-- **WHEN** the user switches between Cushion and Folders
-- **THEN** the legend swatches SHALL update with the direct-leaf treemap style
-- **AND** extension names, ranking, sizes, counts, and selection actions SHALL remain unchanged
+Cushion SHALL ignore every Folders scheme input. Changing the numbered Folders scheme SHALL not
+alter Cushion colors, palette assignments, layout, resolved-color cache identity, or direct-child
+directory behavior.
 
-### Requirement: The website Cards demo follows direct-leaf app color policy
+#### Scenario: Scheme changes while Cushion is selected
 
-The interactive website demo SHALL apply the same direct-leaf chrome blend when Cards is selected
-and SHALL leave Cushion colors unchanged. It does not claim parity for native nested panel tinting.
+- **WHEN** any two Folders schemes are compared at the Cushion color-input boundary
+- **THEN** both SHALL produce the identical raw Cushion palette color
+- **AND** no Folders descendant treatment SHALL leak into Cushion
 
-#### Scenario: A visitor toggles the browser demo
+### Requirement: Website remains on the clean review baseline
 
-- **WHEN** the visitor switches the live demo from Cushions to Cards
-- **THEN** leaf colors SHALL use the app's documented direct-leaf factor
-- **AND** switching back SHALL restore the raw Cushion palette
+While native selection is open, the local website Cards demo SHALL use Scheme 1's zero direct-leaf
+blend and Cushion SHALL remain raw. The website SHALL NOT be deployed as a final palette decision
+until the native winner is selected and separately verified.
+
+#### Scenario: A visitor toggles the local browser demo
+
+- **WHEN** the local demo switches between Cushions and Cards during review
+- **THEN** direct file colors SHALL remain unwashed in both styles
+- **AND** Cards geometry SHALL remain the distinguishing treatment

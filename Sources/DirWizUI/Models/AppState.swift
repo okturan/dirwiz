@@ -147,12 +147,22 @@ public final class AppState {
         }
     }
 
+    /// Numbered native Folders colour comparison. It persists so a chosen candidate survives
+    /// relaunch and every screenshot refers to the same unambiguous scheme number.
+    public var foldersColorScheme: FoldersColorScheme = .clean {
+        didSet {
+            guard foldersColorScheme != oldValue else { return }
+            defaults.set(foldersColorScheme.rawValue, forKey: AppState.foldersColorSchemeKey)
+        }
+    }
+
     /// Presents the full file-type table. It used to be a whole tab, which duplicated the
     /// always-visible sidebar legend; the legend is now the only file-type surface and this
     /// sheet is its "see everything" affordance.
     public var showAllFileTypes: Bool = false
 
     static let renderStyleKey = "DirWizTreemapRenderStyle"
+    static let foldersColorSchemeKey = "DirWizFoldersColorScheme"
 
     /// Whether the bottom treemap pane is collapsed to give the detail pane full height.
     /// A layout preference like `treemapRenderStyle`: persisted, and NOT reset by
@@ -170,6 +180,10 @@ public final class AppState {
         guard let raw = defaults.string(forKey: renderStyleKey),
               let style = TreemapRenderStyle(rawValue: raw) else { return .cushion }
         return style
+    }
+
+    static func loadFoldersColorScheme(_ defaults: UserDefaults) -> FoldersColorScheme {
+        FoldersColorScheme(rawValue: defaults.integer(forKey: foldersColorSchemeKey)) ?? .clean
     }
 
     // MARK: - Space Analysis
@@ -413,6 +427,7 @@ public final class AppState {
         // in a property default is what keeps an isolated test suite from writing into the
         // user's real defaults domain (it did, once).
         self.treemapRenderStyle = AppState.loadRenderStyle(defaults)
+        self.foldersColorScheme = AppState.loadFoldersColorScheme(defaults)
         self.isTreemapPaneCollapsed = defaults.bool(forKey: AppState.treemapCollapsedKey)
         self.liveRefreshPaused = defaults.bool(forKey: AppState.livePausedKey)
     }

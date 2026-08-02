@@ -1,97 +1,96 @@
 ## Context
 
-The extension palette is intentionally vivid because Cushion lighting integrates those colors into
-one surface. Folders has no cushion lighting, but muting leaves alone is insufficient: the 75%
-neutral blend shipped by the first revision retained only 25% of source chroma and made the palette
-look grey, while the folder panels themselves still supplied no hint of the content hue below them.
-The supplied multi-terabyte scans reject both extremes and identify hierarchy continuity as the
-missing mechanism.
+Folders has no cushion lighting, so hierarchy and extension colors must coexist through flat fills.
+The installed real-tree evidence rejected two one-shot constant choices:
+
+- 75% neutral leaf blend: extensions became grey.
+- 40% neutral leaf blend plus a 30% accent from a 65%-resolved descendant color: leaves recovered,
+  but expanded panels carried about 19.5% raw content signal. Across nested, large folders those fills
+  form the all-over veil visible in the supplied 880 GB screenshot.
+
+The renderer, not a palette swatch, is the meaningful evaluation surface. Card nesting changes how
+much of every parent remains visible, large same-extension regions dominate perception, and depth
+causes several structural fills to be seen simultaneously.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Make folder structure and extension identity read as one hierarchy in Folders.
-- Preserve a stable, clearly chromatic amount of extension-color information.
-- Prevent non-empty directory-only chains from falling back to unrelated grey.
-- Keep Cushion pixel behavior unchanged.
-- Make the legend and website Cards demo honest representations of the app.
-- Cover the actual 17-color production palette.
+- Give Okan ten meaningfully distinct choices in the real native view.
+- Make each choice a production-renderer recipe, not an image filter or mockup.
+- Include no-tint, low-tint, temperature, and contrast alternatives.
+- Keep extension identity readable in every candidate.
+- Repaint cheaply without changing layout, navigation, selection, or hit testing.
+- Preserve Cushion byte-for-byte at the color-input boundary.
 
 **Non-Goals:**
 
-- Replace or reorder the extension palette.
-- Remove extension coloring from Folders.
-- Change treemap layout, card nesting, hit testing, labels, or palette ranking.
-- Retune temporal-diff or recency overlays.
+- Pretend a final scheme has already been selected.
+- Make ten permanent product themes before the review decision.
+- Replace/reorder the extension palette.
+- Change card geometry, density, labels, overlays, or descendant selection.
+- Deploy the website or publish a release from this comparison build.
 
 ## Decisions
 
-### 1. Retain 60% of extension color on direct leaves
+### 1. Compare ten bounded recipes
 
-Folders blends each file 40% toward the neutral tone of its parent container. Because the target is
-the same neutral for every color at a given depth, this preserves exactly 60% of every pairwise RGB
-distance and channel spread. The production palette therefore remains visibly red, blue, green, and
-magenta instead of becoming a grey code users cannot read.
+Each recipe owns chrome base, depth step, direct-leaf neutral blend, expanded-panel accent, and
+collapsed-folder neutral blend. Strengths are applied by the existing Swift instance builder before
+the unchanged Metal shader.
 
-The old 55% and 75% blends were both asked to solve hierarchy continuity at the leaf. They could
-only trade one failure for the other. Continuity now comes from folder surfaces themselves.
+| # | Name | Leaf blend | Panel accent | Structural character |
+|---|---|---:|---:|---|
+| 1 | Clean | 0% | 0% | Current slate, neutral panels, raw leaves |
+| 2 | Crisp | 12% | 0% | Neutral panels, lightly settled leaves |
+| 3 | Balanced | 28% | 0% | Neutral panels, calmer leaves |
+| 4 | Whisper | 10% | 6% | Barely tinted panels |
+| 5 | Soft | 18% | 12% | Small content bridge |
+| 6 | Bridge | 25% | 18% | Visible but bounded bridge |
+| 7 | Tinted | 40% | 30% | Rejected installed treatment, retained as control |
+| 8 | Cool Slate | 10% | 0% | Cooler blue-grey structure |
+| 9 | Warm Graphite | 10% | 2% | Warmer graphite structure |
+| 10 | Dark Contrast | 0% | 0% | Dark neutral structure, raw leaves |
 
-### 2. Tint expanded panels from the largest descendant content branch
+No leaf blend exceeds 40%, so every candidate retains at least 60% source channel spread and
+pairwise RGB distance. Candidate 7 is not endorsed; it makes the failure directly comparable.
 
-The existing general resolver intentionally colors a directory from direct file children only; that
-behavior remains unchanged for Cushion. Folders adds a separate representative lookup. At each
-directory level it aggregates direct files by extension, compares the largest aggregate with the
-largest child directory by on-disk bytes, and follows the winning directory branch until it reaches
-files. Stable hash/index tie-breaks make the result deterministic.
+### 2. Default to the falsifiable no-veil baseline
 
-The walk is bounded by tree depth, not subtree size, and its results are cached by layout and color
-generation. That avoids per-directory descendant maps on multi-million-node trees and preserves
-cheap style toggles.
+An absent preference resolves to Scheme 1. Its panel accent is exactly zero, so it cannot reproduce
+the reported subtree veil through representative colors. This gives the next screenshot a clean
+control rather than silently preserving the rejected candidate.
 
-An expanded panel carries 30% of the resolved directory color. The resolved directory color itself
-contains 65% representative extension signal, so two production hues remain separated by about
-19.5% on panels: enough to bridge grey-to-color discontinuities without making panels compete with
-their leaves.
+### 3. Use one persisted selection and a temporary native picker
 
-### 3. Collapsed folders remain content-bearing
+`AppState.foldersColorScheme` persists the integer in the injected defaults store and is not reset by
+scans. The picker appears only while Folders is selected and names options `1. Clean` through
+`10. Dark Contrast`, making feedback unambiguous. It is a review affordance; after Okan selects a
+winner, a follow-up decides whether to remove the picker or retain a smaller user-facing set.
 
-A collapsed folder replaces all of the tiles it contains, so treating it like an expanded structural
-panel would erase the only available content key. It retains 90% of its resolved directory color,
-or about 58.5% of the raw representative signal, deliberately aligned with direct leaves' 60%.
-Actually empty folders remain neutral.
+### 4. Reuse caches; repaint instances only
 
-### 4. Cushion remains the raw palette
+All candidates use the same extension palette, overlay results, descendant representative cache,
+layout, and CardNesting output. Changing scheme marks only the instance buffer dirty. It does not
+bump color generation or force a descendant walk, because the cached representative color is an
+input shared by every recipe.
 
-The raw palette is not globally muted. Cushion relies on vivid color under shared lighting and is a
-separate user-selected style. The extra descendant resolver and cache are Folders-only. The ordinary
-resolved-color cache and Cushion's direct-child directory rule remain unchanged.
+### 5. Keep Cushion and website scope explicit
 
-### 5. The Folders legend shows representative rendered colors
-
-The always-visible File Types sidebar is explicitly the treemap's color key. While Folders is
-selected, its swatches use the same direct-leaf transform at depth zero; while Cushion is selected,
-they remain raw. A single legend cannot represent every depth shade, so depth zero is the documented
-stable representative. The full file-type table and tree-row icons are analysis surfaces, not the
-treemap key, and remain raw unless separately specified.
-
-### 6. The browser demo follows the direct-leaf policy
-
-The website claims its Cards toggle uses the app's renderer. Its direct and collapsed leaves must
-apply the same 40% neutral blend when Cards is selected and leave Cushion unchanged. A named
-JavaScript constant and helper make the parity testable instead of burying another independent
-judgement in shader math. The browser demo does not claim parity for native panel nesting.
+Cushion ignores `FoldersColorScheme` and always receives the raw resolved palette. The File Types
+legend applies the selected leaf recipe only in Folders. The local website demo uses Scheme 1's zero
+leaf blend while review is open; it is not deployed and will be aligned to the chosen final recipe
+after the native decision.
 
 ## Risks / Trade-offs
 
-- Content-tinted folder panels add more color than the rejected neutral-only model. Their measured
-  approximately 19.5% source separation keeps them subordinate to files.
-- A depth-zero legend swatch is not pixel-identical to a deep tile. It is still truthful about hue
-  and strength.
-- Browser and Swift implementations could drift again. Contract tests pin the shared 0.40 factor and
-  the presence of the Cards-only helper.
+- Ten choices are too many for a final product control. This is intentional evaluation scaffolding.
+- Recipe changes are cheap but still rebuild the visible instance buffer; tests pin that they do not
+  invalidate layout or Cushion's resolved-color cache.
+- A single screenshot may favor one volume's extension distribution. The picker persists so the
+  same candidates can be checked on another volume before finalization.
 
 ## Open Questions
 
-None. The real-volume evidence rejects both a neutral-only hierarchy and the 25%-signal grey wash;
-the three-role policy above makes the accepted distinctions explicit and testable.
+- Which numbered scheme does Okan select on the restored tree?
+- After selection, should the picker disappear or should a smaller subset remain user-configurable?

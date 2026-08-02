@@ -41,12 +41,12 @@ struct WebsiteContractTests {
         #expect(page.contains("recency heatmap, snapshot pinning, temporal diff, CSV/JSON export"))
     }
 
-    @Test("Browser Cards demo applies the app's Folders color policy")
+    @Test("Browser Cards demo uses the clean native-review baseline")
     func browserCardsUseSettledPalette() throws {
         let page = try html
-        #expect(page.contains("const FOLDER_LEAF_CHROME_BLEND = .40;"))
+        #expect(page.contains("const FOLDER_LEAF_CHROME_BLEND = .00;"))
         #expect(page.contains("function folderLeafColor"))
         #expect(page.contains("mapStyle===1 ? folderLeafColor"),
-                "Cards must transform leaf colors while Cushions retain the raw palette")
+                "Cards keeps a named parity seam while Cushions bypasses it")
     }
 }

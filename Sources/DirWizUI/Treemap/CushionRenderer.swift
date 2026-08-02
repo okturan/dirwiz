@@ -65,6 +65,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Painting style only - both styles consume the same `SquarifyLayout` output, so hit
     /// testing, zoom and the spatial index keep working off one set of rects regardless.
     var renderStyle: TreemapRenderStyle = .cushion
+    var foldersColorScheme: FoldersColorScheme = .clean
 
     /// Bumped by the view whenever anything COLOUR-affecting changes (palette, recency,
     /// temporal diff). Style changes deliberately do not bump it: switching cushion to
@@ -509,22 +510,28 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             if nestCards && tmRect.isBackground && !isCollapsedFolder {
                 drawColor = CardGeometry.folderContainerFill(
                     representativeColor: folderAccent,
-                    depth: tmRect.depth
+                    depth: tmRect.depth,
+                    scheme: foldersColorScheme
                 )
             } else if nestCards && tmRect.isBackground {
                 let parentDepth = max(0, tmRect.depth - 1)
                 if let folderAccent {
                     drawColor = CardGeometry.collapsedFolderFill(
                         folderAccent,
-                        containerDepth: parentDepth
+                        containerDepth: parentDepth,
+                        scheme: foldersColorScheme
                     )
                 } else {
-                    drawColor = CardGeometry.containerFill(depth: parentDepth)
+                    drawColor = CardGeometry.containerFill(
+                        depth: parentDepth,
+                        scheme: foldersColorScheme
+                    )
                 }
             } else if nestCards {
                 drawColor = CardGeometry.leafFill(
                     baseColor,
-                    containerDepth: max(0, tmRect.depth - 1)
+                    containerDepth: max(0, tmRect.depth - 1),
+                    scheme: foldersColorScheme
                 )
             } else {
                 drawColor = baseColor

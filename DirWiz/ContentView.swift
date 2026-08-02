@@ -731,6 +731,7 @@ struct ContentView: View {
                     palette: appState.extensionPalette,
                     totalSize: appState.fileTree?.rootDisplaySize ?? 0,
                     renderStyle: appState.treemapRenderStyle,
+                    foldersColorScheme: appState.foldersColorScheme,
                     onSelect: { model in
                         appState.drillDownToExtension(hash: model.id, displayName: model.displayName)
                     },

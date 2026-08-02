@@ -139,6 +139,10 @@ public struct InteractiveTreemapView: View {
 
             styleToggle
 
+            if appState.treemapRenderStyle == .cards {
+                foldersSchemePicker
+            }
+
             // Show size of current root.
             if let tree = appState.fileTree,
                let rootNode = tree.node(at: appState.navigation.treemapRootIndex) {
@@ -182,6 +186,38 @@ public struct InteractiveTreemapView: View {
         .help("Cushions: one shaded tile per file. Folders: files grouped inside labelled folder boxes.")
     }
 
+    /// Temporary native review control. Every option repaints this exact tree through the
+    /// production renderer, which is more honest than comparing synthetic palette swatches.
+    private var foldersSchemePicker: some View {
+        Menu {
+            ForEach(FoldersColorScheme.allCases) { scheme in
+                Button {
+                    appState.foldersColorScheme = scheme
+                } label: {
+                    if appState.foldersColorScheme == scheme {
+                        Label(scheme.reviewLabel, systemImage: "checkmark")
+                    } else {
+                        Text(scheme.reviewLabel)
+                    }
+                }
+                .help(scheme.explanation)
+            }
+        } label: {
+            Label(
+                "Colors \(appState.foldersColorScheme.rawValue)",
+                systemImage: "paintpalette"
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(
+            "\(appState.foldersColorScheme.reviewLabel): "
+                + appState.foldersColorScheme.explanation
+        )
+        .accessibilityLabel("Folders color scheme")
+        .accessibilityValue(appState.foldersColorScheme.reviewLabel)
+    }
+
     private func navButton(systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -220,6 +256,7 @@ public struct InteractiveTreemapView: View {
                 recencyGeneration: appState.recencyGeneration,
                 isRecencyOverlayEnabled: appState.isRecencyOverlayEnabled,
                 renderStyle: appState.treemapRenderStyle,
+                foldersColorScheme: appState.foldersColorScheme,
                 temporalDiffKinds: appState.temporalDiff.temporalDiffKinds,
                 temporalDiffStrengths: appState.temporalDiff.temporalDiffStrengths,
                 isTemporalDiffEnabled: appState.temporalDiff.isTemporalDiffEnabled,

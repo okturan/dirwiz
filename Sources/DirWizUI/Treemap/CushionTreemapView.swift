@@ -16,6 +16,7 @@ public struct CushionTreemapView: NSViewRepresentable {
     public var recencyGeneration: UInt64
     public var isRecencyOverlayEnabled: Bool
     public var renderStyle: TreemapRenderStyle
+    public var foldersColorScheme: FoldersColorScheme
     public var temporalDiffKinds: [UInt8]
     public var temporalDiffStrengths: [Float]
     public var isTemporalDiffEnabled: Bool
@@ -38,6 +39,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         recencyGeneration: UInt64 = 0,
         isRecencyOverlayEnabled: Bool = false,
         renderStyle: TreemapRenderStyle = .cushion,
+        foldersColorScheme: FoldersColorScheme = .clean,
         temporalDiffKinds: [UInt8] = [],
         temporalDiffStrengths: [Float] = [],
         isTemporalDiffEnabled: Bool = false,
@@ -59,6 +61,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         self.recencyGeneration = recencyGeneration
         self.isRecencyOverlayEnabled = isRecencyOverlayEnabled
         self.renderStyle = renderStyle
+        self.foldersColorScheme = foldersColorScheme
         self.temporalDiffKinds = temporalDiffKinds
         self.temporalDiffStrengths = temporalDiffStrengths
         self.isTemporalDiffEnabled = isTemporalDiffEnabled
@@ -104,9 +107,10 @@ public struct CushionTreemapView: NSViewRepresentable {
                              coordinator.isRecencyOverlayEnabled != isRecencyOverlayEnabled
         let temporalChanged = coordinator.temporalDiffGeneration != temporalDiffGeneration ||
                               coordinator.isTemporalDiffEnabled != isTemporalDiffEnabled
-        // Style is a pure repaint: same layout, same instances, different fragment shader
-        // branch - so it never invalidates the layout or the instance buffer.
+        // Style and Folders scheme changes keep the same Squarify layout. They do rebuild
+        // instances because CardNesting and final fills live there, but never relayout.
         let styleChanged = coordinator.renderStyle != renderStyle
+        let foldersSchemeChanged = coordinator.foldersColorScheme != foldersColorScheme
 
         coordinator.currentFileTree = fileTree
         coordinator.currentTreeRevision = treeRevision
@@ -117,6 +121,12 @@ public struct CushionTreemapView: NSViewRepresentable {
             coordinator.renderStyle = renderStyle
             // Card nesting is applied at instance-build time, so a style switch must
             // rebuild - without this, cards render un-nested until the next relayout.
+            coordinator.instanceBufferDirty = true
+        }
+        if foldersSchemeChanged {
+            coordinator.foldersColorScheme = foldersColorScheme
+            // Recipes consume the same resolved palette and representative cache; only the
+            // final instance colours change, so this is a cheap repaint without a relayout.
             coordinator.instanceBufferDirty = true
         }
         if paletteChanged {
@@ -159,7 +169,8 @@ public struct CushionTreemapView: NSViewRepresentable {
             }
         }
 
-        if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged || recencyChanged || temporalChanged || styleChanged {
+        if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged
+            || recencyChanged || temporalChanged || styleChanged || foldersSchemeChanged {
             mtkView.needsDisplay = true
         }
     }

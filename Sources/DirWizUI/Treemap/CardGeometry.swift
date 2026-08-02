@@ -20,6 +20,111 @@ public enum TreemapRenderStyle: String, CaseIterable, Sendable {
     }
 }
 
+/// Native comparison set for choosing the final Folders colour treatment on real trees.
+///
+/// This is deliberately expressed as renderer inputs rather than screenshot filters: every
+/// option runs through the same Metal instances, nesting, overlays, hit testing, and extension
+/// palette as production. The numbered names make feedback unambiguous while the review is open.
+public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
+    case clean = 1
+    case crisp
+    case balanced
+    case whisper
+    case soft
+    case bridge
+    case tinted
+    case coolSlate
+    case warmGraphite
+    case darkContrast
+
+    public var id: Int { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .clean:         return "Clean"
+        case .crisp:         return "Crisp"
+        case .balanced:      return "Balanced"
+        case .whisper:       return "Whisper"
+        case .soft:          return "Soft"
+        case .bridge:        return "Bridge"
+        case .tinted:        return "Tinted"
+        case .coolSlate:     return "Cool Slate"
+        case .warmGraphite:  return "Warm Graphite"
+        case .darkContrast:  return "Dark Contrast"
+        }
+    }
+
+    public var reviewLabel: String { "\(rawValue). \(displayName)" }
+
+    public var explanation: String {
+        switch self {
+        case .clean:         return "Neutral panels and full-strength file colours"
+        case .crisp:         return "Neutral panels with lightly settled files"
+        case .balanced:      return "Neutral panels with calmer file colours"
+        case .whisper:       return "Barely tinted panels and crisp files"
+        case .soft:          return "A small content bridge with softer files"
+        case .bridge:        return "A visible content bridge without the current wash"
+        case .tinted:        return "The current all-over tint, kept as the comparison control"
+        case .coolSlate:     return "Cool blue-grey structure and vivid files"
+        case .warmGraphite:  return "Warm graphite structure and vivid files"
+        case .darkContrast:  return "Dark neutral structure and unmuted files"
+        }
+    }
+
+    struct Recipe: Equatable, Sendable {
+        let chromeBase: SIMD3<Float>
+        let depthStep: Float
+        let leafChromeBlend: Float
+        let panelAccentStrength: Float
+        let collapsedChromeBlend: Float
+    }
+
+    var recipe: Recipe {
+        switch self {
+        case .clean:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.00, panelAccentStrength: 0.00,
+                          collapsedChromeBlend: 0.00)
+        case .crisp:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.12, panelAccentStrength: 0.00,
+                          collapsedChromeBlend: 0.08)
+        case .balanced:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.28, panelAccentStrength: 0.00,
+                          collapsedChromeBlend: 0.15)
+        case .whisper:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.10, panelAccentStrength: 0.06,
+                          collapsedChromeBlend: 0.08)
+        case .soft:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.18, panelAccentStrength: 0.12,
+                          collapsedChromeBlend: 0.10)
+        case .bridge:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.25, panelAccentStrength: 0.18,
+                          collapsedChromeBlend: 0.12)
+        case .tinted:
+            return Recipe(chromeBase: SIMD3(0.25, 0.27, 0.32), depthStep: 0.034,
+                          leafChromeBlend: 0.40, panelAccentStrength: 0.30,
+                          collapsedChromeBlend: 0.10)
+        case .coolSlate:
+            return Recipe(chromeBase: SIMD3(0.21, 0.25, 0.33), depthStep: 0.032,
+                          leafChromeBlend: 0.10, panelAccentStrength: 0.00,
+                          collapsedChromeBlend: 0.08)
+        case .warmGraphite:
+            return Recipe(chromeBase: SIMD3(0.29, 0.27, 0.24), depthStep: 0.030,
+                          leafChromeBlend: 0.10, panelAccentStrength: 0.02,
+                          collapsedChromeBlend: 0.08)
+        case .darkContrast:
+            return Recipe(chromeBase: SIMD3(0.16, 0.18, 0.22), depthStep: 0.028,
+                          leafChromeBlend: 0.00, panelAccentStrength: 0.00,
+                          collapsedChromeBlend: 0.00)
+        }
+    }
+}
+
 /// Corner radius and gap for card style, as pure functions of a rect's smaller side.
 ///
 /// The point is progressive degradation. A rect can't show rounded corners and a gap below
@@ -92,15 +197,25 @@ public enum CardGeometry {
     /// chrome of folder panels, giving stacked levels separation without stealing meaning
     /// from the colours that carry data.
     ///
-    /// The step is sized against what competes with it. These are sRGB values, so 0.021 per
+    /// The Clean/Crisp/Balanced family keeps the measured 0.034 step. These are sRGB values,
+    /// so 0.021 per
     /// level was about 5 of 255 - while the shader's own top-left to bottom-right card
     /// gradient swings roughly 18% across every panel. The depth cue was quieter than the
     /// shading laid over it, so stacked folders read as one flat slab. 0.034 puts a level
-    /// change near 9 of 255, above the gradient's local variation, while depth 7 still lands
-    /// at 0.49 - a mid panel, not a light one, so file colour keeps its contrast.
-    public static func containerFill(depth: Int) -> SIMD4<Float> {
-        let step = Float(depth & 7) * 0.034
-        return SIMD4<Float>(0.25 + step, 0.27 + step, 0.32 + step, 1.0)
+    /// change near 9 of 255, above the gradient's local variation. Temperature/contrast
+    /// candidates own a slightly different base and step as explicit recipe inputs.
+    public static func containerFill(
+        depth: Int,
+        scheme: FoldersColorScheme = .clean
+    ) -> SIMD4<Float> {
+        let recipe = scheme.recipe
+        let step = Float(depth & 7) * recipe.depthStep
+        return SIMD4<Float>(
+            recipe.chromeBase.x + step,
+            recipe.chromeBase.y + step,
+            recipe.chromeBase.z + step,
+            1.0
+        )
     }
 
     /// Folders style only: bring a file's extension colour into the same tonal family as
@@ -111,29 +226,17 @@ public enum CardGeometry {
     /// has no lighting, so a fully saturated blue sitting inside a graduated grey panel
     /// reads as a different picture pasted on top rather than as contents of that folder.
     ///
-    /// A 75% chrome blend was an overcorrection: it retained only 25% of the production
-    /// palette's channel spread, so red, blue, and green all read as greyish slate on the
-    /// supplied multi-terabyte scan. Retain 60% instead. Folder panels now carry a quieter
-    /// tint from their representative descendants (below), which supplies the visual bridge
-    /// that the stronger leaf muting was trying to create by itself.
-    public static let leafChromeBlend: Float = 0.40
-
-    /// Expanded folder panels carry 30% of their representative descendant colour. The
-    /// resolver's directory colour already carries 65% of the representative extension,
-    /// so the visible panel carries about 19.5% of the raw signal: enough to avoid a hard
-    /// grey-to-red/blue boundary without competing with the files inside it.
-    public static let containerAccentStrength: Float = 0.30
-
-    /// A collapsed folder stands in for its contents, so it should be as chromatic as a
-    /// file tile rather than as quiet as an expanded panel. Its resolved directory colour
-    /// already retains 65% of the representative extension; a 10% settle leaves 58.5%,
-    /// deliberately aligned with direct leaves' 60%.
-    public static let collapsedFolderChromeBlend: Float = 0.10
-
-    public static func leafFill(_ base: SIMD4<Float>, containerDepth: Int = 0) -> SIMD4<Float> {
-        let chrome = containerFill(depth: containerDepth)
+    /// The supplied real-tree screenshots rejected both a 75% grey blend and a 30% panel
+    /// accent. During the native review, the selected scheme owns these strengths so the
+    /// user compares the production renderer rather than synthetic swatches.
+    public static func leafFill(
+        _ base: SIMD4<Float>,
+        containerDepth: Int = 0,
+        scheme: FoldersColorScheme = .clean
+    ) -> SIMD4<Float> {
+        let chrome = containerFill(depth: containerDepth, scheme: scheme)
         let neutral = (chrome.x + chrome.y + chrome.z) / 3
-        let k = leafChromeBlend
+        let k = scheme.recipe.leafChromeBlend
         return SIMD4<Float>(
             base.x + (neutral - base.x) * k,
             base.y + (neutral - base.y) * k,
@@ -145,11 +248,12 @@ public enum CardGeometry {
     /// Subtle content tint for an expanded folder's structural panel.
     public static func folderContainerFill(
         representativeColor: SIMD4<Float>?,
-        depth: Int
+        depth: Int,
+        scheme: FoldersColorScheme = .clean
     ) -> SIMD4<Float> {
-        let chrome = containerFill(depth: depth)
+        let chrome = containerFill(depth: depth, scheme: scheme)
         guard let representativeColor else { return chrome }
-        let t = containerAccentStrength
+        let t = scheme.recipe.panelAccentStrength
         return SIMD4<Float>(
             chrome.x + (representativeColor.x - chrome.x) * t,
             chrome.y + (representativeColor.y - chrome.y) * t,
@@ -161,11 +265,12 @@ public enum CardGeometry {
     /// Content-bearing colour for a folder too small to subdivide.
     public static func collapsedFolderFill(
         _ representativeColor: SIMD4<Float>,
-        containerDepth: Int
+        containerDepth: Int,
+        scheme: FoldersColorScheme = .clean
     ) -> SIMD4<Float> {
-        let chrome = containerFill(depth: containerDepth)
+        let chrome = containerFill(depth: containerDepth, scheme: scheme)
         let neutral = (chrome.x + chrome.y + chrome.z) / 3
-        let k = collapsedFolderChromeBlend
+        let k = scheme.recipe.collapsedChromeBlend
         return SIMD4<Float>(
             representativeColor.x + (neutral - representativeColor.x) * k,
             representativeColor.y + (neutral - representativeColor.y) * k,
@@ -179,11 +284,12 @@ public enum CardGeometry {
     /// Cushion keeps the raw palette that its shared lighting integrates on the map.
     public static func paletteColor(
         _ base: SIMD4<Float>,
-        for style: TreemapRenderStyle
+        for style: TreemapRenderStyle,
+        foldersScheme: FoldersColorScheme = .clean
     ) -> SIMD4<Float> {
         switch style {
         case .cushion: base
-        case .cards: leafFill(base, containerDepth: 0)
+        case .cards: leafFill(base, containerDepth: 0, scheme: foldersScheme)
         }
     }
 
