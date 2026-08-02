@@ -119,5 +119,22 @@
   frame geometry, role-aware shader inputs, offscreen pixel differences, title-size admission,
   preference persistence, hit geometry, and complete Cushion isolation.
 - [x] 10.7 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
-- [ ] 10.8 Commit, build, install, relaunch, and inspect several surface numbers on the same native
+- [x] 10.8 Commit, build, install, relaunch, and inspect several surface numbers on the same native
   tree before choosing one; do not call a final surface winner from synthetic pixels alone.
+
+## 11. Adapt boundary treatment to drawn size
+
+- [x] 11.1 Record Okan's native six-surface finding: every fixed edge weight fails somewhere - thin
+  boundaries vanish into same-colour slabs at density, while thick outlines and mid-size bevels
+  make dense regions unclear.
+- [x] 11.2 Give all six profiles one shared size-adaptive backbone: a sub-line self-shade valley
+  (exact flat fill below 3pt), a same-hue floored-opacity hairline with a guaranteed background
+  seam at reading sizes, and each profile's structural colour, width, opacity, and gated bevel only
+  at structural sizes.
+- [x] 11.3 Mirror the backbone constants between `CardGeometry` and the Metal source; keep hit
+  geometry, nesting, labels, and Cushion output untouched.
+- [x] 11.4 Add deterministic floor, ceiling, gating, and monotonicity gates plus offscreen micro,
+  reading, and structural pixel gates across profiles.
+- [ ] 11.5 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
+- [ ] 11.6 Commit, install, relaunch, and inspect dense and sparse regions natively; the final
+  surface choice remains with Okan.

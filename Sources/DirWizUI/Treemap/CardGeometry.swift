@@ -196,6 +196,9 @@ public enum FoldersSurfaceStyle: Int, CaseIterable, Identifiable, Sendable {
     struct Recipe: Hashable, Sendable {
         let containerPadScale: Float
         let visualInsetScale: Float
+        /// STRUCTURAL-regime boundary values: what this profile draws on structurally
+        /// large cards. Micro and reading-size cards share the adaptive backbone in
+        /// `CardGeometry` instead - a profile has no say below structural sizes.
         let outlineWidth: Float
         let outlineOpacity: Float
         let bevelStrength: Float
@@ -444,6 +447,91 @@ public enum CardGeometry {
     /// 18-point title row.
     public static func shouldShowFolderSize(width: Float, nameCharacterCount: Int) -> Bool {
         width >= 210 && nameCharacterCount <= 18
+    }
+
+    // MARK: - Adaptive edge backbone
+
+    /// What KIND of boundary a card carries is decided by its drawn size, not by the
+    /// selected surface. The native six-surface review found every fixed weight failing
+    /// somewhere: thin boundaries vanish between same-depth siblings (which share EXACT
+    /// colours, so a faded line merges them into one false slab), while thick outlines
+    /// and mid-size bevels turn dense regions into ink. The numbered surfaces therefore
+    /// style only the STRUCTURAL end of one shared backbone:
+    ///
+    ///   < 3pt      exact flat fill - slivers keep the exact selected depth colour
+    ///   3..~7pt    multiplicative self-shade valley toward the tile's own edge
+    ///   ~7..16pt   hairline in a darker shade of the card's OWN colour at a floored
+    ///              opacity, plus a guaranteed minimum background seam
+    ///   16..48pt   blend toward the profile's structural colour/width/opacity; bevels
+    ///              are admitted on their own 12->32pt ramp
+    ///
+    /// Every constant here is mirrored literally in `CushionShaderSource` (pinned by the
+    /// mirrored-constant test); the shader is what actually paints.
+    static let microShadeFloor: Float = 3
+    static let microShadeStrength: Float = 0.30
+    static let readingOutlineWidth: Float = 0.85
+    static let readingOutlineOpacity: Float = 0.50
+    static let readingShadeFactor: Float = 0.45
+    static let seamFloorInset: Float = 0.45
+
+    static func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {
+        let t = max(0, min(1, (x - edge0) / (edge1 - edge0)))
+        return t * t * (3 - 2 * t)
+    }
+
+    /// 0 below ~7pt, where a line has no room; 1 from 11pt, where lines carry separation.
+    static func lineRegime(minSide: Float) -> Float {
+        smoothstep(7, 11, minSide)
+    }
+
+    /// 0 at reading sizes; 1 once the profile's structural character fully applies.
+    static func structuralBlend(minSide: Float) -> Float {
+        smoothstep(16, 48, minSide)
+    }
+
+    /// Directional bevels are a structural treatment; at density they read as mush.
+    static func bevelGate(minSide: Float) -> Float {
+        smoothstep(12, 32, minSide)
+    }
+
+    static func structuralOutlineWidth(minSide: Float, surface: FoldersSurfaceStyle) -> Float {
+        if surface == .classicBevel { return min(1.5, max(0.75, minSide * 0.025)) }
+        return surface.recipe.outlineWidth
+    }
+
+    static func adaptiveOutlineWidth(minSide: Float, surface: FoldersSurfaceStyle) -> Float {
+        let blend = structuralBlend(minSide: minSide)
+        let structural = structuralOutlineWidth(minSide: minSide, surface: surface)
+        return readingOutlineWidth + (structural - readingOutlineWidth) * blend
+    }
+
+    static func adaptiveOutlineOpacity(minSide: Float, surface: FoldersSurfaceStyle) -> Float {
+        let blend = structuralBlend(minSide: minSide)
+        let mixed = readingOutlineOpacity
+            + (surface.recipe.outlineOpacity - readingOutlineOpacity) * blend
+        return mixed * lineRegime(minSide: minSide)
+    }
+
+    static func adaptiveBevelStrength(minSide: Float, surface: FoldersSurfaceStyle) -> Float {
+        surface.recipe.bevelStrength * bevelGate(minSide: minSide)
+    }
+
+    /// The effective shader gap, including the floor that guarantees same-colour siblings
+    /// a background seam even where a profile's own inset rounds to nothing (Fine Lines
+    /// at Retina density did exactly that).
+    static func seamInset(minSide: Float, surface: FoldersSurfaceStyle) -> Float {
+        let decorate: Float = minSide >= minSideForDecoration ? 1 : 0
+        let profile = decorate * min(maxGap, minSide * 0.06)
+            * surface.recipe.visualInsetScale
+        return max(profile, seamFloorInset * smoothstep(5, 8, minSide))
+    }
+
+    /// Strength of the sub-line valley at a given distance inside the drawn edge.
+    static func microShade(minSide: Float, edgeDistance: Float) -> Float {
+        guard minSide >= microShadeFloor else { return 0 }
+        let extent = min(max(minSide * 0.25, 0.75), 1.25)
+        return (1 - lineRegime(minSide: minSide))
+            * (1 - smoothstep(0, extent, edgeDistance))
     }
 }
 

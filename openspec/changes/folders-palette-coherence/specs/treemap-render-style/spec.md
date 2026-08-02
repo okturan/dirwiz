@@ -150,8 +150,11 @@ when no post-palette overlay is active.
 
 #### Scenario: A card becomes too small for edge decoration
 
-- **WHEN** a card shrinks below the decoration floor
-- **THEN** it SHALL draw as occupied plain fill without a gap, outline, bevel, or missing pixel
+- **WHEN** a card shrinks below line sizes
+- **THEN** it SHALL remain fully occupied, with no missing pixels, no near-black outline, and no
+  bevel
+- **AND** from the 3pt micro floor up it MAY darken only toward its own edge so equal-colour
+  neighbours stay distinguishable, while below that floor it SHALL draw as exact plain fill
 - **AND** its complete layout rectangle SHALL remain its hit target at every size
 
 #### Scenario: A bright depth colour carries a file label
@@ -228,6 +231,37 @@ it without materially squeezing the folder name.
 - **AND** the folder name SHALL retain the row's available width with middle truncation only as a
   final containment measure
 - **AND** the title row SHALL remain clipped to the folder's displayed rectangle
+
+### Requirement: Card boundary treatment adapts to drawn size
+
+Folders SHALL choose each card's boundary treatment from the card's drawn size instead of applying
+one fixed weight everywhere. Every surface profile SHALL share this backbone: separation SHALL
+never fade to zero above the micro floor, boundary ink SHALL stay bounded at dense reading sizes,
+and a profile's own structural character SHALL apply only on structurally large cards.
+
+#### Scenario: Same-colour siblings render at dense sizes
+
+- **WHEN** same-depth siblings are drawn below line sizes
+- **THEN** each tile SHALL darken toward its own edge as a soft valley instead of drawing an
+  outline or bevel
+- **AND** tile centres SHALL keep the exact selected depth colour
+- **AND** adjacent equal-colour tiles SHALL remain distinguishable
+
+#### Scenario: Tiles render at reading sizes
+
+- **WHEN** a card's smaller side is in the teens of points
+- **THEN** its boundary SHALL be a darker shade of the card's own colour at a floored opacity
+- **AND** every profile SHALL keep at least the guaranteed minimum background seam
+- **AND** no profile SHALL apply its full structural outline weight or any directional bevel there
+
+#### Scenario: Cards reach structural sizes
+
+- **WHEN** a card's smaller side reaches structural sizes
+- **THEN** the boundary SHALL blend toward the selected profile's structural colour, width, and
+  opacity
+- **AND** bevel-bearing profiles SHALL reach full bevel strength only at the top of the bevel ramp
+- **AND** the adaptive backbone constants SHALL be mirrored between the Swift geometry and the
+  Metal source
 
 ### Requirement: Folders surface selection is isolated from Cushion
 

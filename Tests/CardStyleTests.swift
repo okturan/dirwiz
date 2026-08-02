@@ -134,6 +134,77 @@ struct CardStyleTests {
         #expect(!CardGeometry.shouldShowFolderSize(width: 260, nameCharacterCount: 24))
     }
 
+    // MARK: - Adaptive edge backbone
+
+    /// The native six-surface finding this encodes: every FIXED edge weight fails
+    /// somewhere - thin boundaries vanish into same-colour slabs at density, thick ones
+    /// turn dense regions to ink. The backbone gives every profile the same floors,
+    /// ceilings, and gates; profiles keep their character only at structural sizes.
+    @Test("The adaptive edge backbone has floors, ceilings, and gated character")
+    func adaptiveEdgeBackbone() {
+        for surface in FoldersSurfaceStyle.allCases {
+            // Floor: separation never fades out above line sizes...
+            #expect(CardGeometry.adaptiveOutlineOpacity(minSide: 11, surface: surface) >= 0.4,
+                    "\(surface.reviewLabel) must never fade its boundary to nothing")
+            #expect(CardGeometry.seamInset(minSide: 10, surface: surface)
+                    >= CardGeometry.seamFloorInset,
+                    "\(surface.reviewLabel) must keep the guaranteed background seam")
+            // ...and the ceiling: no structural ink at dense reading sizes.
+            #expect(CardGeometry.adaptiveOutlineWidth(minSide: 14, surface: surface) <= 0.9,
+                    "\(surface.reviewLabel) must not draw structural weight at density")
+            #expect(CardGeometry.adaptiveBevelStrength(minSide: 12, surface: surface) == 0,
+                    "bevels are structural-only")
+
+            var previousOpacity: Float = 0
+            for side in stride(from: Float(11), through: 200, by: 1) {
+                let opacity = CardGeometry.adaptiveOutlineOpacity(
+                    minSide: side, surface: surface)
+                #expect(opacity + 0.0001 >= previousOpacity,
+                        "\(surface.reviewLabel) boundary presence must not weaken as cards grow")
+                previousOpacity = opacity
+                let width = CardGeometry.adaptiveOutlineWidth(minSide: side, surface: surface)
+                #expect(width >= 0.6 && width <= 1.5,
+                        "\(surface.reviewLabel) width out of bounds at side \(side)")
+            }
+        }
+
+        // Character survives untouched at structural sizes.
+        #expect(CardGeometry.adaptiveOutlineWidth(minSide: 128, surface: .classicBevel) == 1.5)
+        #expect(CardGeometry.adaptiveOutlineOpacity(minSide: 128, surface: .classicBevel) == 0.97)
+        #expect(CardGeometry.adaptiveOutlineWidth(minSide: 128, surface: .fineLines) == 0.65)
+        #expect(CardGeometry.adaptiveBevelStrength(minSide: 128, surface: .classicBevel) == 0.82)
+        #expect(CardGeometry.adaptiveBevelStrength(minSide: 128, surface: .softCards) == 0.28)
+        #expect(CardGeometry.adaptiveBevelStrength(minSide: 128, surface: .crisp) == 0)
+
+        // The micro valley: bounded extent, off below the floor, yields to lines.
+        #expect(CardGeometry.microShade(minSide: 2.9, edgeDistance: 0) == 0,
+                "sub-3pt slivers keep the exact selected depth colour")
+        #expect(CardGeometry.microShade(minSide: 5, edgeDistance: 0) == 1)
+        #expect(CardGeometry.microShade(minSide: 5, edgeDistance: 2) == 0,
+                "the valley never reaches a tile's centre")
+        #expect(CardGeometry.microShade(minSide: 12, edgeDistance: 0) == 0,
+                "once lines have room, the valley yields to them")
+        let crossfade = CardGeometry.microShade(minSide: 9, edgeDistance: 0)
+        #expect(crossfade > 0 && crossfade < 1)
+    }
+
+    /// The backbone lives twice: Swift for tests and tooling, MSL for pixels. A drifted
+    /// constant would make every deterministic gate above vouch for the wrong shader.
+    @Test("Adaptive edge constants are mirrored into the Metal source")
+    func adaptiveConstantsMirrored() {
+        let src = CushionShaderSource.source
+        #expect(src.contains("smoothstep(7.0, 11.0, minSide)"), "lineRegime")
+        #expect(src.contains("smoothstep(16.0, 48.0, minSide)"), "structuralBlend")
+        #expect(src.contains("smoothstep(12.0, 32.0, minSide)"), "bevelGate")
+        #expect(src.contains("0.45 * smoothstep(5.0, 8.0, minSide)"), "seam floor")
+        #expect(src.contains("step(3.0, minSide)"), "micro floor")
+        #expect(src.contains("mix(0.85, structuralWidth, structuralBlend)"), "reading width")
+        #expect(src.contains("mix(0.50, structuralOpacity, structuralBlend)"),
+                "reading opacity floor")
+        #expect(src.contains("baseLinear * 0.45"), "self-shade boundary colour")
+        #expect(src.contains("1.0 - 0.30 * microShade"), "micro strength")
+    }
+
     // MARK: - Density budget
 
     @Test("Card budget aggregates then falls back as density rises")
@@ -773,16 +844,128 @@ struct CardStyleRenderTests {
                 "surface selection must not enter Cushion shading")
     }
 
-    /// A card small enough to lose its decoration renders as plain fill. This is the
-    /// degradation promise: small rects stay visible instead of dissolving into padding.
-    @Test("Below the decoration floor a card fills its rect like cushion does")
-    func tinyCardIsPlainFill() throws {
-        // 4pt is under CardGeometry.minSideForDecoration, so radius and gap are both 0.
-        guard let tiny = try render(styleMode: 1, side: 4) else { return }
-        for y in 0..<4 {
-            for x in 0..<4 {
+    /// Below line sizes a card stays fully occupied, but from the 3pt micro floor up it
+    /// darkens toward its own edge: same-depth siblings share EXACT colours, so without
+    /// this valley a dense field of equal tiles reads as one false slab. The centre keeps
+    /// the exact colour - the valley is multiplicative shade, never ink.
+    @Test("A tiny card stays occupied and separates itself with a soft edge valley")
+    func tinyCardKeepsOccupiedColorWithValley() throws {
+        let side = 5
+        guard let tiny = try render(styleMode: 1, side: side) else { return }
+        for y in 0..<side {
+            for x in 0..<side {
                 #expect(!tiny.isBackground(x: x, y: y),
                         "a tiny card must draw every pixel, not shrink into padding (\(x),\(y))")
+            }
+        }
+        func energy(_ p: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(p.b) + Int(p.g) + Int(p.r)
+        }
+        let centre = tiny.rgb(x: 2, y: 2)
+        let edge = tiny.rgb(x: 0, y: 2)
+        #expect(abs(Int(centre.r) - 127) <= 2, "the centre keeps the exact fill colour")
+        #expect(energy(centre) - energy(edge) >= 15, "the edge valley must be visible")
+        #expect(edge.r >= 90, "the valley is a shade of the fill, never black ink")
+    }
+
+    /// The user-visible failure the adaptive backbone fixes, half one: thin fixed lines
+    /// vanished at density. Reading-size tiles now separate with a darker shade of their
+    /// OWN colour at a floored opacity - present, hue-preserving, and never black.
+    @Test("Reading-size boundaries keep the card's own hue and never vanish")
+    func readingBoundariesAreSelfShaded() throws {
+        let side = 14
+        guard let card = try render(
+            styleMode: 1, side: side,
+            color: SIMD4<Float>(1.0, 0.50, 0.50, 1),
+            cardSurfaceMode: Int32(FoldersSurfaceStyle.crisp.rawValue)
+        ) else { return }
+        func energy(_ p: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(p.b) + Int(p.g) + Int(p.r)
+        }
+        let centre = energy(card.rgb(x: side / 2, y: side / 2))
+        var darkest = 3 * 255
+        var darkestRed = 255
+        for x in 0..<4 where !card.isBackground(x: x, y: side / 2) {
+            let p = card.rgb(x: x, y: side / 2)
+            if energy(p) < darkest { darkest = energy(p); darkestRed = Int(p.r) }
+        }
+        #expect(darkest < centre - 20, "separation must exist at reading sizes")
+        #expect(darkestRed >= 150, "the boundary is a shade of red, not black structural ink")
+    }
+
+    /// Half two of the same failure: thick treatments made dense regions unclear. The
+    /// dual bevel is a structural treatment now - a dense Classic tile has no light
+    /// source at all, while the 128pt control above keeps the full reference bevel.
+    @Test("Directional bevels are admitted only at structural sizes")
+    func bevelIsStructuralOnly() throws {
+        let side = 12
+        guard let dense = try render(
+            styleMode: 1, side: side,
+            color: SIMD4<Float>(0.50, 1.0, 1.0, 1),
+            cardSurfaceMode: Int32(FoldersSurfaceStyle.classicBevel.rawValue)
+        ) else { return }
+        func energy(_ p: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(p.b) + Int(p.g) + Int(p.r)
+        }
+        let top = energy(dense.rgb(x: 6, y: 2))
+        let bottom = energy(dense.rgb(x: 6, y: 9))
+        let left = energy(dense.rgb(x: 2, y: 6))
+        let right = energy(dense.rgb(x: 9, y: 6))
+        #expect(abs(top - bottom) <= 8, "no light source may appear on a dense Classic tile")
+        #expect(abs(left - right) <= 8, "no directional shadow either")
+    }
+
+    /// Structure needs decisiveness where it has room: the same profile must draw a
+    /// clearly stronger boundary on a large card than on a dense tile.
+    @Test("Boundaries strengthen from reading to structural sizes")
+    func structuralBoundaryIsStrongerThanReading() throws {
+        func darkestEdge(_ r: Rendered) -> Int {
+            var darkest = 3 * 255
+            for x in 0..<6 where !r.isBackground(x: x, y: r.height / 2) {
+                let p = r.rgb(x: x, y: r.height / 2)
+                darkest = min(darkest, Int(p.b) + Int(p.g) + Int(p.r))
+            }
+            return darkest
+        }
+        guard let reading = try render(
+            styleMode: 1, side: 14,
+            color: SIMD4<Float>(1.0, 0.50, 0.50, 1),
+            cardSurfaceMode: Int32(FoldersSurfaceStyle.crisp.rawValue)),
+              let structural = try render(
+                styleMode: 1, side: 128,
+                color: SIMD4<Float>(1.0, 0.50, 0.50, 1),
+                cardSurfaceMode: Int32(FoldersSurfaceStyle.crisp.rawValue)) else { return }
+        #expect(darkestEdge(structural) < darkestEdge(reading) - 60,
+                "large cards must carry a decisively stronger boundary than dense tiles")
+    }
+
+    /// The floor is profile-independent: no surface choice may lose separation at dense
+    /// sizes, and none may paint it as heavy ink. Separation is either a background seam
+    /// pixel or a visible self-shade darkening.
+    @Test("Every profile keeps visible separation at dense sizes without black ink")
+    func densityFloorHoldsForEveryProfile() throws {
+        for surface in FoldersSurfaceStyle.allCases {
+            guard let card = try render(
+                styleMode: 1, side: 10,
+                color: SIMD4<Float>(0.50, 1.0, 1.0, 1),
+                cardSurfaceMode: Int32(surface.rawValue)
+            ) else { return }
+            func energy(_ p: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+                Int(p.b) + Int(p.g) + Int(p.r)
+            }
+            let centre = energy(card.rgb(x: 5, y: 5))
+            var separated = false
+            var minEnergy = 3 * 255
+            for x in 0..<3 {
+                if card.isBackground(x: x, y: 5) { separated = true; continue }
+                minEnergy = min(minEnergy, energy(card.rgb(x: x, y: 5)))
+            }
+            if minEnergy < centre - 20 { separated = true }
+            #expect(separated,
+                    "\(surface.reviewLabel) lost its separation floor at dense sizes")
+            if minEnergy < 3 * 255 {
+                #expect(minEnergy > centre / 3,
+                        "\(surface.reviewLabel) still paints dense boundaries as heavy ink")
             }
         }
     }

@@ -122,6 +122,11 @@ enum CushionShaderSource {
             float  radius = decorate * min(6.0, minSide * 0.12) * radiusScale;
             float  inset = decorate * min(2.0, minSide * 0.06) * insetScale;
 
+            // Guaranteed seam floor. Same-depth siblings share EXACT colours, so a gap
+            // that rounds to nothing merges them into one false slab (Fine Lines at
+            // Retina density did exactly that). Mirrored by CardGeometry.seamInset.
+            inset = max(inset, 0.45 * smoothstep(5.0, 8.0, minSide));
+
             float2 p = (in.rectPos - 0.5) * in.rectSize;
             float2 b = max(halfSize - inset - radius, float2(0.0));
             float2 d = abs(p) - b;
@@ -134,31 +139,43 @@ enum CushionShaderSource {
             // Distance to the card's own edge drives hover/selection outlines below.
             edgeDist = -sdf;
 
-            // Large cards get an explicit boundary independent of neighbouring hues. The
-            // treatment fades in between 6 and 12px so dense tiles keep their occupied
-            // colour instead of becoming an all-outline field.
-            float edgeDecoration = smoothstep(6.0, 12.0, minSide);
-            float outlineWidth = 0.95;
-            float outlineOpacity = 0.82;
+            // ---- Adaptive edge backbone (mirrored by CardGeometry) ----------------
+            // A card's drawn size decides what KIND of boundary it can carry; the
+            // numbered surface styles only the structural end. Micro tiles get a soft
+            // self-shade valley - lines have no room there and near-black ink turns
+            // dense regions to mush. Reading sizes get a hairline in a darker shade of
+            // the card's OWN colour at a floored opacity, so thin boundaries never
+            // vanish. From ~16pt the boundary blends toward the profile's structural
+            // character, and directional bevels are admitted only on the 12->32pt ramp.
+            float lineRegime = smoothstep(7.0, 11.0, minSide);
+            float structuralBlend = smoothstep(16.0, 48.0, minSide);
+            float bevelGate = smoothstep(12.0, 32.0, minSide);
+
+            float structuralWidth = 0.95;
+            float structuralOpacity = 0.82;
             float bevelStrength = 0.0;
             float bevelWidth = 0.0;
             if (surfaceMode == 2) {
-                outlineWidth = 0.65; outlineOpacity = 0.62;
+                structuralWidth = 0.65; structuralOpacity = 0.62;
             } else if (surfaceMode == 3) {
-                outlineWidth = 0.90; outlineOpacity = 0.76;
+                structuralWidth = 0.90; structuralOpacity = 0.76;
             } else if (surfaceMode == 4) {
-                outlineWidth = 0.90; outlineOpacity = 0.72;
+                structuralWidth = 0.90; structuralOpacity = 0.72;
             } else if (surfaceMode == 5) {
-                outlineWidth = 0.90; outlineOpacity = 0.55;
+                structuralWidth = 0.90; structuralOpacity = 0.55;
                 bevelWidth = 1.20; bevelStrength = 0.28;
             } else if (surfaceMode == 6) {
-                outlineWidth = min(1.5, max(0.75, minSide * 0.025));
-                outlineOpacity = 0.97;
+                structuralWidth = min(1.5, max(0.75, minSide * 0.025));
+                structuralOpacity = 0.97;
                 bevelWidth = min(2.25, max(0.75, minSide * 0.035));
                 bevelStrength = 0.82;
             }
-            outlineWidth *= edgeDecoration;
-            bevelWidth *= edgeDecoration;
+            bevelStrength *= bevelGate;
+            bevelWidth *= bevelGate;
+
+            float outlineWidth = mix(0.85, structuralWidth, structuralBlend);
+            float outlineOpacity = mix(0.50, structuralOpacity, structuralBlend)
+                * lineRegime;
 
             // Distances from the four straight edges, after the visual gap. Rounded
             // corners are still governed by the SDF above; these only choose whether an
@@ -185,15 +202,27 @@ enum CushionShaderSource {
             }
 
             // The outline stays inside the drawn rectangle, so the complete pre-gap rect
-            // remains the hit target. Fine Lines uses a depth-tinted near-black boundary;
-            // the other profiles use a neutral one.
-            float outlineAlpha = edgeDecoration * (
-                1.0 - smoothstep(max(0.0, outlineWidth - 0.45),
-                                 outlineWidth + 0.45, edgeDist));
-            float3 outlineColor = surfaceMode == 2
+            // remains the hit target. Reading-size boundaries are a darker shade of the
+            // card's own colour, so dense same-hue fields separate without accumulating
+            // black ink; structural boundaries blend toward the profile character (Fine
+            // Lines stays depth-tinted, the other profiles use a neutral near-black).
+            float3 structuralColor = surfaceMode == 2
                 ? baseLinear * 0.10
                 : float3(0.004);
+            float3 outlineColor = mix(baseLinear * 0.45, structuralColor, structuralBlend);
+            float outlineAlpha =
+                1.0 - smoothstep(max(0.0, outlineWidth - 0.45),
+                                 outlineWidth + 0.45, edgeDist);
             litColor = mix(litColor, outlineColor, outlineAlpha * outlineOpacity);
+
+            // Below line sizes, separation comes from a soft valley toward the card's
+            // own edge - the same job cushion lighting does at density, done
+            // multiplicatively so tile centres keep the exact selected depth colour.
+            // Off below the 3pt micro floor so slivers stay exact flat fill.
+            float microExtent = clamp(minSide * 0.25, 0.75, 1.25);
+            float microShade = step(3.0, minSide) * (1.0 - lineRegime)
+                * (1.0 - smoothstep(0.0, microExtent, edgeDist));
+            litColor *= (1.0 - 0.30 * microShade);
         } else {
             // ---- Cushion style (unchanged) ----------------------------------------
             // Compute cushion surface normal from parabolic coefficients.
