@@ -32,6 +32,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     /// Spatial grid rebuilt after each layout for fast hit testing.
     private var spatialGrid: SpatialGrid?
+    /// Rect array used to build `spatialGrid`; Folders-only aggregates are absent.
+    private var cushionHitRects: [TreemapRect] = []
 
     /// Folders style hit testing. `CardNesting` remaps every child into its parent's inner
     /// rect, so a node's DRAWN position is not its layout position, and the displacement
@@ -65,23 +67,16 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Painting style only - both styles consume the same `SquarifyLayout` output, so hit
     /// testing, zoom and the spatial index keep working off one set of rects regardless.
     var renderStyle: TreemapRenderStyle = .cushion
-    var foldersColorScheme: FoldersColorScheme = .pearl
+    var foldersColorScheme: FoldersColorScheme = .spaceMonger
 
-    /// Bumped by the view whenever anything COLOUR-affecting changes (palette, recency,
-    /// temporal diff). Style changes deliberately do not bump it: switching cushion to
-    /// cards repaints the same colours, and re-resolving them was costing 70ms of main
-    /// thread per click - the whole reason the toggle felt slow.
+    /// Bumped by the view whenever any resolved source colour changes (palette, recency,
+    /// temporal diff). Style and Folders-scheme changes deliberately do not bump it:
+    /// Cushion reuses these raw colours, while Folders cheaply substitutes its depth table.
+    /// Re-resolving directory colours here cost ~70ms per click on a real volume scan.
     var colorGeneration: UInt64 = 0
     private var cachedColors: [SIMD4<Float>] = []
     private var cachedColorsGeneration: UInt64 = .max
     private var cachedColorsLayoutIdentity: UInt64 = .max
-
-    /// Folders-only descendant colours for directory panels and collapsed folders. Kept
-    /// separate from `cachedColors` so Cushion's historical direct-child colouring stays
-    /// unchanged and switching styles does not repeat descendant walks.
-    private var cachedFolderAccents: [SIMD4<Float>] = []
-    private var cachedFolderAccentsGeneration: UInt64 = .max
-    private var cachedFolderAccentsLayoutIdentity: UInt64 = .max
 
     /// Bumped every time `cachedLayout` is replaced or rescaled. The colour cache is keyed
     /// on it as well as on `colorGeneration`: rect COUNT is not identity, and a relayout
@@ -92,6 +87,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Nodes inside a collapsed folder in Folders style: drawn as part of their ancestor,
     /// so a hit on them resolves upward to the block the user can actually see.
     private var hiddenNodes: Set<UInt32> = []
+
+    /// Anchor child -> real folder owner for anonymous density aggregates. The anchor gives
+    /// the display rect a unique real index; it must never become a fake hit target.
+    private var aggregateOwners: [UInt32: UInt32] = [:]
 
     /// The style actually painted last frame. Card style falls back to cushion above
     /// `CardBudget.fallbackNodeThreshold`, where cards could only draw sub-pixel slivers;
@@ -201,8 +200,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             cachedLayout = []
             cachedSnapshot = []
             spatialGrid = nil
+            cushionHitRects = []
             cardHitGrid = nil
             cardHitRects = []
+            aggregateOwners = [:]
             return
         }
 
@@ -234,6 +235,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 cachedLayout[i].height *= sy
             }
             spatialGrid = nil // Stale; rebuilt when background layout completes.
+            cushionHitRects = []
             cardHitGrid = nil // Same, and rebuilt from displayRects on the next instance build.
             cardHitRects = []
             instanceBufferDirty = true
@@ -260,6 +262,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             self.layoutIdentity &+= 1
             self.cachedSnapshot = snapshot
             self.spatialGrid = grid
+            self.cushionHitRects = layout.filter { !$0.isAggregate }
             self.instanceBufferDirty = true
             if isScanningNow {
                 self.lastScanTimeLayoutCompletedAt = CFAbsoluteTimeGetCurrent()
@@ -284,10 +287,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             )
             let duration = CFAbsoluteTimeGetCurrent() - layoutStart
             guard !Task.isCancelled else { return }
+            let cushionRects = layout.filter { !$0.isAggregate }
             let grid = SpatialGrid(
                 viewportWidth: Float(bounds.width),
                 viewportHeight: Float(bounds.height),
-                rects: layout
+                rects: cushionRects
             )
             await applyLayout(layout, grid, duration)
         }
@@ -336,11 +340,12 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         let nodes = cachedSnapshot
         let layoutCount = cachedLayout.count
 
-        // First pass: count visible instances (sub-pixel culling).
+        // First pass: count visible instances (sub-pixel culling). Density aggregates are
+        // Folders-only; including them in Cushion's budget could trigger a false fallback.
         var visibleCount = 0
         for i in 0..<layoutCount {
             let r = cachedLayout[i]
-            if r.width >= 0.5 && r.height >= 0.5 {
+            if r.width >= 0.5 && r.height >= 0.5 && r.isRenderable(in: renderStyle) {
                 visibleCount += 1
             }
         }
@@ -377,20 +382,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         // while the Folders hit grid is rebuilt from the post-nesting `displayRects` below.
         // The shader-only card gap is not applied to those rects, so edges stay clickable.
         // Cushion style does none of this.
-        let nestCards = (renderStyle == .cards)
-            && CardBudget.decide(nodeCount: visibleCount) != .fallbackToCushion
-        let cullTinyCards = (renderStyle == .cards)
-
-        // A negative alpha is an internal sentinel only; it is never sent to Metal.
-        let noFolderAccent = SIMD4<Float>(0, 0, 0, -1)
-        let folderAccentsValid = cachedFolderAccentsGeneration == colorGeneration
-            && cachedFolderAccentsLayoutIdentity == layoutIdentity
-            && cachedFolderAccents.count == layoutCount
-        var folderAccents: [SIMD4<Float>] = folderAccentsValid
-            ? cachedFolderAccents
-            : (nestCards
-                ? [SIMD4<Float>](repeating: noFolderAccent, count: layoutCount)
-                : [])
+        let cardDecision = CardBudget.decide(nodeCount: visibleCount)
+        let nestCards = (renderStyle == .cards) && cardDecision != .fallbackToCushion
+        effectiveRenderStyle = nestCards ? .cards : .cushion
+        let cullTinyCards = nestCards
 
         // Precomputed by the pure `CardNesting` transform, keyed by node index.
         var nestedRect: [UInt32: CardNesting.Placed] = [:]
@@ -414,15 +409,21 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 if placed.suppressed { hidden.insert(placed.nodeIndex) }
             }
             hiddenNodes = hidden
+            aggregateOwners = cachedLayout.reduce(into: [:]) { owners, rect in
+                if rect.isAggregate {
+                    owners[rect.nodeIndex] = rect.interactionNodeIndex
+                }
+            }
         } else {
             hiddenNodes = []
+            aggregateOwners = [:]
         }
 
         // Above the draw budget, card style keeps the largest rects and drops the tail.
         // The dropped nodes are not blanks: their parent container is drawn behind them,
         // so the space reads as "more inside this folder" rather than as empty canvas.
         var areaFloor: Float = 0
-        if renderStyle == .cards, case .aggregate(let limit) = CardBudget.decide(nodeCount: visibleCount) {
+        if nestCards, case .aggregate(let limit) = cardDecision {
             var areas: [Float] = []
             areas.reserveCapacity(visibleCount)
             for i in 0..<layoutCount {
@@ -456,38 +457,24 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 colors[i] = baseColor
             }
 
-            var folderAccent: SIMD4<Float>?
-            if nestCards, nodes[nodeIdx].isDirectory {
-                let resolved: SIMD4<Float>
-                if folderAccentsValid {
-                    resolved = folderAccents[i]
-                } else {
-                    resolved = resolver.resolveFoldersRepresentativeColor(
-                        for: tmRect.nodeIndex,
-                        depth: tmRect.depth,
-                        nodes: nodes,
-                        scratchSizeByExt: &scratchSizeByExt
-                    ) ?? noFolderAccent
-                    folderAccents[i] = resolved
-                }
-                if resolved.w >= 0 {
-                    folderAccent = resolved
-                }
-            }
+            // Aggregates are a Folders-only density representation. This also covers the
+            // safety fallback: requesting Folders is not enough when Cushion is what paints.
+            if !tmRect.isRenderable(in: effectiveRenderStyle) { continue }
 
             // Sub-pixel culling: skip rects smaller than half a pixel in either dimension.
             guard tmRect.width >= 0.5, tmRect.height >= 0.5 else { continue }
 
             // Containers are always kept - dropping one would erase the backdrop that makes
             // its aggregated children read as contents rather than as a hole.
-            if areaFloor > 0, !tmRect.isBackground, tmRect.width * tmRect.height < areaFloor {
+            if areaFloor > 0, !tmRect.isBackground, !tmRect.isAggregate,
+               tmRect.width * tmRect.height < areaFloor {
                 continue
             }
             // Card style draws detail (rounding, gap, container frame) that a tile a few
             // pixels across cannot show - it becomes a smudge that costs a full instance.
             // Dropping those is both faster AND cleaner: the parent container shows through.
             if cullTinyCards, min(tmRect.width, tmRect.height) < CardGeometry.minVisibleSide,
-               !tmRect.isBackground {
+               !tmRect.isBackground, !tmRect.isAggregate {
                 continue
             }
 
@@ -502,40 +489,41 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 guard w >= 0.5, h >= 0.5 else { continue }
             }
 
-            // Expanded folders use only the selected structural depth palette. A collapsed
-            // folder stands in for hidden content and therefore keeps its raw representative
-            // extension colour. Cushion continues to consume the historical style-independent
-            // base colour above.
-            let drawColor: SIMD4<Float>
-            if nestCards && tmRect.isBackground && !isCollapsedFolder {
-                drawColor = CardGeometry.folderContainerFill(
-                    representativeColor: folderAccent,
+            // Folders follows SpaceMonger's default semantic: folders and files use the same
+            // depth palette. Mixing depth-colored panels with extension-colored leaves was the
+            // shared discontinuity in every previous candidate. Cushion keeps `baseColor` and
+            // remains the file-type view.
+            let roleColor: SIMD4<Float>
+            if nestCards && tmRect.isAggregate {
+                roleColor = CardGeometry.leafFill(
+                    baseColor,
+                    depth: tmRect.depth,
+                    scheme: foldersColorScheme
+                )
+            } else if nestCards && tmRect.isBackground && !isCollapsedFolder {
+                roleColor = CardGeometry.folderContainerFill(
+                    representativeColor: nil,
                     depth: tmRect.depth,
                     scheme: foldersColorScheme
                 )
             } else if nestCards && tmRect.isBackground {
-                let parentDepth = max(0, tmRect.depth - 1)
-                if let folderAccent {
-                    drawColor = CardGeometry.collapsedFolderFill(
-                        folderAccent,
-                        containerDepth: parentDepth,
-                        scheme: foldersColorScheme
-                    )
-                } else {
-                    drawColor = CardGeometry.containerFill(
-                        depth: parentDepth,
-                        scheme: foldersColorScheme
-                    )
-                }
-            } else if nestCards {
-                drawColor = CardGeometry.leafFill(
+                roleColor = CardGeometry.collapsedFolderFill(
                     baseColor,
-                    containerDepth: max(0, tmRect.depth - 1),
+                    depth: tmRect.depth,
+                    scheme: foldersColorScheme
+                )
+            } else if nestCards {
+                roleColor = CardGeometry.leafFill(
+                    baseColor,
+                    depth: tmRect.depth,
                     scheme: foldersColorScheme
                 )
             } else {
-                drawColor = baseColor
+                roleColor = baseColor
             }
+            let drawColor = nestCards
+                ? resolver.applyingOverlays(to: roleColor, nodeIndex: nodeIdx)
+                : roleColor
 
             // Use cached coefficients instead of recomputing.
             let coefs = tmRect.cachedCoefs
@@ -566,12 +554,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             cachedColorsGeneration = colorGeneration
             cachedColorsLayoutIdentity = layoutIdentity
         }
-        if nestCards, !folderAccentsValid {
-            cachedFolderAccents = folderAccents
-            cachedFolderAccentsGeneration = colorGeneration
-            cachedFolderAccentsLayoutIdentity = layoutIdentity
-        }
-
         instanceCount = instances.count
         nodeToInstanceIndex = lookup
 
@@ -691,12 +673,6 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             selectedInstance = nodeToInstanceIndex[selected] ?? -1
         }
 
-        // Card style spends pixels per nesting level, so past the budget it can only draw
-        // sub-pixel slivers - hand the view back to cushion rather than draw a lie.
-        effectiveRenderStyle =
-            (renderStyle == .cards && CardBudget.decide(nodeCount: instanceCount) == .fallbackToCushion)
-            ? .cushion : renderStyle
-
         let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
         var uniforms = CushionUniforms(
             viewportSize: SIMD2<Float>(Float(logicalSize.width), Float(logicalSize.height)),
@@ -754,13 +730,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     // MARK: - Hit Testing
 
-    /// Maps a hit on a node hidden inside a collapsed folder to the folder actually drawn
-    /// there. The spatial grid deliberately still indexes full layout rects (so the gaps
-    /// between cards stay clickable); this is what keeps the ANSWER honest in Folders style,
-    /// where whole subtrees are represented by one block.
+    /// Maps anonymous density aggregates and nodes hidden inside a collapsed folder to the
+    /// real folder actually represented there. Returning an aggregate's bookkeeping anchor
+    /// as a file hit would invent ownership SpaceMonger's placeholder never had.
     private func visibleAncestor(of hit: UInt32?) -> UInt32? {
-        guard let hit, !hiddenNodes.isEmpty else { return hit }
-        var current = hit
+        guard let hit else { return nil }
+        var current = aggregateOwners[hit] ?? hit
+        guard !hiddenNodes.isEmpty else { return current }
         var guardCount = 0
         while hiddenNodes.contains(current), guardCount < 64 {
             let parent = cachedSnapshot.indices.contains(Int(current))
@@ -784,13 +760,14 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         if let grid = cardHitGrid, !cardHitRects.isEmpty {
             return visibleAncestor(of: grid.hitTest(point: (x: px, y: py), rects: cardHitRects))
         }
-        if let grid = spatialGrid {
-            return visibleAncestor(of: grid.hitTest(point: (x: px, y: py), rects: cachedLayout))
+        if let grid = spatialGrid, !cushionHitRects.isEmpty {
+            return visibleAncestor(of: grid.hitTest(point: (x: px, y: py), rects: cushionHitRects))
         }
 
         // Fallback: linear scan in reverse order (deeper rects first).
         for i in stride(from: cachedLayout.count - 1, through: 0, by: -1) {
             let r = cachedLayout[i]
+            if r.isAggregate { continue }
             if px >= r.x && px < r.x + r.width &&
                py >= r.y && py < r.y + r.height {
                 return r.nodeIndex

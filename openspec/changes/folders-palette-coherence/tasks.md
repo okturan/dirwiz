@@ -36,8 +36,8 @@
 - [x] 5.1 Run focused card-style, treemap-color, extension-palette, and website contract tests.
 - [x] 5.2 Run the full suite, `CI=true` parity, and strict OpenSpec after the comparison implementation.
 - [x] 5.3 Build, install, and relaunch the local app from a clean recorded commit.
-- [ ] 5.4 On the restored multi-million-item tree, confirm the picker changes the actual native view
-  and Scheme 1 removes the reported dark outer surface and panel veil.
+- [x] 5.4 Inspect the picker on the restored multi-million-item tree and record the rejection: the
+  schemes repaint, but every option retains the hierarchy-to-extension colour discontinuity.
 - [ ] 5.5 Okan selects a numbered winner; do not remove the picker or call the palette final before it.
 
 ## 6. Replace the false comparison model
@@ -53,3 +53,33 @@
 - [x] 6.5 Run focused, full, `CI=true`, and strict OpenSpec verification after the replacement.
 - [x] 6.6 Commit, build, install, and relaunch the clean local comparison build before asking Okan to
   choose again.
+
+## 7. Preserve content at the density cutoff
+
+- [x] 7.1 Record the supplied 882 GB native failure and inspect SpaceMonger 1.4's complete
+  `SizeFolders` and draw paths, including its anonymous group placeholders and default colour roles.
+- [x] 7.2 Add a deterministic fixture proving the current cutoff paints exactly 5,000 of 10,000
+  square points when half the bytes are split across individually tiny files.
+- [x] 7.3 Emit occupied aggregate rectangles for contiguous sub-threshold sibling regions instead
+  of exposing their parent folder background.
+- [x] 7.4 Paint collapsed and aggregate content with its selected depth colour; keep Cushion's
+  historical direct-child directory blend and extension colours isolated.
+- [x] 7.5 Suppress false aggregate labels, resolve aggregate hits to their owning folder, and prove
+  Folders aggregation remains absent from Cushion output.
+- [x] 7.6 Run focused layout, card, color, interaction, full-suite, `CI=true`, and strict OpenSpec
+  verification.
+- [ ] 7.7 Commit, build, install, relaunch, and inspect the same real native tree before resuming
+  palette selection.
+
+## 8. Use SpaceMonger's complete color role
+
+- [x] 8.1 Record the source fact missed by the earlier comparisons: SpaceMonger's defaults set both
+  `file_color` and `folder_color` to the same `BoxColors[depth & 7]` path.
+- [x] 8.2 Replace the ten folder-only ramps with ten complete map palettes applied to files,
+  expanded folders, collapsed folders, and aggregates; make option 1 source-traceable.
+- [x] 8.3 Show the active eight-swatch depth key above a File Types breakdown that explicitly says
+  Folders map colors show depth.
+- [x] 8.4 Replace raw-file preservation gates with same-depth role equivalence, adjacent-depth
+  contrast, exact reference-palette, Cushion-isolation, and aggregate-occupancy gates.
+- [x] 8.5 Run focused, full, `CI=true`, and strict OpenSpec verification after the semantic change.
+- [ ] 8.6 Commit, build, install, relaunch, and inspect the same 882 GB native tree before selection.

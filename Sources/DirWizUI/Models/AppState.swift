@@ -153,7 +153,7 @@ public final class AppState {
 
     /// Numbered native Folders colour comparison. It persists so a chosen candidate survives
     /// relaunch and every screenshot refers to the same unambiguous scheme number.
-    public var foldersColorScheme: FoldersColorScheme = .pearl {
+    public var foldersColorScheme: FoldersColorScheme = .spaceMonger {
         didSet {
             guard foldersColorScheme != oldValue else { return }
             defaults.set(foldersColorScheme.rawValue, forKey: AppState.foldersColorSchemeKey)
@@ -187,7 +187,7 @@ public final class AppState {
     }
 
     static func loadFoldersColorScheme(_ defaults: UserDefaults) -> FoldersColorScheme {
-        FoldersColorScheme(rawValue: defaults.integer(forKey: foldersColorSchemeKey)) ?? .pearl
+        FoldersColorScheme(rawValue: defaults.integer(forKey: foldersColorSchemeKey)) ?? .spaceMonger
     }
 
     // MARK: - Space Analysis

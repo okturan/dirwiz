@@ -17,65 +17,64 @@ relayout, navigation loss, or hit-testing changes.
 #### Scenario: The user compares two schemes
 
 - **WHEN** the user selects another numbered scheme
-- **THEN** the displayed folder hierarchy SHALL repaint from that scheme
-- **AND** file tiles and the visible File Types key SHALL keep their raw extension colours
+- **THEN** every displayed Folders card SHALL repaint from that scheme's depth table
+- **AND** the visible Folders depth key SHALL repaint to the same table
 - **AND** the current root, selection, layout, labels, overlays, and hit targets SHALL remain intact
 
 #### Scenario: The app relaunches during review
 
 - **WHEN** a scheme has been selected and the app relaunches or scans again
 - **THEN** the same numbered scheme SHALL remain selected
-- **AND** an absent or invalid preference SHALL resolve to `1. Pearl`
+- **AND** an absent or invalid preference SHALL resolve to `1. SpaceMonger`
 
-### Requirement: Review candidates are full hierarchy palettes
+### Requirement: Review candidates are complete map palettes
 
-Every Folders candidate SHALL provide eight explicit structural colours indexed by folder depth.
-The ten outermost colours SHALL be pairwise distinct, their luminance range SHALL include both light
-and dark treatments, and the set SHALL include brightening, darkening, and alternating trajectories.
+Every Folders candidate SHALL provide eight explicit colours indexed by tree depth and SHALL apply
+them to folders, files, collapsed blocks, and density aggregates. The ten outermost colours SHALL be
+pairwise distinct and every adjacent depth pair SHALL have material RGB distance.
 
 #### Scenario: The complete comparison set is inspected
 
 - **WHEN** all ten structural tables are evaluated at depths 0 through 7
 - **THEN** no two tables or depth-zero colours SHALL be equal
-- **AND** at least one table SHALL brighten, one SHALL darken, and one SHALL alternate with depth
-- **AND** the set SHALL not be representable as ten blend strengths around one shared dark ramp
+- **AND** option 1 SHALL match SpaceMonger 1.4's eight `BoxColors` base colours
+- **AND** the set SHALL not be representable as ten blend strengths around one shared ramp
 
-### Requirement: Every review candidate preserves extension identity
+### Requirement: One depth semantic spans every Folders role
 
-Every Folders candidate SHALL pass direct-file and collapsed-folder content through at the raw
-production palette colour. Expanded structural panels SHALL not inherit descendant content tint.
+Every Folders candidate SHALL use its selected `depth & 7` colour for direct files, expanded folders,
+collapsed folders, and density aggregates. It SHALL NOT change to extension colours at the leaf or
+collapse boundary. Cushion SHALL continue to use production extension colours.
 
-#### Scenario: Production palette colors are rendered by every candidate
+#### Scenario: Two differently typed files occupy the same depth
 
-- **WHEN** all 17 production colors are transformed at one container depth
-- **THEN** every candidate SHALL return each direct-file colour byte-for-byte
-- **AND** every candidate SHALL return each collapsed content-bearing folder colour byte-for-byte
-- **AND** red, blue, green, and other extension identities SHALL not be muted or shifted
+- **WHEN** Folders renders two direct files with different extension palette colours at one depth
+- **THEN** both files SHALL use the selected scheme's colour for that depth
+- **AND** a folder or aggregate at that depth SHALL use the same colour
+- **AND** switching to Cushion SHALL restore the two production extension colours
 
 #### Scenario: A fresh comparison build is launched
 
 - **WHEN** no stored scheme exists
-- **THEN** `1. Pearl` SHALL show a light outer folder surface that darkens inward
-- **AND** representative descendant colours SHALL contribute zero expanded-panel tint
+- **THEN** `1. SpaceMonger` SHALL be selected
+- **AND** its eight colours SHALL match the reference `BoxColors` base row
 
 ### Requirement: Folder roles follow the selected recipe
 
-Folders SHALL continue to derive a representative extension from non-empty descendant content,
-including directory-only chains, for collapsed folders that stand in for hidden content. The
-selected recipe SHALL control the complete expanded structural depth table. Actually empty folders
-SHALL remain structural palette colour.
+The selected recipe SHALL control every visible Folders card. Expanded, collapsed, aggregate, file,
+and actually-empty folder roles SHALL not introduce a second colour semantic.
 
 #### Scenario: An expanded folder has coloured descendants
 
 - **WHEN** a non-empty expanded folder is rendered under any review scheme
 - **THEN** its panel SHALL remain the scheme's structural depth colour
-- **AND** descendant representative color SHALL not create a subtree-wide veil
+- **AND** descendant extension colour SHALL not create a subtree-wide veil
 
 #### Scenario: A folder is collapsed by density
 
 - **WHEN** one tile represents the folder's hidden contents
-- **THEN** the tile SHALL use its raw representative extension colour
-- **AND** it SHALL remain distinguishable from an actually empty structural panel
+- **THEN** the tile SHALL use the selected colour for that folder's depth
+- **AND** expanding it SHALL continue the same adjacent depth sequence
 
 ### Requirement: Cushion is isolated from Folders comparison
 
@@ -87,16 +86,46 @@ directory behavior.
 
 - **WHEN** any two Folders schemes are compared at the Cushion color-input boundary
 - **THEN** both SHALL produce the identical raw Cushion palette color
-- **AND** no Folders descendant treatment SHALL leak into Cushion
+- **AND** no Folders depth treatment SHALL leak into Cushion
 
-### Requirement: Website remains on the clean review baseline
+### Requirement: Density aggregation preserves occupied content area
 
-While native selection is open, the local website Cards demo SHALL keep direct-file colours raw and
-Cushion SHALL remain raw. The website SHALL NOT be deployed as a final palette decision
-until the native winner is selected and separately verified.
+Folders SHALL NOT expose structural folder background merely because individually small descendants
+fall below the layout or card-visibility threshold. A contiguous group that is collectively visible
+SHALL be represented by an occupied aggregate rectangle covering that group's layout region.
 
-#### Scenario: A visitor toggles the local browser demo
+#### Scenario: Half the bytes are individually sub-threshold
 
-- **WHEN** the local demo switches between Cushions and Cards during review
-- **THEN** direct file colors SHALL remain unwashed in both styles
-- **AND** Cards geometry SHALL remain the distinguishing treatment
+- **GIVEN** one file owns half a folder's bytes and many individually sub-threshold files own the
+  other half
+- **WHEN** the Folders layout applies its density cutoff
+- **THEN** non-background content rectangles, including aggregates, SHALL cover at least 98% of the
+  folder's available area
+- **AND** the small-file half SHALL not appear as the owning folder's parent-depth colour
+
+#### Scenario: An aggregate contains hidden content
+
+- **WHEN** one aggregate rectangle stands in for a contiguous group of hidden descendants
+- **THEN** it SHALL use the selected Folders colour for its depth
+- **AND** it SHALL not display the representative child's name as though that child owns the group
+- **AND** hit testing SHALL resolve to the owning folder
+- **AND** zooming the owning folder SHALL remain the path to the underlying detail
+
+#### Scenario: Cushion renders the same tree
+
+- **WHEN** the view switches from Folders to Cushion
+- **THEN** Folders-only aggregate rectangles SHALL not be drawn
+- **AND** Cushion's existing rect colors, labels, and hit targets SHALL remain unchanged
+
+### Requirement: Folders exposes the correct visible color key
+
+Folders SHALL show the selected eight-colour depth key above the File Types breakdown. The breakdown
+SHALL state that map colours show depth and SHALL retain its extension drill-down behavior. Cushion
+SHALL continue to present File Types as its map colour key.
+
+#### Scenario: The user switches from Cushion to Folders
+
+- **WHEN** Folders becomes active
+- **THEN** an outer-to-inner eight-swatch key SHALL show the selected scheme
+- **AND** the sidebar SHALL state that map colours show depth
+- **AND** File Types rows SHALL remain usable for size comparison and Search drill-down

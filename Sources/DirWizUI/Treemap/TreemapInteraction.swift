@@ -1,6 +1,14 @@
 import SwiftUI
 import DirWizCore
 
+extension TreemapRect {
+    /// Anonymous density aggregates represent a group, so using their representative child's
+    /// filename would assert a false spatial identity even when the rectangle is label-sized.
+    var qualifiesForLeafLabel: Bool {
+        width * height > 60 * 20 && !isBackground && !isAggregate
+    }
+}
+
 /// SwiftUI view that wraps the Metal treemap with interaction overlays.
 /// Provides breadcrumb navigation, hover tooltips, and context menus.
 /// Show a confirmation alert before trashing large items; call action() immediately for small ones.
@@ -299,7 +307,7 @@ public struct InteractiveTreemapView: View {
                     // too, and in Folders style they get the header strip the geometry
                     // already reserves for them.
                     let leaves = rects
-                        .filter { $0.width * $0.height > 60 * 20 && !$0.isBackground }
+                        .filter(\.qualifiesForLeafLabel)
                         .sorted { $0.width * $0.height > $1.width * $1.height }
                         .prefix(70)
                     // Folders style reserves a header strip per container for exactly this.

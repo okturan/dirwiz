@@ -23,33 +23,33 @@ public enum TreemapRenderStyle: String, CaseIterable, Sendable {
 /// Native comparison set for choosing the final Folders colour treatment on real trees.
 ///
 /// This is deliberately expressed as renderer inputs rather than screenshot filters: every
-/// option runs through the same Metal instances, nesting, overlays, hit testing, and extension
-/// palette as production. The numbered names make feedback unambiguous while the review is open.
+/// option runs through the same Metal instances, nesting, overlays, and hit testing as production.
+/// The numbered names make feedback unambiguous while the review is open.
 public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
-    case pearl = 1
-    case frost
-    case silver
-    case graphite
-    case midnight
-    case sand
-    case clay
-    case sage
-    case lavender
+    case spaceMonger = 1
+    case ocean
+    case forest
+    case sunset
+    case spectrum
+    case candy
+    case earth
+    case nord
+    case monochrome
     case inkAndPaper
 
     public var id: Int { rawValue }
 
     public var displayName: String {
         switch self {
-        case .pearl:       return "Pearl"
-        case .frost:       return "Frost"
-        case .silver:      return "Silver"
-        case .graphite:    return "Graphite"
-        case .midnight:    return "Midnight"
-        case .sand:        return "Sand"
-        case .clay:        return "Clay"
-        case .sage:        return "Sage"
-        case .lavender:    return "Lavender"
+        case .spaceMonger: return "SpaceMonger"
+        case .ocean:       return "Ocean"
+        case .forest:      return "Forest"
+        case .sunset:      return "Sunset"
+        case .spectrum:    return "Spectrum"
+        case .candy:       return "Candy"
+        case .earth:       return "Earth"
+        case .nord:        return "Nord"
+        case .monochrome:  return "Monochrome"
         case .inkAndPaper: return "Ink & Paper"
         }
     }
@@ -58,88 +58,89 @@ public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
 
     public var explanation: String {
         switch self {
-        case .pearl:       return "Light cool folders that darken inward"
-        case .frost:       return "Ice-blue folders that lighten inward"
-        case .silver:      return "Alternating mid-grey folder layers"
-        case .graphite:    return "Dark neutral folders that lighten inward"
-        case .midnight:    return "Deep navy folders that open into blue-grey"
-        case .sand:        return "Light warm folders that darken inward"
-        case .clay:        return "Earthy folders that lighten inward"
-        case .sage:        return "Light muted-green folders that darken inward"
-        case .lavender:    return "Light muted-violet folders that darken inward"
-        case .inkAndPaper: return "Strong alternating dark and light folder layers"
+        case .spaceMonger: return "The original SpaceMonger depth sequence"
+        case .ocean:       return "Navy, blue, cyan, and teal depth layers"
+        case .forest:      return "Pine, leaf, moss, earth, and sage layers"
+        case .sunset:      return "Plum through magenta, red, orange, and gold"
+        case .spectrum:    return "A high-contrast full-spectrum depth cycle"
+        case .candy:       return "Bright playful hues with strong adjacent contrast"
+        case .earth:       return "Clay, sand, olive, teal, and slate layers"
+        case .nord:        return "Muted cool hues with a restrained red accent"
+        case .monochrome:  return "Alternating neutral light and dark layers"
+        case .inkAndPaper: return "Alternating ink-dark and paper-light tinted layers"
         }
     }
 
     struct Recipe: Equatable, Sendable {
-        /// One structural colour for every `depth & 7` value. An explicit table is
+        /// One map colour for every `depth & 7` value. An explicit table is
         /// intentional: a shared base-plus-step equation made ten numerically different
         /// recipes look like one dark scheme with ten strength settings.
         let chromeLevels: [SIMD3<Float>]
     }
 
-    /// Static storage avoids allocating an eight-element Array for every visible folder
+    /// Static storage avoids allocating an eight-element Array for every visible node
     /// while rebuilding a multi-million-item tree's Metal instances.
     private static let recipes: [Recipe] = [
             Recipe(chromeLevels: [
-                SIMD3(0.78, 0.79, 0.82), SIMD3(0.73, 0.74, 0.78),
-                SIMD3(0.68, 0.69, 0.73), SIMD3(0.63, 0.64, 0.68),
-                SIMD3(0.58, 0.59, 0.63), SIMD3(0.53, 0.54, 0.58),
-                SIMD3(0.48, 0.49, 0.53), SIMD3(0.43, 0.44, 0.48),
+                // SpaceMonger 1.4's BoxColors base row, normalized from 8-bit RGB.
+                SIMD3(1.00, 0.50, 0.50), SIMD3(1.00, 0.75, 0.50),
+                SIMD3(1.00, 1.00, 0.00), SIMD3(0.50, 1.00, 0.50),
+                SIMD3(0.50, 1.00, 1.00), SIMD3(0.75, 0.75, 1.00),
+                SIMD3(0.75, 0.75, 0.75), SIMD3(1.00, 0.50, 1.00),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.52, 0.61, 0.72), SIMD3(0.57, 0.66, 0.76),
-                SIMD3(0.62, 0.71, 0.80), SIMD3(0.67, 0.76, 0.84),
-                SIMD3(0.72, 0.80, 0.87), SIMD3(0.77, 0.84, 0.90),
-                SIMD3(0.81, 0.87, 0.92), SIMD3(0.85, 0.90, 0.94),
+                SIMD3(0.10, 0.22, 0.45), SIMD3(0.12, 0.42, 0.72),
+                SIMD3(0.12, 0.66, 0.86), SIMD3(0.08, 0.55, 0.58),
+                SIMD3(0.24, 0.76, 0.66), SIMD3(0.40, 0.64, 0.90),
+                SIMD3(0.25, 0.36, 0.68), SIMD3(0.10, 0.68, 0.72),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.51, 0.53, 0.57), SIMD3(0.66, 0.67, 0.70),
-                SIMD3(0.47, 0.49, 0.53), SIMD3(0.70, 0.71, 0.74),
-                SIMD3(0.43, 0.45, 0.49), SIMD3(0.74, 0.75, 0.78),
-                SIMD3(0.39, 0.41, 0.45), SIMD3(0.78, 0.79, 0.82),
+                SIMD3(0.10, 0.34, 0.22), SIMD3(0.34, 0.54, 0.20),
+                SIMD3(0.58, 0.66, 0.22), SIMD3(0.18, 0.62, 0.30),
+                SIMD3(0.58, 0.44, 0.18), SIMD3(0.38, 0.24, 0.16),
+                SIMD3(0.48, 0.66, 0.46), SIMD3(0.20, 0.48, 0.38),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.20, 0.22, 0.26), SIMD3(0.24, 0.26, 0.30),
-                SIMD3(0.28, 0.30, 0.34), SIMD3(0.32, 0.34, 0.38),
-                SIMD3(0.36, 0.38, 0.42), SIMD3(0.40, 0.42, 0.46),
-                SIMD3(0.44, 0.46, 0.50), SIMD3(0.48, 0.50, 0.54),
+                SIMD3(0.30, 0.12, 0.42), SIMD3(0.52, 0.18, 0.56),
+                SIMD3(0.76, 0.20, 0.52), SIMD3(0.90, 0.25, 0.40),
+                SIMD3(0.92, 0.38, 0.24), SIMD3(0.94, 0.56, 0.20),
+                SIMD3(0.90, 0.72, 0.20), SIMD3(0.66, 0.28, 0.50),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.13, 0.19, 0.29), SIMD3(0.18, 0.25, 0.35),
-                SIMD3(0.23, 0.31, 0.41), SIMD3(0.28, 0.37, 0.47),
-                SIMD3(0.33, 0.43, 0.53), SIMD3(0.38, 0.49, 0.59),
-                SIMD3(0.43, 0.55, 0.65), SIMD3(0.48, 0.61, 0.71),
+                SIMD3(0.10, 0.58, 0.78), SIMD3(0.22, 0.34, 0.78),
+                SIMD3(0.48, 0.22, 0.76), SIMD3(0.78, 0.18, 0.62),
+                SIMD3(0.90, 0.24, 0.32), SIMD3(0.94, 0.52, 0.16),
+                SIMD3(0.72, 0.76, 0.16), SIMD3(0.14, 0.68, 0.40),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.76, 0.69, 0.58), SIMD3(0.72, 0.65, 0.54),
-                SIMD3(0.68, 0.61, 0.50), SIMD3(0.64, 0.57, 0.46),
-                SIMD3(0.60, 0.53, 0.42), SIMD3(0.56, 0.49, 0.38),
-                SIMD3(0.52, 0.45, 0.34), SIMD3(0.48, 0.41, 0.30),
+                SIMD3(0.82, 0.30, 0.64), SIMD3(0.46, 0.30, 0.82),
+                SIMD3(0.12, 0.68, 0.82), SIMD3(0.94, 0.48, 0.20),
+                SIMD3(0.20, 0.72, 0.42), SIMD3(0.30, 0.46, 0.90),
+                SIMD3(0.88, 0.72, 0.18), SIMD3(0.88, 0.22, 0.38),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.43, 0.31, 0.29), SIMD3(0.47, 0.35, 0.32),
-                SIMD3(0.51, 0.39, 0.35), SIMD3(0.55, 0.43, 0.38),
-                SIMD3(0.59, 0.47, 0.41), SIMD3(0.63, 0.51, 0.44),
-                SIMD3(0.67, 0.55, 0.47), SIMD3(0.71, 0.59, 0.50),
+                SIMD3(0.40, 0.24, 0.16), SIMD3(0.68, 0.34, 0.22),
+                SIMD3(0.78, 0.62, 0.34), SIMD3(0.50, 0.54, 0.24),
+                SIMD3(0.24, 0.50, 0.44), SIMD3(0.30, 0.38, 0.46),
+                SIMD3(0.66, 0.46, 0.34), SIMD3(0.46, 0.62, 0.52),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.64, 0.72, 0.65), SIMD3(0.60, 0.68, 0.61),
-                SIMD3(0.56, 0.64, 0.57), SIMD3(0.52, 0.60, 0.53),
-                SIMD3(0.48, 0.56, 0.49), SIMD3(0.44, 0.52, 0.45),
-                SIMD3(0.40, 0.48, 0.41), SIMD3(0.36, 0.44, 0.37),
+                SIMD3(0.31, 0.36, 0.46), SIMD3(0.36, 0.51, 0.64),
+                SIMD3(0.30, 0.61, 0.60), SIMD3(0.48, 0.63, 0.49),
+                SIMD3(0.60, 0.53, 0.68), SIMD3(0.43, 0.55, 0.72),
+                SIMD3(0.55, 0.58, 0.62), SIMD3(0.70, 0.40, 0.42),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.69, 0.65, 0.76), SIMD3(0.65, 0.61, 0.72),
-                SIMD3(0.61, 0.57, 0.68), SIMD3(0.57, 0.53, 0.64),
-                SIMD3(0.53, 0.49, 0.60), SIMD3(0.49, 0.45, 0.56),
-                SIMD3(0.45, 0.41, 0.52), SIMD3(0.41, 0.37, 0.48),
+                SIMD3(0.20, 0.21, 0.23), SIMD3(0.72, 0.73, 0.75),
+                SIMD3(0.32, 0.33, 0.35), SIMD3(0.84, 0.85, 0.87),
+                SIMD3(0.42, 0.43, 0.45), SIMD3(0.64, 0.65, 0.67),
+                SIMD3(0.26, 0.27, 0.29), SIMD3(0.90, 0.91, 0.93),
             ]),
             Recipe(chromeLevels: [
-                SIMD3(0.16, 0.18, 0.22), SIMD3(0.72, 0.73, 0.76),
-                SIMD3(0.23, 0.25, 0.29), SIMD3(0.78, 0.79, 0.82),
-                SIMD3(0.30, 0.32, 0.36), SIMD3(0.68, 0.69, 0.72),
-                SIMD3(0.37, 0.39, 0.43), SIMD3(0.82, 0.83, 0.86),
+                SIMD3(0.10, 0.12, 0.16), SIMD3(0.84, 0.80, 0.72),
+                SIMD3(0.16, 0.20, 0.27), SIMD3(0.76, 0.84, 0.82),
+                SIMD3(0.23, 0.16, 0.25), SIMD3(0.86, 0.76, 0.80),
+                SIMD3(0.17, 0.24, 0.22), SIMD3(0.82, 0.84, 0.72),
             ]),
     ]
 
@@ -185,16 +186,6 @@ public enum CardGeometry {
     public static let minHeightForHeader: Float = 56
     public static let headerHeight: Float = 18
 
-    /// Folders style paints containers as neutral chrome rather than in their dominant
-    /// child's colour. A directory tinted bright magenta competes with the files inside it
-    /// for attention and turns nested chains into stacked colour bands; a slate panel reads
-    /// as structure and lets the files carry the only colour that means anything.
-    ///
-    /// Applied at instance-build time, NOT in the colour resolver, so the resolved-colour
-    /// cache stays independent of render style (a style-dependent cache key would put the
-    /// 70ms-per-toggle cost straight back).
-    public static let containerFill = SIMD4<Float>(0.29, 0.31, 0.36, 1.0)
-
     /// Below this, a folder is drawn as ONE solid block and its contents are not drawn.
     ///
     /// Taken from SpaceMonger 1.4 (`FolderView.cpp`, `minsizes` density table, default row
@@ -211,13 +202,12 @@ public enum CardGeometry {
         width > minSubdivideWidth && height > minSubdivideHeight
     }
 
-    /// Complete depth palette for expanded folder panels. SpaceMonger also indexes a table
-    /// with `depth & 7`; keeping the table explicit is load-bearing here. The first native
-    /// comparison used one dark base plus a linear step and accidentally offered ten
-    /// strength variants of the same hierarchy. Each current scheme owns all eight colours.
+    /// Complete depth palette for every Folders card. SpaceMonger indexes the same table
+    /// with `depth & 7` for files and folders. Keeping the table explicit is load-bearing:
+    /// the first native comparison offered ten variants of one nearly monochrome ramp.
     public static func containerFill(
         depth: Int,
-        scheme: FoldersColorScheme = .pearl
+        scheme: FoldersColorScheme = .spaceMonger
     ) -> SIMD4<Float> {
         let color = scheme.recipe.chromeLevels[depth & 7]
         return SIMD4<Float>(
@@ -228,48 +218,46 @@ public enum CardGeometry {
         )
     }
 
-    /// File colour is data, not structural theme chrome. Two real-tree attempts to settle
-    /// it toward folder grey produced either a grey wash or a subtree veil, so every review
-    /// scheme now passes the production extension colour through unchanged.
+    /// SpaceMonger's default color model is one depth palette for both folders and files.
+    /// Using unrelated extension colors only for the leaves caused every candidate to share
+    /// the same abrupt panel-to-red/blue transition. Cushion remains the file-type view.
     public static func leafFill(
         _ base: SIMD4<Float>,
-        containerDepth: Int = 0,
-        scheme: FoldersColorScheme = .pearl
+        depth: Int = 0,
+        scheme: FoldersColorScheme = .spaceMonger
     ) -> SIMD4<Float> {
-        _ = containerDepth
-        _ = scheme
-        return base
+        _ = base
+        return containerFill(depth: depth, scheme: scheme)
     }
 
-    /// Expanded folders are structure only. Descendant colour on a large nested panel is
-    /// precisely the all-over veil the native screenshots rejected.
+    /// Expanded folders and their direct contents share one depth sequence. This makes the
+    /// color transition describe nesting instead of changing semantics at the leaf boundary.
     public static func folderContainerFill(
         representativeColor: SIMD4<Float>?,
         depth: Int,
-        scheme: FoldersColorScheme = .pearl
+        scheme: FoldersColorScheme = .spaceMonger
     ) -> SIMD4<Float> {
         _ = representativeColor
         return containerFill(depth: depth, scheme: scheme)
     }
 
-    /// Content-bearing colour for a folder too small to subdivide.
+    /// A collapsed folder keeps the depth colour it would have had if expanded. Its area is
+    /// occupied content, but it must not reintroduce an unrelated extension-color system.
     public static func collapsedFolderFill(
         _ representativeColor: SIMD4<Float>,
-        containerDepth: Int,
-        scheme: FoldersColorScheme = .pearl
+        depth: Int,
+        scheme: FoldersColorScheme = .spaceMonger
     ) -> SIMD4<Float> {
-        _ = containerDepth
-        _ = scheme
-        return representativeColor
+        _ = representativeColor
+        return containerFill(depth: depth, scheme: scheme)
     }
 
-    /// Representative palette color for UI surfaces that act as the treemap's visible key.
-    /// Folders uses depth zero because one legend cannot represent every nested chrome shade;
-    /// Cushion keeps the raw palette that its shared lighting integrates on the map.
+    /// File Types rows keep their category swatches for filtering and size comparison.
+    /// Folders displays a separate eight-swatch depth key above those rows.
     public static func paletteColor(
         _ base: SIMD4<Float>,
         for style: TreemapRenderStyle,
-        foldersScheme: FoldersColorScheme = .pearl
+        foldersScheme: FoldersColorScheme = .spaceMonger
     ) -> SIMD4<Float> {
         _ = foldersScheme
         switch style {

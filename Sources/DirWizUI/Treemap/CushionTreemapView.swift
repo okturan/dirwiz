@@ -39,7 +39,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         recencyGeneration: UInt64 = 0,
         isRecencyOverlayEnabled: Bool = false,
         renderStyle: TreemapRenderStyle = .cushion,
-        foldersColorScheme: FoldersColorScheme = .pearl,
+        foldersColorScheme: FoldersColorScheme = .spaceMonger,
         temporalDiffKinds: [UInt8] = [],
         temporalDiffStrengths: [Float] = [],
         isTemporalDiffEnabled: Bool = false,
@@ -125,8 +125,8 @@ public struct CushionTreemapView: NSViewRepresentable {
         }
         if foldersSchemeChanged {
             coordinator.foldersColorScheme = foldersColorScheme
-            // Recipes consume the same resolved palette and representative cache; only the
-            // final instance colours change, so this is a cheap repaint without a relayout.
+            // Folders substitutes one static depth table at instance-build time. The raw
+            // Cushion colour cache and layout stay valid, so this is a cheap repaint.
             coordinator.instanceBufferDirty = true
         }
         if paletteChanged {

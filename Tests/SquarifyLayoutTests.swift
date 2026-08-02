@@ -148,6 +148,59 @@ struct SquarifyLayoutTests {
         #expect(leaves.count >= 1, "Should have at least the large file")
     }
 
+    @Test("Collectively significant tiny files still occupy their visible area")
+    func tinyFilesRetainOccupiedArea() {
+        // Half the bytes are in one file. The other half are spread across enough tiny
+        // files that every individual rectangle falls below the density threshold. Those
+        // files must not turn half the folder into exposed background: SpaceMonger emits
+        // aggregate placeholders for exactly this cutoff shape.
+        let tinyCount = 2_000
+        let tree = makeTree(childSizes: [UInt64(tinyCount)] + Array(repeating: 1, count: tinyCount))
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+
+        let rects = SquarifyLayout.layout(
+            nodes: tree.nodesSnapshot(),
+            rootIndex: 0,
+            bounds: bounds,
+            minPixelSize: 2.0
+        )
+
+        let representedArea = rects
+            .filter { !$0.isBackground }
+            .reduce(Float(0)) { $0 + $1.width * $1.height }
+        let totalArea = Float(bounds.width * bounds.height)
+
+        let aggregates = rects.filter(\.isAggregate)
+        #expect(!aggregates.isEmpty, "the omitted sibling tail needs an occupied aggregate")
+        #expect(aggregates.allSatisfy { $0.aggregateOwnerIndex == 0 },
+            "anonymous aggregate interaction belongs to the containing folder")
+        #expect(aggregates.allSatisfy { $0.interactionNodeIndex == 0 })
+        #expect(representedArea >= totalArea * 0.98,
+            "Tiny contents represent only \(representedArea) of \(totalArea); the remainder reads as empty")
+    }
+
+    @Test("A single sub-threshold tail still occupies its remaining strip")
+    func singleTinyTailBecomesAggregate() {
+        let tree = makeTree(childSizes: [99, 1])
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+
+        let rects = SquarifyLayout.layout(
+            nodes: tree.nodesSnapshot(),
+            rootIndex: 0,
+            bounds: bounds,
+            minPixelSize: 2.0
+        )
+        let aggregate = rects.first(where: \.isAggregate)
+        #expect(aggregate != nil, "the iterative last-item fast path must not drop its strip")
+        #expect(aggregate?.aggregateOwnerIndex == 0)
+
+        let representedArea = rects
+            .filter { !$0.isBackground }
+            .reduce(Float(0)) { $0 + $1.width * $1.height }
+        #expect(representedArea >= 9_800,
+            "the 1% tail must remain occupied instead of exposing its parent")
+    }
+
     @Test("Nested directories produce deeper rects")
     func nestedDirectoriesDepth() {
         let tree = FileTree()

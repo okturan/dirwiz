@@ -13,9 +13,26 @@ public struct TreemapRect: Sendable {
     /// Cached cushion coefficients (ax2, bx, ay2, by). Computed inline during layout.
     public var cachedCoefs: SIMD4<Float> = .zero
 
-    /// True for directory background rects (drawn first so sub-pixel children expose dir color).
-    /// These should not receive text labels since children are drawn on top.
+    /// True for directory background rects, drawn before their children. Cushion may expose this
+    /// backdrop below physical resolution; Folders emits occupied aggregates for visible unions
+    /// instead. Background rects do not receive leaf labels.
     public var isBackground: Bool = false
+
+    /// True when this rect represents a contiguous group of siblings whose individual rects
+    /// fell below the density threshold. It is a display placeholder, not a fabricated node:
+    /// `nodeIndex` is a unique anchor child for renderer bookkeeping and
+    /// `aggregateOwnerIndex` is the real folder that interaction resolves to.
+    public var isAggregate: Bool = false
+    public var aggregateOwnerIndex: UInt32? = nil
+
+    /// Filesystem identity exposed by hover, selection, and zoom.
+    public var interactionNodeIndex: UInt32 { aggregateOwnerIndex ?? nodeIndex }
+
+    /// Density aggregates exist to repair Folders' card cutoff. Cushion keeps its historical
+    /// rect set and therefore never emits them as render instances.
+    public func isRenderable(in style: TreemapRenderStyle) -> Bool {
+        !isAggregate || style == .cards
+    }
 }
 
 /// Internal layout rectangle for squarify calculations.
@@ -91,6 +108,7 @@ public struct SquarifyLayout {
         nodeIndex: UInt32, rect: LayoutRect, depth: Int,
         ancestors: [(x: Float, y: Float, w: Float, h: Float)],
         minPixelSize: Float, isBackground: Bool = false,
+        isAggregate: Bool = false, aggregateOwnerIndex: UInt32? = nil,
         result: inout [TreemapRect]
     ) {
         guard rect.w >= minPixelSize, rect.h >= minPixelSize else { return }
@@ -100,8 +118,78 @@ public struct SquarifyLayout {
             width: rect.w, height: rect.h,
             depth: depth,
             cachedCoefs: computeCoefs(rectX: rect.x, rectY: rect.y, rectW: rect.w, rectH: rect.h, ancestors: ancestors),
-            isBackground: isBackground
+            isBackground: isBackground,
+            isAggregate: isAggregate,
+            aggregateOwnerIndex: aggregateOwnerIndex
         ))
+    }
+
+    /// Emit one occupied placeholder for a group that cannot produce useful individual
+    /// rectangles. SpaceMonger 1.4 does this at its density cutoff; omitting the group instead
+    /// exposes the directory background and makes real data look like empty space.
+    private static func emitAggregate(
+        anchorNodeIndex: UInt32,
+        ownerIndex: UInt32,
+        rect: LayoutRect,
+        depth: Int,
+        ancestors: [(x: Float, y: Float, w: Float, h: Float)],
+        result: inout [TreemapRect]
+    ) {
+        // Half a logical point still occupies a physical pixel on the normal Retina path.
+        // Anything smaller is not a collectively visible region and can remain omitted.
+        guard rect.w >= 0.5, rect.h >= 0.5 else { return }
+        result.append(TreemapRect(
+            nodeIndex: anchorNodeIndex,
+            x: rect.x,
+            y: rect.y,
+            width: rect.w,
+            height: rect.h,
+            depth: depth,
+            cachedCoefs: computeCoefs(
+                rectX: rect.x,
+                rectY: rect.y,
+                rectW: rect.w,
+                rectH: rect.h,
+                ancestors: ancestors
+            ),
+            isBackground: false,
+            isAggregate: true,
+            aggregateOwnerIndex: ownerIndex
+        ))
+    }
+
+    private static func emitAggregateSegment(
+        anchorNodeIndex: UInt32,
+        ownerIndex: UInt32,
+        rowRect: LayoutRect,
+        horizontal: Bool,
+        startOffset: Float,
+        endOffset: Float,
+        depth: Int,
+        ancestors: [(x: Float, y: Float, w: Float, h: Float)],
+        result: inout [TreemapRect]
+    ) {
+        let rect = horizontal
+            ? LayoutRect(
+                x: rowRect.x,
+                y: startOffset,
+                w: rowRect.w,
+                h: endOffset - startOffset
+            )
+            : LayoutRect(
+                x: startOffset,
+                y: rowRect.y,
+                w: endOffset - startOffset,
+                h: rowRect.h
+            )
+        emitAggregate(
+            anchorNodeIndex: anchorNodeIndex,
+            ownerIndex: ownerIndex,
+            rect: rect,
+            depth: depth,
+            ancestors: ancestors,
+            result: &result
+        )
     }
 
     /// Recursively layout a single node's children within the given rect.
@@ -167,6 +255,7 @@ public struct SquarifyLayout {
         squarify(
             children: children,
             rect: rect,
+            ownerIndex: index,
             depth: depth,
             ancestors: &ancestors,
             nodes: nodes,
@@ -184,6 +273,7 @@ public struct SquarifyLayout {
     private static func squarify(
         children: [(index: UInt32, area: Float)],
         rect: LayoutRect,
+        ownerIndex: UInt32,
         depth: Int,
         ancestors: inout [(x: Float, y: Float, w: Float, h: Float)],
         nodes: [FileNode],
@@ -198,16 +288,27 @@ public struct SquarifyLayout {
         while startIndex < count {
             // Only one item left: give it the whole remaining rect.
             if startIndex == count - 1 {
-                layoutNode(
-                    index: children[startIndex].index,
-                    rect: rect,
-                    depth: depth + 1,
-                    ancestors: &ancestors,
-                    nodes: nodes,
-                    maxDepth: maxDepth,
-                    minPixelSize: minPixelSize,
-                    result: &result
-                )
+                if rect.w >= minPixelSize, rect.h >= minPixelSize {
+                    layoutNode(
+                        index: children[startIndex].index,
+                        rect: rect,
+                        depth: depth + 1,
+                        ancestors: &ancestors,
+                        nodes: nodes,
+                        maxDepth: maxDepth,
+                        minPixelSize: minPixelSize,
+                        result: &result
+                    )
+                } else {
+                    emitAggregate(
+                        anchorNodeIndex: children[startIndex].index,
+                        ownerIndex: ownerIndex,
+                        rect: rect,
+                        depth: depth + 1,
+                        ancestors: ancestors,
+                        result: &result
+                    )
+                }
                 return
             }
 
@@ -245,11 +346,15 @@ public struct SquarifyLayout {
                 rect: rect
             )
 
-            // Place each item in the row.
+            // Individually sub-threshold neighbours become one occupied union instead of
+            // disappearing and exposing the owner's structural background. Track the union
+            // as offsets so the multi-million-node path does not allocate per-row arrays.
             let rowLength = rowArea / rect.shortSide
             let horizontal = rect.w >= rect.h
             var offset: Float = horizontal ? rowRect.y : rowRect.x
             let rowEndEdge: Float = horizontal ? rowRect.y + rowRect.h : rowRect.x + rowRect.w
+            var aggregateStartOffset: Float?
+            var aggregateAnchor: UInt32?
 
             for i in startIndex..<rowEnd {
                 let isLastInRow = (i == rowEnd - 1)
@@ -267,18 +372,55 @@ public struct SquarifyLayout {
                     itemRect = LayoutRect(x: offset, y: rowRect.y, w: itemLength, h: rowLength)
                 }
 
-                layoutNode(
-                    index: children[i].index,
-                    rect: itemRect,
+                let individuallyVisible = itemRect.w >= minPixelSize
+                    && itemRect.h >= minPixelSize
+                if individuallyVisible {
+                    if let start = aggregateStartOffset,
+                       let anchor = aggregateAnchor {
+                        emitAggregateSegment(
+                            anchorNodeIndex: anchor,
+                            ownerIndex: ownerIndex,
+                            rowRect: rowRect,
+                            horizontal: horizontal,
+                            startOffset: start,
+                            endOffset: offset,
+                            depth: depth + 1,
+                            ancestors: ancestors,
+                            result: &result
+                        )
+                        aggregateStartOffset = nil
+                        aggregateAnchor = nil
+                    }
+                    layoutNode(
+                        index: children[i].index,
+                        rect: itemRect,
+                        depth: depth + 1,
+                        ancestors: &ancestors,
+                        nodes: nodes,
+                        maxDepth: maxDepth,
+                        minPixelSize: minPixelSize,
+                        result: &result
+                    )
+                } else if aggregateStartOffset == nil {
+                    aggregateStartOffset = offset
+                    aggregateAnchor = children[i].index
+                }
+                offset += itemLength
+            }
+
+            if let start = aggregateStartOffset,
+               let anchor = aggregateAnchor {
+                emitAggregateSegment(
+                    anchorNodeIndex: anchor,
+                    ownerIndex: ownerIndex,
+                    rowRect: rowRect,
+                    horizontal: horizontal,
+                    startOffset: start,
+                    endOffset: rowEndEdge,
                     depth: depth + 1,
-                    ancestors: &ancestors,
-                    nodes: nodes,
-                    maxDepth: maxDepth,
-                    minPixelSize: minPixelSize,
+                    ancestors: ancestors,
                     result: &result
                 )
-
-                offset += itemLength
             }
 
             // Continue with the remaining children in the leftover space.

@@ -1,7 +1,7 @@
 ## Context
 
-Folders has no cushion lighting, so hierarchy and extension colors must coexist through flat fills.
-The installed real-tree evidence rejected two one-shot constant choices:
+Folders has no cushion lighting, so its flat fills need one coherent colour semantic. The installed
+real-tree evidence rejected two attempts to blend hierarchy and extension colours into one surface:
 
 - 75% neutral leaf blend: extensions became grey.
 - 40% neutral leaf blend plus a 30% accent from a 65%-resolved descendant color: leaves recovered,
@@ -18,6 +18,20 @@ one was darker. Most selection changes adjusted how strongly file colours were p
 same neutral ramp. The deterministic test called these recipes distinct because their structs were
 not equal, but it never asserted distinct outer surfaces or distinct depth sequences.
 
+The replacement ten-option build then exposed two deeper shared defects. All ten still show broad
+same-colour upper hierarchy fields that abruptly become unrelated extension colours, and some
+data-heavy regions remain pale, nearly empty landscapes. A 100-by-100 fixture with half its bytes
+in one file and half in 2,000 tiny files produces exactly 5,000 square points of non-background
+output. The other 5,000 points are silently dropped by `minPixelSize` and reveal the parent panel.
+
+The complete SpaceMonger reference path matters here. Its defaults set both `file_color` and
+`folder_color` to the same eight-colour depth palette, so files do not switch to a second semantic
+at the bottom of the hierarchy. Separately, `FolderView.cpp::SizeFolders`
+recursively groups siblings and calls `AddDisplayFolder(..., index: -1, flags: 0)` for a group whose
+rectangle cannot be subdivided. The placeholder has no false file identity or label, but it paints
+the group's occupied area. DirWiz copied the folder threshold and recursive inset, not this aggregate
+coverage rule.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -25,7 +39,10 @@ not equal, but it never asserted distinct outer surfaces or distinct depth seque
 - Give Okan ten meaningfully distinct choices in the real native view.
 - Make each choice a production-renderer recipe, not an image filter or mockup.
 - Include light-to-dark, dark-to-light, temperature, and alternating hierarchy alternatives.
-- Keep extension colours byte-identical in every candidate.
+- Give every Folders card one coherent depth-colour semantic from root through leaf.
+- Keep collectively significant content visible when individual descendants fall below density.
+- Resolve anonymous aggregate interaction to its owning folder rather than a made-up file.
+- Keep raw extension colours and their meaning unchanged in Cushion.
 - Repaint cheaply without changing layout, navigation, selection, or hit testing.
 - Preserve Cushion byte-for-byte at the color-input boundary.
 
@@ -33,76 +50,90 @@ not equal, but it never asserted distinct outer surfaces or distinct depth seque
 
 - Pretend a final scheme has already been selected.
 - Make ten permanent product themes before the review decision.
-- Replace/reorder the extension palette.
-- Change card geometry, density, labels, overlays, or descendant selection.
+- Replace/reorder the extension palette used by Cushion and analysis surfaces.
+- Replace DirWiz's squarify algorithm with SpaceMonger's historical binary splitter.
+- Claim that Folders is an extension-colour view; its sidebar must state that map colours show depth.
 - Deploy the website or publish a release from this comparison build.
 
 ## Decisions
 
-### 1. Compare ten complete hierarchy palettes
+### 1. Compare ten complete map palettes
 
-Each recipe owns an explicit eight-colour folder table indexed by `depth & 7`. A table can brighten,
-darken, or alternate; it is not constrained to `darkBase + depth * step`. Values are applied by the
-existing Swift instance builder before the unchanged Metal shader.
+Each recipe owns an explicit eight-colour table indexed by `depth & 7`. The same table applies to
+folder backgrounds, direct files, collapsed folders, and density aggregates. Values are applied by
+the existing Swift instance builder before the unchanged Metal shader.
 
-| # | Name | Outermost surface | Depth behaviour |
+| # | Name | Source / character | Depth behaviour |
 |---|---|---|---|
-| 1 | Pearl | light cool neutral | steadily darkens inward |
-| 2 | Frost | medium ice blue | steadily lightens inward |
-| 3 | Silver | middle neutral | alternates around the midpoint |
-| 4 | Graphite | dark neutral | steadily lightens inward |
-| 5 | Midnight | dark navy | lightens through blue-grey |
-| 6 | Sand | light warm neutral | steadily darkens inward |
-| 7 | Clay | medium terracotta neutral | steadily lightens inward |
-| 8 | Sage | light muted green | steadily darkens inward |
-| 9 | Lavender | light muted violet | steadily darkens inward |
-| 10 | Ink & Paper | dark ink | deliberately alternates dark and light |
+| 1 | SpaceMonger | reference `BoxColors` base row | eight-hue source sequence |
+| 2 | Ocean | navy, blue, cyan, teal | cool high-contrast cycle |
+| 3 | Forest | pine, moss, leaf, earth | natural multi-hue cycle |
+| 4 | Sunset | plum, magenta, red, gold | warm chromatic progression |
+| 5 | Spectrum | cyan through violet and warm hues | full-spectrum cycle |
+| 6 | Candy | bright playful hues | strong adjacent contrast |
+| 7 | Earth | clay, sand, olive, teal, slate | muted multi-hue cycle |
+| 8 | Nord | restrained cool colours | muted cycle with red accent |
+| 9 | Monochrome | neutral | alternating light and dark |
+| 10 | Ink & Paper | tinted near-black and light paper | alternating light and dark |
 
-Every outer colour is pairwise distinct. Across the set, outer luminance spans light and dark; at
-least one palette brightens, one darkens, and one alternates. This makes each option a different
-hierarchy treatment rather than a different amount of the same wash.
+Every outer colour is pairwise distinct and every adjacent pair within a recipe has material RGB
+distance. This makes each option a complete map treatment rather than a different amount of one
+wash.
 
-### 2. File colours are not a theme variable
+### 2. One color semantic spans the whole Folders tree
 
-Direct files and collapsed content-bearing folders keep the raw extension palette in every scheme.
-Expanded folder panels ignore descendant representative colour and use only the selected structural
-depth table. This removes both mechanisms that produced the reported grey wash and coloured veil.
-The comparison now asks one question only: which folder hierarchy best frames the unchanged data
-colours?
+SpaceMonger's defaults select the depth table for both files and folders. Folders now does the same:
+every visible card at depth `d` uses the selected recipe's `d & 7` colour. Extension identity remains
+available in Cushions, the Extensions analysis, Search, and the File Types breakdown. It is not mixed
+into Folders, because that creates the rejected abrupt transition from broad hierarchy fields to
+red/blue leaves.
 
-An absent preference resolves to `1. Pearl`, whose light outer surface also directly falsifies the
-reported “every option starts dark” failure.
+An absent preference resolves to `1. SpaceMonger`, which is traceable to the reference source rather
+than another invented neutral ramp.
 
 ### 3. Use one persisted selection and a temporary native picker
 
 `AppState.foldersColorScheme` persists the integer in the injected defaults store and is not reset by
-scans. The picker appears only while Folders is selected and names options `1. Pearl` through
+scans. The picker appears only while Folders is selected and names options `1. SpaceMonger` through
 `10. Ink & Paper`, making feedback unambiguous. It is a review affordance; after Okan selects a
 winner, a follow-up decides whether to remove the picker or retain a smaller user-facing set.
 
 ### 4. Reuse caches; repaint instances only
 
-All candidates use the same extension palette, overlay results, layout, and CardNesting output.
-Changing scheme marks only the instance buffer dirty. It does not bump color generation or alter
-the resolved-colour cache. The existing descendant representative cache remains available for
-collapsed folders, which still stand in for their hidden content.
+All candidates use the same layout and CardNesting output. Changing scheme marks only the instance
+buffer dirty. It does not bump color generation or alter Cushion's resolved-colour cache. Folders no
+longer walks descendant extensions to invent a panel accent, which also removes that rebuild cost.
 
 ### 5. Keep Cushion and website scope explicit
 
-Cushion ignores `FoldersColorScheme` and always receives the raw resolved palette. The File Types
-legend is raw in both styles because file colours are no longer transformed. The local website demo
-also keeps raw file colours while review is open; it is not deployed and will be aligned to the
-chosen final folder palette after the native decision.
+Cushion ignores `FoldersColorScheme` and always receives the raw resolved palette. In Folders, the
+sidebar shows the selected eight-colour depth key above the File Types breakdown and explicitly says
+the map colours show depth. The file rows keep raw category swatches for filtering; they are no longer
+presented as the Folders map key. The local website is not deployed during native review.
+
+### 6. Preserve occupied area at the density cutoff
+
+`SquarifyLayout` emits an aggregate rectangle for each contiguous sibling region whose individual
+items fall below `minPixelSize` but whose union is still visible. The rectangle carries one real
+child as a unique bookkeeping anchor and the actual owning folder for interaction. It is not a
+fabricated filesystem node.
+
+Folders paints that aggregate with the selected colour for its depth, so occupied data cannot
+masquerade as a parent-depth empty field. Aggregate rectangles receive no filename label, and a hit
+resolves to the owning folder, matching SpaceMonger's anonymous-placeholder semantics. Cushion does
+not draw these Folders aggregates and keeps its existing rendered rectangles and color inputs.
 
 ## Risks / Trade-offs
 
 - Ten choices are too many for a final product control. This is intentional evaluation scaffolding.
 - Recipe changes are cheap but still rebuild the visible instance buffer; tests pin that they do not
   invalidate layout or Cushion's resolved-color cache.
-- Light folder panels make dark header chips and vivid files carry more contrast than before; the
-  real-tree gate decides whether that is desirable rather than treating darkness as an invariant.
-- A single screenshot may favor one volume's extension distribution. The picker persists so the
-  same candidates can be checked on another volume before finalization.
+- Very light reference colours rely on the existing white text shadow and dark folder chips; the
+  real-tree gate decides whether a darker final recipe is preferable.
+- An aggregate intentionally trades per-file identity for honest occupied area below the legibility
+  threshold. It is non-selectable as a fake file; zooming its owner reveals the underlying detail.
+- A single screenshot may favor one volume's nesting shape. The picker persists so the same
+  candidates can be checked on another volume before finalization.
 
 ## Open Questions
 

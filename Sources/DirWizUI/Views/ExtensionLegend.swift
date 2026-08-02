@@ -1,11 +1,12 @@
 import SwiftUI
 import DirWizCore
 
-/// Right sidebar showing top extensions by size with WinDirStat-style palette colors.
+/// Right sidebar showing the active map key and top extensions by size.
 ///
-/// This is the treemap's color key, and it is always on screen - so it is also the most
-/// natural place to say "show me these files". Rows share `ExtensionLegendRow` with the
-/// Extensions tab and perform the same drill-down, rather than being an inert twin of it.
+/// Cushion uses extension colours, so its file rows are also the map key. Folders follows
+/// SpaceMonger's depth-colour model; it shows that key explicitly, then keeps the file rows
+/// as a useful size breakdown and drill-down surface without pretending their swatches map
+/// to the cards. Rows share `ExtensionLegendRow` with the Extensions tab.
 public struct ExtensionLegend: View {
     let palette: ExtensionPalette
     let totalSize: UInt64
@@ -19,7 +20,7 @@ public struct ExtensionLegend: View {
         palette: ExtensionPalette,
         totalSize: UInt64,
         renderStyle: TreemapRenderStyle = .cushion,
-        foldersColorScheme: FoldersColorScheme = .pearl,
+        foldersColorScheme: FoldersColorScheme = .spaceMonger,
         onSelect: ((ExtensionRowModel) -> Void)? = nil,
         onSeeAll: (() -> Void)? = nil
     ) {
@@ -47,12 +48,64 @@ public struct ExtensionLegend: View {
         }
     }
 
+    private var folderDepthKey: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Folder Depth")
+                .font(.headline)
+
+            HStack(spacing: 3) {
+                ForEach(0..<8, id: \.self) { depth in
+                    let color = CardGeometry.containerFill(
+                        depth: depth,
+                        scheme: foldersColorScheme
+                    )
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(
+                            red: Double(color.x),
+                            green: Double(color.y),
+                            blue: Double(color.z)
+                        ))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 10)
+
+            HStack {
+                Text("outer")
+                Spacer()
+                Text("inner")
+            }
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+
+            Text(foldersColorScheme.displayName)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if renderStyle == .cards {
+                folderDepthKey
+                Divider()
+            }
+
             Text("File Types")
                 .font(.headline)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, renderStyle == .cards ? 2 : 8)
+
+            if renderStyle == .cards {
+                Text("Size breakdown; map colors show depth")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 7)
+            }
 
             Divider()
 

@@ -134,10 +134,40 @@ struct CardStyleTests {
         #expect(grid.hitTest(point: (x: 30, y: 30), rects: rects) == 1)
     }
 
-    /// Every review candidate uses the actual 17-color production palette, not hand-picked
-    /// moderate samples. File colour is data, so the hierarchy picker must not transform it.
-    @Test("All ten native schemes keep production file colors byte-identical")
-    func productionFileColorsRemainRaw() {
+    @Test("Density aggregates are anonymous Folders content owned by their parent")
+    func aggregatePresentationContract() {
+        let aggregate = TreemapRect(
+            nodeIndex: 42,
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 100,
+            depth: 3,
+            isAggregate: true,
+            aggregateOwnerIndex: 7
+        )
+
+        #expect(aggregate.interactionNodeIndex == 7,
+            "the bookkeeping anchor must not become a fabricated hit identity")
+        #expect(!aggregate.qualifiesForLeafLabel,
+            "the representative child's name must not label a whole sibling group")
+        #expect(aggregate.isRenderable(in: .cards))
+        #expect(!aggregate.isRenderable(in: .cushion),
+            "Folders density repair must not alter Cushion's rendered rect set")
+
+        var ordinary = aggregate
+        ordinary.isAggregate = false
+        ordinary.aggregateOwnerIndex = nil
+        #expect(ordinary.interactionNodeIndex == 42)
+        #expect(ordinary.qualifiesForLeafLabel)
+        #expect(ordinary.isRenderable(in: .cushion))
+    }
+
+    /// The rejected builds mixed two semantic systems: neutral depth panels followed by raw
+    /// extension leaves. SpaceMonger does not; both its default file and folder settings use
+    /// the same depth table. Every native candidate must therefore own the complete map.
+    @Test("All ten native schemes color every Folders card by depth")
+    func foldersUsesOneColorSemantic() {
         var palette = ExtensionPalette()
         let stats = (0..<17).map { index in
             FileTypeStat(
@@ -154,19 +184,22 @@ struct CardStyleTests {
         let productionColors = stats.map { palette.color(forHash: $0.extensionHash) }
         for scheme in FoldersColorScheme.allCases {
             for depth in 0..<8 {
+                let depthColor = CardGeometry.containerFill(depth: depth, scheme: scheme)
                 for base in productionColors {
                     #expect(CardGeometry.leafFill(
-                        base, containerDepth: depth, scheme: scheme
-                    ) == base, "\(scheme.reviewLabel) altered a direct file at depth \(depth)")
+                        base, depth: depth, scheme: scheme
+                    ) == depthColor,
+                        "\(scheme.reviewLabel) left a file on the unrelated extension palette")
                     #expect(CardGeometry.collapsedFolderFill(
-                        base, containerDepth: depth, scheme: scheme
-                    ) == base, "\(scheme.reviewLabel) altered collapsed content at depth \(depth)")
+                        base, depth: depth, scheme: scheme
+                    ) == depthColor,
+                        "\(scheme.reviewLabel) changed semantics at the collapse boundary")
                 }
             }
             for base in productionColors {
                 #expect(CardGeometry.paletteColor(
                     base, for: .cards, foldersScheme: scheme
-                ) == base, "the Folders legend must stay raw")
+                ) == base, "File Types remains a data list below the separate depth key")
                 #expect(CardGeometry.paletteColor(
                     base, for: .cushion, foldersScheme: scheme
                 ) == base, "the Folders comparison must never leak into Cushion")
@@ -189,6 +222,12 @@ struct CardStyleTests {
             #expect(scheme.recipe.chromeLevels.count == 8,
                     "\(scheme.reviewLabel) must own every depth colour")
             for i in scheme.recipe.chromeLevels.indices {
+                if i + 1 < scheme.recipe.chromeLevels.count {
+                    #expect(distance(
+                        scheme.recipe.chromeLevels[i], scheme.recipe.chromeLevels[i + 1]
+                    ) > 0.12,
+                        "\(scheme.reviewLabel) depths \(i) and \(i + 1) read as one field")
+                }
                 for j in scheme.recipe.chromeLevels.indices where j > i {
                     #expect(scheme.recipe.chromeLevels[i] != scheme.recipe.chromeLevels[j],
                             "\(scheme.reviewLabel) repeats depth levels \(i) and \(j)")
@@ -209,19 +248,19 @@ struct CardStyleTests {
         let outerLuminances = schemes.map { mean($0.recipe.chromeLevels[0]) }
         #expect((outerLuminances.max() ?? 0) - (outerLuminances.min() ?? 0) > 0.5,
                 "the options must span genuinely light and dark outer surfaces")
-        #expect(mean(FoldersColorScheme.pearl.recipe.chromeLevels[0])
-                > mean(FoldersColorScheme.pearl.recipe.chromeLevels[7]),
-                "Pearl is the light-to-dark control")
-        #expect(mean(FoldersColorScheme.frost.recipe.chromeLevels[0])
-                < mean(FoldersColorScheme.frost.recipe.chromeLevels[7]),
-                "Frost is a dark-to-light control")
-        let silver = FoldersColorScheme.silver.recipe.chromeLevels.map(mean)
-        #expect(silver[1] > silver[0] && silver[2] < silver[1] && silver[3] > silver[2],
-                "Silver must alternate instead of following one linear progression")
+        #expect(FoldersColorScheme.spaceMonger.recipe.chromeLevels == [
+            SIMD3(1.00, 0.50, 0.50), SIMD3(1.00, 0.75, 0.50),
+            SIMD3(1.00, 1.00, 0.00), SIMD3(0.50, 1.00, 0.50),
+            SIMD3(0.50, 1.00, 1.00), SIMD3(0.75, 0.75, 1.00),
+            SIMD3(0.75, 0.75, 0.75), SIMD3(1.00, 0.50, 1.00),
+        ], "option 1 must be traceable to SpaceMonger's BoxColors base row")
+        let mono = FoldersColorScheme.monochrome.recipe.chromeLevels.map(mean)
+        #expect(mono[1] > mono[0] && mono[2] < mono[1] && mono[3] > mono[2],
+                "Monochrome must still distinguish adjacent depth layers")
     }
 
-    @Test("Expanded folders stay structural while collapsed folders keep raw content color")
-    func folderRolesDoNotCreateAContentVeil() {
+    @Test("Expanded, collapsed, aggregate, and file roles share the selected depth color")
+    func folderRolesDoNotChangeColorSemantics() {
         let dirBaseA = SIMD4<Float>(0.80, 0.30, 0.38, 1)
         let dirBaseB = SIMD4<Float>(0.28, 0.40, 0.88, 1)
         for scheme in FoldersColorScheme.allCases {
@@ -229,19 +268,25 @@ struct CardStyleTests {
                 let chrome = CardGeometry.containerFill(depth: depth, scheme: scheme)
                 #expect(CardGeometry.folderContainerFill(
                     representativeColor: dirBaseA, depth: depth, scheme: scheme
-                ) == chrome, "expanded red content tinted \(scheme.reviewLabel)")
+                ) == chrome)
                 #expect(CardGeometry.folderContainerFill(
                     representativeColor: dirBaseB, depth: depth, scheme: scheme
-                ) == chrome, "expanded blue content tinted \(scheme.reviewLabel)")
+                ) == chrome)
                 #expect(CardGeometry.folderContainerFill(
                     representativeColor: nil, depth: depth, scheme: scheme
                 ) == chrome, "empty folders must use structural colour")
                 #expect(CardGeometry.collapsedFolderFill(
-                    dirBaseA, containerDepth: depth, scheme: scheme
-                ) == dirBaseA)
+                    dirBaseA, depth: depth, scheme: scheme
+                ) == chrome)
                 #expect(CardGeometry.collapsedFolderFill(
-                    dirBaseB, containerDepth: depth, scheme: scheme
-                ) == dirBaseB)
+                    dirBaseB, depth: depth, scheme: scheme
+                ) == chrome)
+                #expect(CardGeometry.leafFill(
+                    dirBaseA, depth: depth, scheme: scheme
+                ) == chrome)
+                #expect(CardGeometry.leafFill(
+                    dirBaseB, depth: depth, scheme: scheme
+                ) == chrome)
             }
         }
     }
@@ -259,16 +304,38 @@ struct CardStyleTests {
         }
     }
 
-    @Test("File tone is independent of surrounding folder depth")
-    func fileToneIgnoresContainerDepth() {
-        let base = SIMD4<Float>(0.25, 0.60, 0.95, 1)
+    @Test("Folders file tone follows depth and ignores extension identity")
+    func fileToneFollowsDepth() {
+        let blue = SIMD4<Float>(0.25, 0.60, 0.95, 1)
+        let red = SIMD4<Float>(0.95, 0.25, 0.30, 1)
         for scheme in FoldersColorScheme.allCases {
             for depth in 0..<8 {
+                let expected = CardGeometry.containerFill(depth: depth, scheme: scheme)
                 #expect(CardGeometry.leafFill(
-                    base, containerDepth: depth, scheme: scheme
-                ) == base)
+                    blue, depth: depth, scheme: scheme
+                ) == expected)
+                #expect(CardGeometry.leafFill(
+                    red, depth: depth, scheme: scheme
+                ) == expected)
             }
         }
+    }
+
+    @Test("Folders depth colors retain recency and temporal overlays")
+    func foldersDepthColorRetainsOverlays() {
+        let base = CardGeometry.containerFill(depth: 2, scheme: .spaceMonger)
+        let resolver = TreemapColorResolver(
+            recencyFactors: [0.35],
+            isRecencyOverlayEnabled: true,
+            temporalDiffKinds: [TemporalDiffKind.grown.rawValue],
+            temporalDiffStrengths: [1.0],
+            isTemporalDiffEnabled: true
+        )
+        let overlaid = resolver.applyingOverlays(to: base, nodeIndex: 0)
+
+        #expect(overlaid.w == 0.35)
+        #expect(overlaid.x != base.x || overlaid.y != base.y || overlaid.z != base.z,
+            "switching Folders to a depth palette must not disable the diff overlay")
     }
 
     /// The bug this pins shipped: `SpatialGrid` was built from raw `SquarifyLayout` output
@@ -366,21 +433,22 @@ struct CardStyleTests {
 
         let state = AppState(defaults: defaults)
         #expect(state.treemapRenderStyle == .cushion, "cushion is the default")
-        #expect(state.foldersColorScheme == .pearl, "review starts with the light outer palette")
+        #expect(state.foldersColorScheme == .spaceMonger,
+            "review starts with the source-traceable reference palette")
 
         state.treemapRenderStyle = .cards
-        state.foldersColorScheme = .sage
+        state.foldersColorScheme = .forest
         state.resetForNewScan()
         #expect(state.treemapRenderStyle == .cards)
-        #expect(state.foldersColorScheme == .sage)
+        #expect(state.foldersColorScheme == .forest)
 
         // A relaunch reading the same store sees the choice; `.standard` is untouched.
         #expect(AppState(defaults: defaults).treemapRenderStyle == .cards)
-        #expect(AppState(defaults: defaults).foldersColorScheme == .sage)
+        #expect(AppState(defaults: defaults).foldersColorScheme == .forest)
         #expect(defaults.string(forKey: AppState.renderStyleKey) == "cards",
                 "the choice is written to the injected store, not to .standard")
         #expect(defaults.integer(forKey: AppState.foldersColorSchemeKey)
-                == FoldersColorScheme.sage.rawValue)
+                == FoldersColorScheme.forest.rawValue)
     }
 }
 
@@ -775,31 +843,26 @@ struct SubdivideGateTests {
         #expect(child.y > mid.y, "and reserves its header strip")
     }
 
-    /// The default is intentionally light now: the first comparison's invariant that every
-    /// hierarchy must start mid-dark was the bug this review re-opened.
-    @Test("Default Pearl fill varies by depth and stays quietly neutral")
+    /// Option 1 is no longer an invented neutral ramp. It is the reference sequence from
+    /// SpaceMonger, whose default file and folder settings both select `BoxColors` by depth.
+    @Test("Default SpaceMonger fill has a distinct color at every adjacent depth")
     func containerFillByDepth() {
         let a = CardGeometry.containerFill(depth: 0)
         let b = CardGeometry.containerFill(depth: 3)
         #expect(a != b, "nesting levels must be distinguishable")
 
-        // ADJACENT levels are what a stacked folder view actually shows, and comparing
-        // depth 0 against depth 3 passed happily while neighbours were indistinguishable.
-        // These are sRGB, so pin the step in 8-bit terms: below ~6/255 a large flat panel
-        // reads as one slab, especially under the shader's own ~18% card gradient.
+        // Adjacent levels are what a stacked folder view actually shows. Pin full RGB
+        // distance rather than one-channel drift so multi-hue schemes are measured honestly.
         for depth in 0..<7 {
             let here = CardGeometry.containerFill(depth: depth)
             let next = CardGeometry.containerFill(depth: depth + 1)
-            let step = abs(next.x - here.x) * 255
-            #expect(step >= 6,
-                "depth \(depth) -> \(depth + 1) differs by only \(step)/255 - too close to read")
+            let delta = next - here
+            let distance = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z)
+            #expect(distance > 0.12,
+                "depth \(depth) -> \(depth + 1) is too close to read")
         }
-        for depth in 0..<16 {
-            let c = CardGeometry.containerFill(depth: depth)
-            // neutral: the three channels stay close together, so it never reads as a hue
-            let spread = max(c.x, max(c.y, c.z)) - min(c.x, min(c.y, c.z))
-            #expect(spread < 0.12, "container chrome must not compete with file colour")
-            #expect(c.x > 0.40 && c.x < 0.82, "Pearl must stay a light-to-middle panel")
-        }
+        #expect(CardGeometry.containerFill(depth: 0)
+                == CardGeometry.containerFill(depth: 8),
+            "the eight-color source palette cycles by depth")
     }
 }

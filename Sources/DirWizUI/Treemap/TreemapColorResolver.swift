@@ -79,41 +79,6 @@ struct TreemapColorResolver {
         return applyingOverlays(to: baseColor, nodeIndex: nodeIdx)
     }
 
-    /// Folders-only representative colour for a directory's full descendant shape.
-    ///
-    /// The ordinary resolver intentionally keeps Cushion's historical direct-child
-    /// directory colouring unchanged. Folders needs one additional signal: a directory
-    /// whose immediate children are all directories must not remain grey until its files
-    /// appear several levels later. Follow the largest-content branch until a file-bearing
-    /// directory is reached, then blend that extension 65% into the directory base before
-    /// applying the directory's own overlays. The downstream panel/collapse transforms are
-    /// specified in terms of that 65% representative signal.
-    func resolveFoldersRepresentativeColor(
-        for directoryIndex: UInt32,
-        depth: Int,
-        nodes: [FileNode],
-        scratchSizeByExt: inout [UInt32: UInt64]
-    ) -> SIMD4<Float>? {
-        guard let hash = representativeDescendantExtensionHash(
-            in: directoryIndex,
-            nodes: nodes,
-            scratchSizeByExt: &scratchSizeByExt
-        ) else { return nil }
-        let directoryRGB = directoryBaseColor(depth: depth)
-        let directoryColor = SIMD4<Float>(
-            directoryRGB.x, directoryRGB.y, directoryRGB.z, 1.0
-        )
-        let representativeColor = blend(
-            directoryColor,
-            palette.color(forHash: hash),
-            factor: 0.65
-        )
-        return applyingOverlays(
-            to: representativeColor,
-            nodeIndex: Int(directoryIndex)
-        )
-    }
-
     // MARK: - Internal Helpers
 
     /// Depth-based directory base color using subtle hue shifts.
@@ -173,85 +138,11 @@ struct TreemapColorResolver {
         return scratchSizeByExt.max(by: { $0.value < $1.value })?.key
     }
 
-    /// Representative extension reached through the largest-content descendant branch.
-    /// Direct files at each level are aggregated by extension and compared with the largest
-    /// child directory. This is bounded by tree depth rather than subtree size, so it avoids
-    /// allocating per-directory descendant maps on multi-million-node scans.
-    func representativeDescendantExtensionHash(
-        in directoryIndex: UInt32,
-        nodes: [FileNode],
-        scratchSizeByExt: inout [UInt32: UInt64]
-    ) -> UInt32? {
-        var current = directoryIndex
-        var fallbackDirectHash: UInt32?
-        var remainingDepthGuard = nodes.count
-
-        while remainingDepthGuard > 0 {
-            remainingDepthGuard -= 1
-            let i = Int(current)
-            guard i < nodes.count else { break }
-            let directory = nodes[i]
-            guard directory.isDirectory,
-                  directory.firstChildIndex != FileNode.invalid else { break }
-
-            let start = Int(directory.firstChildIndex)
-            let end = min(start + Int(directory.childCount), nodes.count)
-            guard start < end else { break }
-
-            scratchSizeByExt.removeAll(keepingCapacity: true)
-            var largestDirectory: (index: UInt32, bytes: UInt64)?
-            for childIndex in start..<end {
-                let child = nodes[childIndex]
-                if child.isDirectory {
-                    let candidate = (index: UInt32(childIndex), bytes: child.displaySize)
-                    if let best = largestDirectory {
-                        if candidate.bytes > best.bytes
-                            || (candidate.bytes == best.bytes && candidate.index < best.index) {
-                            largestDirectory = candidate
-                        }
-                    } else {
-                        largestDirectory = candidate
-                    }
-                } else {
-                    scratchSizeByExt[child.extensionHash, default: 0] += child.displaySize
-                }
-            }
-
-            let direct = scratchSizeByExt.reduce(
-                into: Optional<(hash: UInt32, bytes: UInt64)>.none
-            ) { best, entry in
-                if let currentBest = best {
-                    if entry.value > currentBest.bytes
-                        || (entry.value == currentBest.bytes && entry.key < currentBest.hash) {
-                        best = (entry.key, entry.value)
-                    }
-                } else {
-                    best = (entry.key, entry.value)
-                }
-            }
-            if fallbackDirectHash == nil {
-                fallbackDirectHash = direct?.hash
-            }
-
-            if let direct {
-                if let largestDirectory {
-                    if direct.bytes >= largestDirectory.bytes {
-                        return direct.hash
-                    }
-                } else {
-                    return direct.hash
-                }
-            }
-            guard let next = largestDirectory else {
-                return direct?.hash ?? fallbackDirectHash
-            }
-            current = next.index
-        }
-
-        return fallbackDirectHash
-    }
-
-    private func applyingOverlays(
+    /// Apply recency alpha and temporal-diff tint after choosing a style's base colour.
+    /// Folders uses this on its depth palette; Cushion reaches the same path through
+    /// `resolveColor`. Keeping it style-neutral prevents a palette switch from disabling
+    /// analysis overlays.
+    func applyingOverlays(
         to color: SIMD4<Float>,
         nodeIndex: Int
     ) -> SIMD4<Float> {
