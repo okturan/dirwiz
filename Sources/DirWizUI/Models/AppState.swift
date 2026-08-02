@@ -93,6 +93,10 @@ public final class AppState {
     /// Available volumes.
     public var availableVolumes: [VolumeInfo] = []
 
+    /// Invalidates a deferred availability recovery when a newer mount-list fact arrives. Recovery
+    /// waits only for an already-committing living-view splice, which cannot safely be cancelled.
+    @ObservationIgnored var volumeAvailabilityGeneration: UInt64 = 0
+
     public var isCombinedVolumeSelection: Bool {
         selectedMountTraversalScope == .combinedVolumes
     }

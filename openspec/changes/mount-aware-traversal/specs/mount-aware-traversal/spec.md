@@ -138,3 +138,55 @@ subtree updates.
 - **WHEN** a foreign-device occurrence is rejected
 - **THEN** its inode is not marked visited merely because of that rejection
 - **AND** a separately encountered eligible occurrence may still be traversed
+
+### Requirement: Unavailable selections recover to a truthful individual tree
+
+The application SHALL reconcile volume availability, selected scope, displayed-tree ownership, and
+scan work as one state transition when a selected target is no longer available. It SHALL prefer the
+boot volume as the individual fallback and SHALL NOT relabel an unavailable or combined tree as that
+fallback.
+
+#### Scenario: The remembered volume is absent at launch
+
+- **WHEN** initial volume discovery does not contain the persisted last-scanned individual path
+- **THEN** the boot volume is selected in individual-volume scope when it is available
+- **AND** a valid exact-scope cache for that fallback is displayed immediately and refreshed
+- **AND** if no valid fallback cache exists, an individual scan starts automatically instead of
+  leaving an idle empty graph
+
+#### Scenario: The selected individual volume is disconnected
+
+- **WHEN** a mount refresh no longer contains the selected individual volume
+- **THEN** active scan work owned by the unavailable target is superseded
+- **AND** an already-committing non-cancellable living splice settles before selection and displayed
+  ownership switch together
+- **AND** the app deterministically selects the boot volume, or the lexicographically first
+  normalized available path when the boot volume is absent
+- **AND** recovery uses only that fallback's individual cache or a new individual scan
+
+#### Scenario: The combined choice disappears
+
+- **WHEN** the explicit combined view is selected
+- **AND** fewer than two eligible local volumes remain
+- **THEN** the remaining fallback is selected as an individual volume
+- **AND** the old combined tree is not treated as the remaining volume's tree
+- **AND** the fallback cache-or-scan recovery behavior is the same as for a disconnected individual
+
+#### Scenario: An unrelated volume changes while the selection remains valid
+
+- **WHEN** mount availability changes but the selected individual volume is still present
+- **THEN** its selection, scope, displayed tree, and active scan remain unchanged
+- **AND** the app does not automatically rescan merely because another drive appeared or disappeared
+
+#### Scenario: No eligible local volume exists
+
+- **WHEN** availability reconciliation yields no individual volume
+- **THEN** the selected target is cleared
+- **AND** no recovery scan is started for an invented or unavailable path
+
+#### Scenario: Fallback persistence waits for completion
+
+- **WHEN** recovery begins for an available fallback volume
+- **THEN** the previously persisted last-scanned path is not replaced merely by selecting or starting
+  the fallback
+- **AND** it changes only after a fallback scan completes successfully

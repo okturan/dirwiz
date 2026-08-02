@@ -76,3 +76,39 @@ and Full Disk Access messaging remain unchanged.
 The repository instruction will require a local app build/install after user-facing changes so UI
 verification exercises current source. That local app is not uploaded, attached to a GitHub release,
 or represented as the public release; publishing remains a separately authorized release workflow.
+
+### 8. Availability recovery is cache-first and transactional
+
+The current mount-refresh code proves the disconnect bug directly: it can replace
+`selectedVolume` after an unmount, but it never replaces `fileTree` or starts a scan for the new
+owner. The launch path has the complementary gap: a remembered path that no longer exists returns
+before selecting or restoring any fallback. Those two partial transitions produce a selected row
+with either no graph or a graph owned by a different path/scope.
+
+Availability reconciliation moves into `AppState` so selection, scope, active work, and displayed
+tree are decided together. A still-mounted individual selection is stable across unrelated mount
+changes. Recovery is admitted only when a selected individual disappears, the explicit combined
+choice becomes impossible, or initial volume discovery proves that the remembered individual path
+is unavailable.
+
+The fallback is deterministic: prefer the boot root (`/`), otherwise choose the available local
+volume with the lexicographically first normalized path. Recovery always chooses
+`selectedVolume` scope; it never silently constructs a smaller combined set.
+
+For the fallback target, an exact `(path, selected-volume scope)` cache is published immediately and
+the normal warm-refresh flow runs behind it. If no valid cache exists, the normal individual scan is
+started automatically. That cold path may briefly have no graph, but it is visibly progressing and
+cannot become the idle blank state reported here. A tree from the missing volume or old combined
+membership is never relabelled as the fallback. Persisted last-scan ownership changes only after the
+fallback scan completes successfully, so cancellation cannot claim that an unfinished tree is
+durable.
+
+An active cold/warm scan is superseded by the fallback flow. A living-view splice is different: its
+scanner is intentionally unregistered and may already be committing into the displayed tree, so it
+cannot be cancelled safely. Availability is recorded immediately, but selection and tree ownership
+remain paired until that bounded splice settles; the newest availability generation then performs
+recovery. This prevents the old splice's completion invalidation from touching a newly published
+fallback tree.
+
+With no eligible local volume there is no truthful fallback: selection becomes empty and no scan is
+started. On macOS the boot root should normally make this defensive branch unreachable.

@@ -73,6 +73,18 @@ struct LaunchRestoreTests {
         return tree
     }
 
+    @MainActor
+    private func stateWithEmptyJournalReplay(defaults: UserDefaults) -> AppState {
+        let replay = JournalReplay(
+            outcome: .changes([]),
+            newEventId: FSEventsJournal.currentEventId()
+        )
+        return AppState(
+            defaults: defaults,
+            warmStartJournalReplay: { _, _ in replay }
+        )
+    }
+
     // MARK: - restoreOnLaunch gates
 
     @Test("No lastScannedVolumePath in defaults: restoreOnLaunch is a no-op")
@@ -411,6 +423,250 @@ struct LaunchRestoreTests {
         #expect(state.fileTree === tree, "Cancelling should leave the stale tree in place, unswapped")
         #expect(state.selectedNodeIndex == fileIndex, "Cancelling should not disturb the stale view's selection")
         #expect(state.staleBadgeText?.contains("refresh cancelled") == true)
+    }
+
+    // MARK: - Unavailable-volume recovery
+
+    @Test("Initial volume discovery recovers a remembered missing drive from the fallback cache")
+    func rememberedMissingVolumeRecoversCachedFallback() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.rememberedMissingVolumeRecoversCachedFallbackBody()
+        }
+    }
+
+    @MainActor
+    private func rememberedMissingVolumeRecoversCachedFallbackBody() async throws {
+        let (fallbackPath, fallbackCleanup) = try createTempTree(Self.layout)
+        defer { fallbackCleanup() }
+        let fallbackTree = await scanFixture(at: fallbackPath)
+        try TreeCache.save(tree: fallbackTree, lastEventId: FSEventsJournal.currentEventId())
+
+        let missingPath = "/Volumes/Gone-\(UUID())"
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        defaults.set(missingPath, forKey: Self.lastScannedVolumePathKey)
+
+        let state = stateWithEmptyJournalReplay(defaults: defaults)
+        state.restoreOnLaunch()
+        #expect(state.fileTree == nil, "The launch path alone cannot see an available fallback")
+
+        state.reconcileAvailableVolumes([
+            VolumeInfo(url: URL(fileURLWithPath: fallbackPath, isDirectory: true))
+        ])
+
+        #expect(state.selectedVolume?.path == fallbackPath)
+        #expect(state.selectedMountTraversalScope == .selectedVolume)
+        #expect(state.fileTree?.rootPath == fallbackPath)
+        #expect(state.staleViewAsOf != nil)
+        #expect(state.scanProgress.isScanning)
+        #expect(defaults.string(forKey: Self.lastScannedVolumePathKey) == missingPath)
+
+        await waitUntil { !state.scanProgress.isScanning && state.staleViewAsOf == nil }
+
+        #expect(state.fileTree?.rootPath == fallbackPath)
+        #expect(defaults.string(forKey: Self.lastScannedVolumePathKey) == fallbackPath)
+    }
+
+    @Test("Hot-unplug of the selected individual volume swaps to the fallback's own cache")
+    func selectedVolumeHotUnplugRecoversCachedFallback() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.selectedVolumeHotUnplugRecoversCachedFallbackBody()
+        }
+    }
+
+    @MainActor
+    private func selectedVolumeHotUnplugRecoversCachedFallbackBody() async throws {
+        let (externalPath, externalCleanup) = try createTempTree(["external.txt": 40])
+        defer { externalCleanup() }
+        let (fallbackPath, fallbackCleanup) = try createTempTree(Self.layout)
+        defer { fallbackCleanup() }
+        let externalTree = await scanFixture(at: externalPath)
+        let fallbackTree = await scanFixture(at: fallbackPath)
+        try TreeCache.save(tree: fallbackTree, lastEventId: FSEventsJournal.currentEventId())
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        defaults.set(externalPath, forKey: Self.lastScannedVolumePathKey)
+        let state = stateWithEmptyJournalReplay(defaults: defaults)
+        state.fileTree = externalTree
+        state.selectVolume(URL(fileURLWithPath: externalPath, isDirectory: true))
+        let unavailableScanner = FileScanner()
+        state.scanSession.markStarted(scanner: unavailableScanner)
+        state.scanProgress.isScanning = true
+        let unavailableToken = state.scanToken
+
+        state.reconcileAvailableVolumes([
+            VolumeInfo(url: URL(fileURLWithPath: fallbackPath, isDirectory: true))
+        ])
+
+        #expect(state.selectedVolume?.path == fallbackPath)
+        #expect(state.scanToken != unavailableToken)
+        #expect(state.scanSession.activeScanner == nil, "Fallback refresh should own the next scanner")
+        #expect(state.fileTree !== externalTree)
+        #expect(state.fileTree?.rootPath == fallbackPath)
+        #expect(state.fileTree?.mountTraversalScope == .selectedVolume)
+        #expect(defaults.string(forKey: Self.lastScannedVolumePathKey) == externalPath)
+
+        await waitUntil { !state.scanProgress.isScanning && state.staleViewAsOf == nil }
+        #expect(defaults.string(forKey: Self.lastScannedVolumePathKey) == fallbackPath)
+    }
+
+    @Test("Hot-unplug waits for a committing living splice before switching tree ownership")
+    func hotUnplugDefersBehindLivingApply() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.hotUnplugDefersBehindLivingApplyBody()
+        }
+    }
+
+    @MainActor
+    private func hotUnplugDefersBehindLivingApplyBody() async throws {
+        let (externalPath, externalCleanup) = try createTempTree(["external.txt": 40])
+        defer { externalCleanup() }
+        let (fallbackPath, fallbackCleanup) = try createTempTree(Self.layout)
+        defer { fallbackCleanup() }
+        let externalTree = await scanFixture(at: externalPath)
+        let fallbackTree = await scanFixture(at: fallbackPath)
+        try TreeCache.save(tree: fallbackTree, lastEventId: FSEventsJournal.currentEventId())
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = stateWithEmptyJournalReplay(defaults: defaults)
+        state.fileTree = externalTree
+        state.selectVolume(URL(fileURLWithPath: externalPath, isDirectory: true))
+        state.isApplyingChanges = true
+
+        state.reconcileAvailableVolumes([
+            VolumeInfo(url: URL(fileURLWithPath: fallbackPath, isDirectory: true))
+        ])
+
+        #expect(state.availableVolumes.map(\.url.path) == [fallbackPath])
+        #expect(state.selectedVolume?.path == externalPath)
+        #expect(state.fileTree === externalTree)
+        #expect(!state.scanProgress.isScanning)
+
+        state.isApplyingChanges = false
+        await waitUntil {
+            state.selectedVolume?.path == fallbackPath
+                && state.fileTree?.rootPath == fallbackPath
+        }
+
+        #expect(state.selectedMountTraversalScope == .selectedVolume)
+        #expect(state.fileTree !== externalTree)
+        await waitUntil { !state.scanProgress.isScanning && state.staleViewAsOf == nil }
+    }
+
+    @Test("Losing the combined option never relabels the combined tree as the remaining drive")
+    func disappearingCombinedChoiceRecoversCachedFallback() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.disappearingCombinedChoiceRecoversCachedFallbackBody()
+        }
+    }
+
+    @MainActor
+    private func disappearingCombinedChoiceRecoversCachedFallbackBody() async throws {
+        let (fallbackPath, fallbackCleanup) = try createTempTree(Self.layout)
+        defer { fallbackCleanup() }
+        let fallbackTree = await scanFixture(at: fallbackPath)
+        try TreeCache.save(tree: fallbackTree, lastEventId: FSEventsJournal.currentEventId())
+
+        let combinedTree = FileTree()
+        combinedTree.setRootPath("/")
+        combinedTree.setMountTraversalScope(.combinedVolumes)
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = stateWithEmptyJournalReplay(defaults: defaults)
+        state.fileTree = combinedTree
+        state.selectCombinedVolumes()
+
+        state.reconcileAvailableVolumes([
+            VolumeInfo(url: URL(fileURLWithPath: fallbackPath, isDirectory: true))
+        ])
+
+        #expect(state.selectedVolume?.path == fallbackPath)
+        #expect(state.selectedMountTraversalScope == .selectedVolume)
+        #expect(state.fileTree !== combinedTree)
+        #expect(state.fileTree?.rootPath == fallbackPath)
+        #expect(state.fileTree?.mountTraversalScope == .selectedVolume)
+
+        await waitUntil { !state.scanProgress.isScanning && state.staleViewAsOf == nil }
+    }
+
+    @Test("A missing fallback cache starts a visible individual scan instead of idling blank")
+    func missingFallbackCacheStartsScan() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.missingFallbackCacheStartsScanBody()
+        }
+    }
+
+    @MainActor
+    private func missingFallbackCacheStartsScanBody() async throws {
+        let (externalPath, externalCleanup) = try createTempTree(["external.txt": 40])
+        defer { externalCleanup() }
+        let (fallbackPath, fallbackCleanup) = try createTempTree(Self.layout)
+        defer { fallbackCleanup() }
+        let externalTree = await scanFixture(at: externalPath)
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        defaults.set(externalPath, forKey: Self.lastScannedVolumePathKey)
+        let state = AppState(defaults: defaults)
+        state.fileTree = externalTree
+        state.selectVolume(URL(fileURLWithPath: externalPath, isDirectory: true))
+
+        state.reconcileAvailableVolumes([
+            VolumeInfo(url: URL(fileURLWithPath: fallbackPath, isDirectory: true))
+        ])
+
+        #expect(state.selectedVolume?.path == fallbackPath)
+        #expect(state.selectedMountTraversalScope == .selectedVolume)
+        #expect(state.fileTree !== externalTree)
+        #expect(defaults.string(forKey: Self.lastScannedVolumePathKey) == externalPath)
+
+        // The cold scanner owns its own progress reset and may complete a tiny fixture before the
+        // poll observes its active phase. Require either observable progress or completion first,
+        // then require the completed fallback tree; an idle blank flow satisfies neither.
+        await waitUntil(timeout: 2, pollInterval: .milliseconds(1)) {
+            state.scanProgress.isScanning || state.scanProgress.scanComplete
+        }
+        #expect(state.scanProgress.isScanning || state.scanProgress.scanComplete)
+        await waitUntil { !state.scanProgress.isScanning && state.scanProgress.scanComplete }
+
+        #expect(state.fileTree?.rootPath == fallbackPath)
+        #expect(state.fileTree?.mountTraversalScope == .selectedVolume)
+        #expect(defaults.string(forKey: Self.lastScannedVolumePathKey) == fallbackPath)
+    }
+
+    @Test("Hot-plug while the selected volume remains mounted changes no scan state")
+    func validSelectionIgnoresUnrelatedHotPlug() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.validSelectionIgnoresUnrelatedHotPlugBody()
+        }
+    }
+
+    @MainActor
+    private func validSelectionIgnoresUnrelatedHotPlugBody() async throws {
+        let (selectedPath, selectedCleanup) = try createTempTree(Self.layout)
+        defer { selectedCleanup() }
+        let (otherPath, otherCleanup) = try createTempTree(["other.txt": 10])
+        defer { otherCleanup() }
+        let selectedTree = await scanFixture(at: selectedPath)
+
+        let (defaults, defaultsCleanup) = makeEphemeralDefaults()
+        defer { defaultsCleanup() }
+        let state = AppState(defaults: defaults)
+        state.fileTree = selectedTree
+        state.selectVolume(URL(fileURLWithPath: selectedPath, isDirectory: true))
+
+        state.reconcileAvailableVolumes([
+            VolumeInfo(url: URL(fileURLWithPath: otherPath, isDirectory: true)),
+            VolumeInfo(url: URL(fileURLWithPath: selectedPath, isDirectory: true)),
+        ])
+
+        #expect(state.selectedVolume?.path == selectedPath)
+        #expect(state.fileTree === selectedTree)
+        #expect(!state.scanProgress.isScanning)
+        #expect(state.selectedMountTraversalScope == .selectedVolume)
     }
 }
 

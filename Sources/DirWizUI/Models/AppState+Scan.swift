@@ -80,6 +80,57 @@ public enum SkippedDirsPresentation: Equatable {
 extension AppState {
     private static let lastScannedVolumePathKey = "lastScannedVolumePath"
 
+    /// Reconciles the OS volume list with selection and displayed-tree ownership.
+    ///
+    /// A mount notification is normally just a list refresh: if the selected individual target is
+    /// still present, nothing scan-related changes. When the selected target has actually become
+    /// unavailable, this method owns the whole transition so the sidebar cannot select one volume
+    /// while the content area remains empty or belongs to another scope.
+    public func reconcileAvailableVolumes(_ volumes: [VolumeInfo]) {
+        volumeAvailabilityGeneration &+= 1
+        let availabilityGeneration = volumeAvailabilityGeneration
+        let decision = VolumeAvailabilityPolicy.resolve(
+            availableVolumeURLs: volumes.map(\.url),
+            selectedVolume: selectedVolume,
+            selectedScope: selectedMountTraversalScope,
+            rememberedVolumePath: defaults.string(forKey: Self.lastScannedVolumePathKey)
+        )
+
+        availableVolumes = volumes
+
+        if decision.recoveryReason != nil, isApplyingChanges {
+            // Living apply owns an unregistered scanner and may already be committing into its tree;
+            // startScan deliberately cannot cancel it. Keep selection + display ownership together
+            // until that bounded splice settles, then reconcile the newest availability snapshot.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                while self.isApplyingChanges,
+                      self.volumeAvailabilityGeneration == availabilityGeneration {
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                guard self.volumeAvailabilityGeneration == availabilityGeneration else { return }
+                self.reconcileAvailableVolumes(self.availableVolumes)
+            }
+            return
+        }
+
+        selectedVolume = decision.selectedVolume
+        selectedMountTraversalScope = decision.selectedScope
+
+        guard let recoveryReason = decision.recoveryReason else { return }
+        guard let fallback = decision.selectedVolume else {
+            // Defensive only: macOS normally always reports the boot root. With no truthful target,
+            // stop work owned by the vanished selection and expose an honest empty selection.
+            scanSession.cancelActiveScan()
+            fileTree = nil
+            staleViewAsOf = nil
+            resetForNewScan()
+            return
+        }
+
+        recoverUnavailableSelection(to: fallback, reason: recoveryReason)
+    }
+
     /// Human-readable stale-view badge text ("Showing last scan · X ago[ - updating…]"),
     /// or nil when no restored view is displayed. Computed live off `staleViewAsOf` and
     /// `scanProgress` rather than cached, so the relative time and refresh status stay
@@ -202,15 +253,27 @@ extension AppState {
         }
 
         let volumeURL = URL(fileURLWithPath: path)
+        publishCachedTree(cached, for: volumeURL)
+
+        startScan(
+            volumeURL: volumeURL,
+            mountTraversalScope: .selectedVolume,
+            runPostScanAnalyses: true,
+            forceCold: false,
+            preloadedCache: cached
+        )
+    }
+
+    /// Makes an exact-scope cached individual tree the visible owner and restores its path-keyed
+    /// exploration state. Shared by ordinary launch restore and unavailable-volume recovery.
+    private func publishCachedTree(_ cached: TreeCache.Payload, for volumeURL: URL) {
+        let path = volumeURL.path
         selectVolume(volumeURL)
         fileTree = cached.tree
 
-        // Restore where the user left off (033/038): resolve the saved session's
-        // selection and treemap root through `resolveOrAncestor` so a folder deleted
-        // since last launch degrades to its nearest surviving ancestor instead of
-        // restoring nothing. TreeTableView seeds its own `expandedPaths` from the same
-        // session on appear (`seedExpansionFromSessionIfNeeded`) - nothing to do here for
-        // expansion, which is view-local state AppState doesn't own.
+        // Restore where the user left off (033/038): resolve the saved session's selection and
+        // treemap root through `resolveOrAncestor` so a deleted folder degrades to its nearest
+        // surviving ancestor. TreeTableView restores its view-local expansion separately.
         let session = sessionStore.load(forVolume: path)
         selectedNodeIndex = session?.selectedPath.flatMap {
             ExplorationCapture.resolveOrAncestor($0, tree: cached.tree)
@@ -225,14 +288,61 @@ extension AppState {
         scanProgress.publishCounters(forceLayoutRevision: true)
         staleViewAsOf = cached.savedAt
         lastScanSummary = ScanSummaryComposer.stale(savedAt: cached.savedAt)
+    }
 
-        startScan(
-            volumeURL: volumeURL,
-            mountTraversalScope: .selectedVolume,
-            runPostScanAnalyses: true,
-            forceCold: false,
-            preloadedCache: cached
+    /// Recovers from a target that disappeared. Cache publication deliberately happens AFTER
+    /// `startScan` synchronously supersedes any older warm patch: that path may detach its mutating
+    /// tree, and publishing first would let it accidentally detach the new fallback tree instead.
+    private func recoverUnavailableSelection(
+        to volumeURL: URL,
+        reason: VolumeAvailabilityDecision.RecoveryReason
+    ) {
+        let path = volumeURL.path
+        selectVolume(volumeURL)
+        log.notice(
+            "Recovering volume selection at \(path, privacy: .public): \(reason.logDescription, privacy: .public)"
         )
+
+        guard ProcessInfo.processInfo.environment["DIRWIZ_NO_WARM_START"] != "1" else {
+            startScan(
+                volumeURL: volumeURL,
+                mountTraversalScope: .selectedVolume,
+                runPostScanAnalyses: true,
+                forceCold: true,
+                forceColdReason: "\(reason.logDescription); warm start disabled"
+            )
+            return
+        }
+
+        switch TreeCache.loadResult(for: path, scope: .selectedVolume) {
+        case .success(let cached):
+            startScan(
+                volumeURL: volumeURL,
+                mountTraversalScope: .selectedVolume,
+                runPostScanAnalyses: true,
+                forceCold: false,
+                preloadedCache: cached
+            )
+            publishCachedTree(cached, for: volumeURL)
+
+        case .noCacheFile:
+            startScan(
+                volumeURL: volumeURL,
+                mountTraversalScope: .selectedVolume,
+                runPostScanAnalyses: true,
+                forceCold: true,
+                forceColdReason: "\(reason.logDescription); fallback had no cached scan"
+            )
+
+        case .rejected(let cacheReason):
+            startScan(
+                volumeURL: volumeURL,
+                mountTraversalScope: .selectedVolume,
+                runPostScanAnalyses: true,
+                forceCold: true,
+                forceColdReason: "\(reason.logDescription); \(cacheReason)"
+            )
+        }
     }
 
     /// Entry point for every scan trigger (incl. `restoreOnLaunch`'s auto-refresh). If a

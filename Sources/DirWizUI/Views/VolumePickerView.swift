@@ -203,34 +203,13 @@ public struct VolumePickerView: View {
             options: [.skipHiddenVolumes]
         ) else { return }
 
-        appState.availableVolumes = urls.compactMap { url in
+        let volumes: [VolumeInfo] = urls.compactMap { url in
             // Filter to local volumes only.
             guard let values = try? url.resourceValues(forKeys: keys),
                   values.volumeIsLocal == true else { return nil }
             return VolumeInfo(url: url, values: values)
         }
-
-        if appState.isCombinedVolumeSelection {
-            // The combined choice only exists when there is something to combine. An
-            // unmount that removes it falls back to the first concrete volume.
-            if appState.availableVolumes.count < 2 {
-                if let first = appState.availableVolumes.first {
-                    appState.selectVolume(first.url)
-                } else {
-                    appState.selectedVolume = nil
-                    appState.selectedMountTraversalScope = .selectedVolume
-                }
-            }
-        } else if appState.selectedVolume == nil
-                    || !appState.availableVolumes.contains(where: { $0.url == appState.selectedVolume }) {
-            // Hot-plugging another drive does not enter this branch while the current
-            // selection remains mounted, so it cannot silently change scope or target.
-            if let first = appState.availableVolumes.first {
-                appState.selectVolume(first.url)
-            } else {
-                appState.selectedVolume = nil
-            }
-        }
+        appState.reconcileAvailableVolumes(volumes)
     }
 
     private var combinedCapacity: (used: UInt64, available: UInt64, total: UInt64) {

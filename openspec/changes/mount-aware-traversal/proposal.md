@@ -20,6 +20,13 @@ Pooling is still useful when it is intentional. With several drives attached, an
 map is a good overview. The defect is making that the implicit consequence of selecting one volume
 or hot-plugging another.
 
+There is a second lifecycle defect at the other edge of the same model. When the selected external
+volume is later disconnected, `VolumePickerView` currently changes the selected row to another
+volume but does not reconcile the displayed tree. On relaunch, `restoreOnLaunch()` returns early
+when the remembered path is absent; the later volume-list refresh selects a fallback row but leaves
+the app idle with no graph. A combined tree can likewise remain owned by the old scope after the
+combined option disappears. Selection, display ownership, and recovery must change together.
+
 ## What Changes
 
 - A normal volume scan uses the scan root's device identity as its traversal boundary, matching
@@ -41,6 +48,10 @@ or hot-plugging another.
   traversal.
 - The tree-cache format records traversal scope and changes version, preventing a previously pooled
   `/` cache from being restored as an individual-volume tree.
+- If an individual selection disappears, or an explicit combined selection ceases to be available,
+  the app falls back to an available individual volume as one recovery transaction. It prefers the
+  boot volume, restores that volume's exact-scope cache immediately when possible, and otherwise
+  starts a truthful individual scan instead of leaving an idle blank graph.
 
 ## Impact
 
@@ -51,5 +62,8 @@ or hot-plugging another.
   clearly labelled row.
 - Existing pooled caches are invalidated once by the cache-format change. That first scan is cold;
   later scans can warm-start within the same scope.
+- Disconnecting a selected drive cannot relabel its old tree as another drive. The app either shows
+  the fallback volume's own cached tree while refreshing it or visibly scans that volume from
+  scratch.
 - No firmlink behavior changes. Firmlinks share a device ID and remain covered by the separate
   `FirmlinkTable` mechanism.

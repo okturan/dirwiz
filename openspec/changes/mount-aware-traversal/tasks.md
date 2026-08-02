@@ -69,3 +69,40 @@
 - [ ] 6.6 With a second physical volume attached, verify individual totals stay isolated and
       **All Volumes** combines only after explicit selection. If no second volume is available,
       leave this manual hardware gate open rather than claiming it.
+
+## 7. Reproduce the disconnect lifecycle defect
+
+- [x] 7.1 Confirm the mount-refresh path changes `selectedVolume` without reconciling `fileTree`
+      or starting work for the fallback owner.
+- [x] 7.2 Confirm launch restore returns early for a remembered path that is no longer mounted,
+      after which volume discovery can select another row while the graph stays empty.
+- [x] 7.3 Record the current hardware boundary: no external physical disk is mounted, so use
+      deterministic availability inputs rather than claiming a live hot-unplug reproduction.
+
+## 8. Specify availability recovery
+
+- [x] 8.1 Keep a valid individual selection unchanged across unrelated mount-list changes.
+- [x] 8.2 Prefer `/`, then stable normalized-path order, for an individual fallback.
+- [x] 8.3 Restore only the fallback's exact individual cache; otherwise start a visible scan.
+- [x] 8.4 Never relabel a missing-volume or combined tree as the fallback, and do not persist
+      fallback ownership until its scan succeeds.
+
+## 9. Implement one recovery transition
+
+- [x] 9.1 Extract a pure availability policy covering valid selection, missing individual,
+      unavailable combined choice, remembered missing path, and zero-volume defense.
+- [x] 9.2 Route initial, manual, mount, and unmount volume-list refreshes through `AppState`.
+- [x] 9.3 Publish an exact fallback cache and auto-refresh it, or automatically start the
+      fallback's individual scan when no valid cache exists.
+- [x] 9.4 Supersede unavailable-target scan work, defer behind an already-committing living splice,
+      and never change a still-valid target on hot-plug.
+
+## 10. Regression tests and delivery
+
+- [x] 10.1 Pin the pure fallback order and every no-recovery/recovery decision.
+- [x] 10.2 Pin launch with a remembered missing volume and a cached fallback.
+- [x] 10.3 Pin hot-unplug recovery for both an individual selection and a disappearing combined
+      choice, including the no-cache automatic-scan path.
+- [x] 10.4 Run strict OpenSpec validation, focused tests, the full suite, and `CI=true` parity.
+- [ ] 10.5 Build, install, relaunch, and verify the local app from the final clean tracked source;
+      do not publish or alter the public release.

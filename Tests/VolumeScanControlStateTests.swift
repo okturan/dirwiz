@@ -148,6 +148,126 @@ struct VolumeScanControlStateTests {
         #expect(VolumePickerPolicy.showsCombinedVolumes(volumeCount: 5))
     }
 
+    @Test("Fresh discovery prefers the boot volume without turning discovery into a scan")
+    func freshAvailabilityPrefersBootWithoutRecovery() {
+        let decision = availability(
+            available: ["/Volumes/Zeta", "/"],
+            selected: nil,
+            remembered: nil
+        )
+
+        #expect(decision.selectedVolume?.path == "/")
+        #expect(decision.selectedScope == .selectedVolume)
+        #expect(decision.recoveryReason == nil)
+    }
+
+    @Test("A still-mounted individual selection survives unrelated mount changes")
+    func validSelectionDoesNotRecover() {
+        let decision = availability(
+            available: ["/Volumes/New", "/Volumes/Current", "/"],
+            selected: "/Volumes/Current",
+            remembered: "/Volumes/Old"
+        )
+
+        #expect(decision.selectedVolume?.path == "/Volumes/Current")
+        #expect(decision.selectedScope == .selectedVolume)
+        #expect(decision.recoveryReason == nil)
+    }
+
+    @Test("A missing individual selection recovers to the boot volume")
+    func missingSelectionRecoversToBoot() {
+        let decision = availability(
+            available: ["/Volumes/Archive", "/"],
+            selected: "/Volumes/Gone",
+            remembered: "/Volumes/Gone"
+        )
+
+        #expect(decision.selectedVolume?.path == "/")
+        #expect(
+            decision.recoveryReason == .selectedVolumeUnavailable("/Volumes/Gone")
+        )
+    }
+
+    @Test("Without the boot volume, fallback order is normalized-path stable")
+    func missingSelectionUsesStableFallback() {
+        let decision = availability(
+            available: ["/Volumes/Zeta/", "/Volumes/Alpha"],
+            selected: "/Volumes/Gone",
+            remembered: nil
+        )
+
+        #expect(decision.selectedVolume?.path == "/Volumes/Alpha")
+        #expect(
+            decision.recoveryReason == .selectedVolumeUnavailable("/Volumes/Gone")
+        )
+    }
+
+    @Test("A viable explicit combined choice remains explicit")
+    func viableCombinedSelectionStaysCombined() {
+        let decision = availability(
+            available: ["/", "/Volumes/Archive"],
+            selected: "/",
+            selectedScope: .combinedVolumes,
+            remembered: "/"
+        )
+
+        #expect(decision.selectedVolume?.path == "/")
+        #expect(decision.selectedScope == .combinedVolumes)
+        #expect(decision.recoveryReason == nil)
+    }
+
+    @Test("A disappearing combined choice recovers as an individual")
+    func unavailableCombinedSelectionRecoversIndividually() {
+        let decision = availability(
+            available: ["/"],
+            selected: "/",
+            selectedScope: .combinedVolumes,
+            remembered: "/"
+        )
+
+        #expect(decision.selectedVolume?.path == "/")
+        #expect(decision.selectedScope == .selectedVolume)
+        #expect(decision.recoveryReason == .combinedSelectionUnavailable)
+    }
+
+    @Test("Initial discovery distinguishes an absent remembered volume from an available one")
+    func rememberedAvailabilityControlsRecovery() {
+        let absent = availability(
+            available: ["/"],
+            selected: nil,
+            remembered: "/Volumes/Gone"
+        )
+        #expect(absent.selectedVolume?.path == "/")
+        #expect(
+            absent.recoveryReason == .rememberedVolumeUnavailable("/Volumes/Gone")
+        )
+
+        let present = availability(
+            available: ["/Volumes/Remembered", "/"],
+            selected: nil,
+            remembered: "/Volumes/Remembered"
+        )
+        #expect(present.selectedVolume?.path == "/Volumes/Remembered")
+        #expect(present.recoveryReason == nil)
+    }
+
+    @Test("No available volume invents neither a target nor a scan recovery")
+    func zeroVolumeDefense() {
+        let fresh = availability(available: [], selected: nil, remembered: nil)
+        #expect(fresh.selectedVolume == nil)
+        #expect(fresh.recoveryReason == nil)
+
+        let missing = availability(
+            available: [],
+            selected: "/Volumes/Gone",
+            remembered: "/Volumes/Gone"
+        )
+        #expect(missing.selectedVolume == nil)
+        #expect(
+            missing.recoveryReason == .selectedVolumeUnavailable("/Volumes/Gone")
+        )
+    }
+
     @Test("Cache policy cannot make an undisplayed tree look displayed")
     func cachePresenceIsNotPresentationState() {
         // Cache existence is deliberately absent from the resolver. Whether a normal scan can use
@@ -299,6 +419,24 @@ struct VolumeScanControlStateTests {
             isScanning: isScanning,
             isPreparingScan: isPreparing,
             isApplyingChanges: isApplying
+        )
+    }
+
+    private func availability(
+        available: [String],
+        selected: String?,
+        selectedScope: MountTraversalScope = .selectedVolume,
+        remembered: String?
+    ) -> VolumeAvailabilityDecision {
+        VolumeAvailabilityPolicy.resolve(
+            availableVolumeURLs: available.map {
+                URL(fileURLWithPath: $0, isDirectory: true)
+            },
+            selectedVolume: selected.map {
+                URL(fileURLWithPath: $0, isDirectory: true)
+            },
+            selectedScope: selectedScope,
+            rememberedVolumePath: remembered
         )
     }
 }
