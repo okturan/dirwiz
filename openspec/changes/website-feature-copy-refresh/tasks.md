@@ -25,5 +25,8 @@
 - [ ] 3.3 Render the page at desktop and mobile widths; verify the nine-card grid, line breaks,
   navigation, live demo, and download block.
 - [x] 3.4 Check local links/assets and run `openspec validate --all --strict`.
-- [ ] 3.5 Before deployment, download the public release and verify every new feature claim against
-  that artifact; do not publish source-only claims.
+- [x] 3.5 Before deployment, download the public release and verify every new feature claim against
+  that artifact; do not publish source-only claims. Verified against a fresh v1.2.1 download
+  (build 13, tag/source `c69542d`, SHA-256 `0acc8061…13f09`): the tagged source and shipped binary
+  contain the named living view, snapshot timeline, Find/Go menu commands, recency, temporal diff,
+  CSV/JSON export, legend, search, duplicates, hardlinks, insights, warm start, and shared CLI.
