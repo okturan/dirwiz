@@ -42,6 +42,9 @@ longer be subdivided. DirWiz copied the 32-by-24 gate and title inset but neithe
   to the folder that owns the group.
 - Include the original SpaceMonger sequence plus ocean, forest, sunset, spectrum, candy, earth,
   Nord, monochrome, and ink/paper alternatives with readable adjacent depth contrast.
+- Match SpaceMonger's independent card-contrast roles: stable dark boundary, bright top/left bevel,
+  dark bottom/right bevel, and a flat palette-colour centre.
+- Select black or white leaf labels per depth colour with a measured 4.5:1 contrast floor.
 - Persist the selected number across relaunch. In Folders, show the active eight-swatch depth key
   above the still-clickable raw File Types size breakdown.
 - Require complete Cushion isolation and prove the ten full depth palettes differ perceptually, not

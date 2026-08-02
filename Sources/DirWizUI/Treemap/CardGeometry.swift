@@ -218,6 +218,44 @@ public enum CardGeometry {
         )
     }
 
+    /// Selects whichever of black or white has the greater WCAG contrast against the
+    /// flat centre of a Folders card. SpaceMonger's bright reference palette uses dark
+    /// labels; keeping DirWiz labels unconditionally white made yellow, cyan, and light
+    /// grey cards difficult to read even after their boundaries were repaired.
+    public static func prefersDarkLabel(
+        depth: Int,
+        scheme: FoldersColorScheme = .spaceMonger
+    ) -> Bool {
+        let background = scheme.recipe.chromeLevels[depth & 7]
+        let luminance = relativeLuminance(background)
+        let blackContrast = (luminance + 0.05) / 0.05
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return blackContrast >= whiteContrast
+    }
+
+    /// Contrast delivered by `prefersDarkLabel`, exposed internally for a deterministic
+    /// all-palettes gate rather than relying on labels looking acceptable in one screenshot.
+    static func preferredLabelContrast(
+        depth: Int,
+        scheme: FoldersColorScheme = .spaceMonger
+    ) -> Float {
+        let background = scheme.recipe.chromeLevels[depth & 7]
+        let luminance = relativeLuminance(background)
+        let blackContrast = (luminance + 0.05) / 0.05
+        let whiteContrast = 1.05 / (luminance + 0.05)
+        return max(blackContrast, whiteContrast)
+    }
+
+    private static func relativeLuminance(_ color: SIMD3<Float>) -> Float {
+        func linearized(_ channel: Float) -> Float {
+            if channel <= 0.04045 { return channel / 12.92 }
+            return pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linearized(color.x)
+            + 0.7152 * linearized(color.y)
+            + 0.0722 * linearized(color.z)
+    }
+
     /// SpaceMonger's default color model is one depth palette for both folders and files.
     /// Using unrelated extension colors only for the leaves caused every candidate to share
     /// the same abrupt panel-to-red/blue transition. Cushion remains the file-type view.

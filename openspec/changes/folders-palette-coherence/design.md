@@ -123,13 +123,34 @@ masquerade as a parent-depth empty field. Aggregate rectangles receive no filena
 resolves to the owning folder, matching SpaceMonger's anonymous-placeholder semantics. Cushion does
 not draw these Folders aggregates and keeps its existing rendered rectangles and color inputs.
 
+### 7. Give every card its own contrast boundary
+
+The 892 GB installed result confirms that one depth semantic and aggregate occupancy repair the
+earlier discontinuity and empty-landscape failures. It also makes the remaining renderer defect
+unambiguous: DirWiz discards the rounded gap to reveal whatever saturated parent colour happens to
+sit behind it, then shades the whole card with one soft diagonal gradient. Adjacent surfaces can
+therefore merge, and bright cards retain low-contrast white labels.
+
+`FolderView.cpp::MinimalDrawDisplayFolder` uses three separate roles instead. It first draws a black
+outer box, then `DrawDualBox` supplies a bright top/left and dark bottom/right edge, and only then it
+fills the base colour. DirWiz mirrors those roles in the existing Metal card branch. The boundary
+lives inside the shader's drawn area, so `CardNesting`, `displayRects`, `SpatialGrid`, and the rule
+that visual gaps remain clickable do not change. Edge decoration fades in with card size so dense
+small rectangles remain coloured content rather than becoming black lines.
+
+The flat centre also gives label contrast a deterministic input. Folders selects whichever of black
+or white has the larger WCAG contrast against the scheme's depth colour. Cushion and post-palette
+recency or temporal overlays keep white because their final shaded colour is not the raw depth table.
+
 ## Risks / Trade-offs
 
 - Ten choices are too many for a final product control. This is intentional evaluation scaffolding.
 - Recipe changes are cheap but still rebuild the visible instance buffer; tests pin that they do not
   invalidate layout or Cushion's resolved-color cache.
-- Very light reference colours rely on the existing white text shadow and dark folder chips; the
-  real-tree gate decides whether a darker final recipe is preferable.
+- Very light reference colours use measured black-or-white label polarity; folder headers retain
+  their dark chips because they can span several differently coloured descendants.
+- Strong outlines can overwhelm dense regions. The shader fades edge treatment out between the
+  plain-fill floor and full-size cards, and the offscreen test keeps sub-floor cards fully occupied.
 - An aggregate intentionally trades per-file identity for honest occupied area below the legibility
   threshold. It is non-selectable as a fake file; zooming its owner reveals the underlying detail.
 - A single screenshot may favor one volume's nesting shape. The picker persists so the same

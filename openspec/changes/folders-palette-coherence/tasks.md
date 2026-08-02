@@ -68,7 +68,7 @@
   Folders aggregation remains absent from Cushion output.
 - [x] 7.6 Run focused layout, card, color, interaction, full-suite, `CI=true`, and strict OpenSpec
   verification.
-- [ ] 7.7 Commit, build, install, relaunch, and inspect the same real native tree before resuming
+- [x] 7.7 Commit, build, install, relaunch, and inspect the same real native tree before resuming
   palette selection.
 
 ## 8. Use SpaceMonger's complete color role
@@ -82,4 +82,20 @@
 - [x] 8.4 Replace raw-file preservation gates with same-depth role equivalence, adjacent-depth
   contrast, exact reference-palette, Cushion-isolation, and aggregate-occupancy gates.
 - [x] 8.5 Run focused, full, `CI=true`, and strict OpenSpec verification after the semantic change.
-- [ ] 8.6 Commit, build, install, relaunch, and inspect the same 882 GB native tree before selection.
+- [x] 8.6 Commit, build, install, relaunch, and inspect the same 882 GB native tree before selection.
+
+## 9. Restore card boundaries and local contrast
+
+- [x] 9.1 Record the installed 892 GB result: depth semantics and occupied area are repaired, but
+  adjacent cards still merge because the gap exposes another saturated depth colour.
+- [x] 9.2 Trace SpaceMonger's draw path and record its three independent contrast roles: black outer
+  boundary, bright top/left bevel, and dark bottom/right bevel.
+- [x] 9.3 Replace Folders' whole-tile gradient with a palette-independent dark outline and directional
+  bevel in the card shader; fade decoration out on tiny cards and do not alter layout or hit rects.
+- [x] 9.4 Choose black or white leaf-label text from measured contrast for every scheme and depth;
+  retain the safe white treatment when recency or temporal overlays alter the base colour.
+- [x] 9.5 Add offscreen Metal pixel gates for boundary darkness, bevel direction, and tiny-card fill,
+  plus an all-80-colours text contrast gate of at least 4.5:1.
+- [x] 9.6 Run focused, full, `CI=true`, and strict OpenSpec verification.
+- [x] 9.7 Commit, build, install, relaunch, and inspect the 4.54-million-item native tree before
+  palette selection; the saved `7. Earth` scheme confirms the boundary treatment is scheme-wide.

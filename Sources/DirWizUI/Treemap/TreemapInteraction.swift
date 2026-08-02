@@ -179,6 +179,17 @@ public struct InteractiveTreemapView: View {
         }
     }
 
+    /// Labels share the renderer's card-to-cushion safety decision. Do not infer this by
+    /// parsing the human notice: that copy may change while the rendering contract does not.
+    private var isFoldersStylePainted: Bool {
+        guard appState.treemapRenderStyle == .cards else { return false }
+        guard drawnRectCount > 0 else { return true }
+        if case .fallbackToCushion = CardBudget.decide(nodeCount: drawnRectCount) {
+            return false
+        }
+        return true
+    }
+
     /// Cushion vs. card painting. Purely visual - it changes no geometry, so switching
     /// mid-exploration keeps the current zoom, selection and hit targets exactly as they were.
     /// Two icons with no words left people guessing what the control even was. Names are
@@ -427,6 +438,19 @@ public struct InteractiveTreemapView: View {
         let node = tree?.node(at: rect.nodeIndex)
         let showSize = rect.height > 40 && node != nil
         let fontSize = min(11, max(8, CGFloat(rect.height) * 0.35))
+        // The Folders shader leaves the card centre at its palette colour. Pick the
+        // higher-contrast text polarity there; Cushion keeps its established white label.
+        // When an overlay changes the colour after palette selection, white remains the
+        // safer common foreground for the potentially darkened result.
+        let canUsePaletteContrast = isFoldersStylePainted
+            && !appState.isRecencyOverlayEnabled
+            && !appState.temporalDiff.isTemporalDiffEnabled
+        let useDarkText = canUsePaletteContrast && CardGeometry.prefersDarkLabel(
+            depth: Int(rect.depth),
+            scheme: appState.foldersColorScheme
+        )
+        let foreground = useDarkText ? Color.black : Color.white
+        let shadow = useDarkText ? Color.white.opacity(0.75) : Color.black.opacity(0.8)
 
         return VStack(alignment: .leading, spacing: 0) {
             Text(name)
@@ -439,8 +463,8 @@ public struct InteractiveTreemapView: View {
                     .lineLimit(1)
             }
         }
-        .foregroundStyle(.white)
-        .shadow(color: .black.opacity(0.8), radius: 1, x: 0, y: 1)
+        .foregroundStyle(foreground)
+        .shadow(color: shadow, radius: 1, x: 0, y: 1)
         .padding(.horizontal, 3)
         .padding(.vertical, 2)
         .frame(

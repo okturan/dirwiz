@@ -125,7 +125,8 @@ struct JournalChangeWaitResult: Equatable, Sendable, CustomStringConvertible {
 func waitForJournalChangesResult(
     root: String,
     since sinceId: UInt64,
-    timeout: TimeInterval = 20
+    timeout: TimeInterval = 20,
+    until changesAreSufficient: @Sendable ([String]) -> Bool = { !$0.isEmpty }
 ) async -> JournalChangeWaitResult {
     let startedAt = Date()
     let deadline = startedAt.addingTimeInterval(timeout)
@@ -137,7 +138,7 @@ func waitForJournalChangesResult(
         switch replay.outcome {
         case .changes(let paths):
             lastObservedPathCount = paths.count
-            if !paths.isEmpty {
+            if changesAreSufficient(paths) {
                 return JournalChangeWaitResult(
                     outcome: .changes(paths),
                     attempts: attempts,

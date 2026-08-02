@@ -129,3 +129,33 @@ SHALL continue to present File Types as its map colour key.
 - **THEN** an outer-to-inner eight-swatch key SHALL show the selected scheme
 - **AND** the sidebar SHALL state that map colours show depth
 - **AND** File Types rows SHALL remain usable for size comparison and Search drill-down
+
+### Requirement: Folders cards preserve local boundary and text contrast
+
+Every decorated Folders card SHALL retain a stable dark outer boundary independent of the palette
+colours on either side. Its inside edge SHALL use a brighter top/left bevel and a darker
+bottom/right bevel. The treatment SHALL fade out before it could consume a tiny card, and it SHALL
+not change layout rectangles or hit targets. Leaf labels SHALL choose black or white from the
+selected depth colour with at least 4.5:1 contrast when no post-palette overlay is active.
+
+#### Scenario: Two saturated depth colours touch
+
+- **WHEN** a decorated child card is drawn over a differently coloured parent or sibling
+- **THEN** a dark boundary SHALL separate the two surfaces without depending on their hue distance
+- **AND** the top and left inside edges SHALL be brighter than the bottom and right inside edges
+- **AND** the card centre SHALL retain the selected palette colour instead of a whole-tile gradient
+
+#### Scenario: A card becomes too small for edge decoration
+
+- **WHEN** a card shrinks below the decoration floor
+- **THEN** it SHALL draw as occupied plain fill without a gap, outline, bevel, or missing pixel
+- **AND** its complete layout rectangle SHALL remain its hit target at every size
+
+#### Scenario: A bright depth colour carries a file label
+
+- **WHEN** black has greater contrast than white against the card's selected depth colour
+- **THEN** the file label SHALL use black
+- **AND** every scheme-depth combination SHALL provide at least 4.5:1 contrast with its chosen
+  black-or-white label
+- **AND** Cushion and active recency or temporal overlays SHALL retain the established safe white
+  label treatment

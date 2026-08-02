@@ -321,6 +321,22 @@ struct CardStyleTests {
         }
     }
 
+    @Test("Every Folders palette chooses a readable leaf-label polarity")
+    func foldersLabelContrast() {
+        for scheme in FoldersColorScheme.allCases {
+            for depth in 0..<8 {
+                #expect(CardGeometry.preferredLabelContrast(
+                    depth: depth, scheme: scheme
+                ) >= 4.5,
+                    "\(scheme.reviewLabel) depth \(depth) misses the text contrast floor")
+            }
+        }
+        #expect(CardGeometry.prefersDarkLabel(depth: 2, scheme: .spaceMonger),
+                "SpaceMonger's yellow card must not retain a white label")
+        #expect(!CardGeometry.prefersDarkLabel(depth: 0, scheme: .inkAndPaper),
+                "a near-black card needs a white label")
+    }
+
     @Test("Folders depth colors retain recency and temporal overlays")
     func foldersDepthColorRetainsOverlays() {
         let base = CardGeometry.containerFill(depth: 2, scheme: .spaceMonger)
@@ -471,7 +487,11 @@ struct CardStyleRenderTests {
     }
 
     /// Renders one full-viewport instance with the real shader source and returns the pixels.
-    private func render(styleMode: Int32, side: Int) throws -> Rendered? {
+    private func render(
+        styleMode: Int32,
+        side: Int,
+        color: SIMD4<Float> = SIMD4<Float>(0.5, 0.5, 0.5, 1)
+    ) throws -> Rendered? {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue() else { return nil }   // CI without a GPU
 
@@ -492,7 +512,7 @@ struct CardStyleRenderTests {
         var instance = CushionInstance(
             rect: SIMD4<Float>(0, 0, Float(side), Float(side)),
             coefs: SIMD4<Float>(-1.6, 1.6, -1.6, 1.6),
-            color: SIMD4<Float>(0.5, 0.5, 0.5, 1)
+            color: color
         )
         let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
         var uniforms = CushionUniforms(
@@ -564,6 +584,35 @@ struct CardStyleRenderTests {
             }
         }
         #expect(differing > 0, "card shading must not be identical to cushion shading")
+    }
+
+    /// The reference renderer does not rely on a neighbouring depth colour to describe a
+    /// box. It draws a black outline, then a bright top/left and dark bottom/right bevel.
+    /// This pixel gate proves that renderer-wide treatment survives every palette choice.
+    @Test("Cards have a stable dark boundary and directional bevel contrast")
+    func cardBoundaryAndBevel() throws {
+        let side = 128
+        guard let card = try render(
+            styleMode: 1,
+            side: side,
+            color: SIMD4<Float>(1.0, 1.0, 0.0, 1)
+        ) else { return }
+
+        func energy(_ pixel: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(pixel.b) + Int(pixel.g) + Int(pixel.r)
+        }
+
+        let centre = energy(card.rgb(x: 64, y: 64))
+        let outline = energy(card.rgb(x: 2, y: 64))
+        let top = energy(card.rgb(x: 64, y: 5))
+        let bottom = energy(card.rgb(x: 64, y: 122))
+        let left = energy(card.rgb(x: 5, y: 64))
+        let right = energy(card.rgb(x: 122, y: 64))
+
+        #expect(outline + 180 < centre,
+                "the boundary must stay dark even around a bright yellow card")
+        #expect(top > bottom + 40, "top bevel must be brighter than bottom bevel")
+        #expect(left > right + 40, "left bevel must be brighter than right bevel")
     }
 
     /// A card small enough to lose its decoration renders as plain fill. This is the

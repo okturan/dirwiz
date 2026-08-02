@@ -685,17 +685,38 @@ struct WarmStartComposedPipelineTests {
             try Data(count: 5_000).write(
                 to: URL(fileURLWithPath: root).appendingPathComponent("MyApp.app/Contents/Resources/data.bin")
             )
-            try await settleFSEventsJournal()
-
             // Step 3: replay the journal + decide, exactly as the UI orchestration would.
+            // The daemon can journal docs and the bundle at different times. A fixed
+            // 500ms sleep intermittently accepted only one area, then blamed the warm
+            // patcher for faithfully applying that incomplete fixture input. Poll the
+            // real replay until BOTH independently mutated areas are present. The shared
+            // helper still has the established 20s ceiling and returns immediately on a
+            // poison result.
+            let journalWait = await waitForJournalChangesResult(
+                root: root,
+                since: savedEventId
+            ) { rawPaths in
+                let paths = rawPaths.map(stripTrailingSlash)
+                let hasDocs = paths.contains {
+                    $0 == root + "/docs" || $0.hasPrefix(root + "/docs/")
+                }
+                let hasBundle = paths.contains {
+                    $0 == root + "/MyApp.app" || $0.hasPrefix(root + "/MyApp.app/")
+                }
+                return hasDocs && hasBundle
+            }
+            guard case .changes(let replayPaths) = journalWait.outcome else {
+                Issue.record("fixture mutations never fully reached FSEvents: \(journalWait)")
+                return
+            }
+
             // `cachedDirectoryCount` comes from `bootstrapTree` - the same tree just saved
             // to cache in step 1 - since the real caller computes it from the loaded
             // cache's tree before deciding (AppState+Scan.swift's `directoryCount(in:)`).
-            let replay = await FSEventsJournal.replay(root: root, since: savedEventId, timeout: 10)
             let cachedDirectoryCount = bootstrapTree.nodesSnapshot().reduce(0) { $0 + ($1.isDirectory ? 1 : 0) }
             let decision = WarmStartPlanner.decide(
                 cacheAvailable: true,
-                replay: replay.outcome,
+                replay: .changes(replayPaths),
                 cachedDirectoryCount: cachedDirectoryCount
             )
             guard case .warm(let targets) = decision else {

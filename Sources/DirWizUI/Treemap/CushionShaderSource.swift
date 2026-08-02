@@ -81,9 +81,10 @@ enum CushionShaderSource {
         if (uniforms.styleMode == 1) {
             // ---- Card style -------------------------------------------------------
             // Hierarchy is drawn (containers + gaps), not lit, so no cushion normal.
-            // A soft top-left -> bottom-right gradient gives the flat card its form.
-            float grad = clamp((px + py) * 0.5, 0.0, 1.0);
-            litColor = baseLinear * mix(1.06, 0.88, grad);
+            // Keep the interior flat. Structure comes from a stable dark outline plus
+            // directional bevel edges, matching the contrast roles in SpaceMonger's
+            // DrawBox + DrawDualBox path instead of washing the whole tile with a gradient.
+            litColor = baseLinear;
 
             // Rounded-box SDF in pixel space. Radius and inset scale with the rect's
             // smaller side and reach zero for small rects, so a shrinking card loses its
@@ -106,6 +107,41 @@ enum CushionShaderSource {
 
             // Distance to the card's own edge drives hover/selection outlines below.
             edgeDist = -sdf;
+
+            // Large cards get an explicit boundary independent of the colours on either
+            // side. The treatment fades in between 6 and 12px so dense tiny tiles keep
+            // their occupied colour instead of turning into an all-outline black field.
+            float edgeDecoration = smoothstep(6.0, 12.0, minSide);
+            float outlineWidth = edgeDecoration
+                * min(1.5, max(0.75, minSide * 0.025));
+            float bevelWidth = edgeDecoration
+                * min(2.25, max(0.75, minSide * 0.035));
+
+            // Distances from the four straight edges, after the visual gap. Rounded
+            // corners are still governed by the SDF above; these only choose whether an
+            // inside bevel faces the virtual light (top/left) or shadow (bottom/right).
+            float leftDistance   = px * in.rectSize.x - inset;
+            float rightDistance  = (1.0 - px) * in.rectSize.x - inset;
+            float topDistance    = py * in.rectSize.y - inset;
+            float bottomDistance = (1.0 - py) * in.rectSize.y - inset;
+            float bevelStart = outlineWidth + 0.35;
+            float lightEdge = 1.0 - smoothstep(
+                bevelStart, bevelStart + bevelWidth, min(leftDistance, topDistance));
+            float darkEdge = 1.0 - smoothstep(
+                bevelStart, bevelStart + bevelWidth, min(rightDistance, bottomDistance));
+            float signedBevel = lightEdge - darkEdge;
+
+            float3 brightColor = mix(baseLinear, float3(1.0), 0.34);
+            float3 darkColor = baseLinear * 0.52;
+            litColor = mix(litColor, brightColor, max(signedBevel, 0.0) * 0.82);
+            litColor = mix(litColor, darkColor, max(-signedBevel, 0.0) * 0.82);
+
+            // SpaceMonger uses a black box outside its coloured bevel. Put that role
+            // inside the card's drawn area so CardGeometry and hit testing remain exact.
+            float outlineAlpha = edgeDecoration * (
+                1.0 - smoothstep(max(0.0, outlineWidth - 0.45),
+                                 outlineWidth + 0.45, edgeDist));
+            litColor = mix(litColor, float3(0.004), outlineAlpha * 0.97);
         } else {
             // ---- Cushion style (unchanged) ----------------------------------------
             // Compute cushion surface normal from parabolic coefficients.
