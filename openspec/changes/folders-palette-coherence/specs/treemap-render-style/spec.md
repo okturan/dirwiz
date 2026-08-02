@@ -132,17 +132,20 @@ SHALL continue to present File Types as its map colour key.
 
 ### Requirement: Folders cards preserve local boundary and text contrast
 
-Every decorated Folders card SHALL retain a stable dark outer boundary independent of the palette
-colours on either side. Its inside edge SHALL use a brighter top/left bevel and a darker
-bottom/right bevel. The treatment SHALL fade out before it could consume a tiny card, and it SHALL
-not change layout rectangles or hit targets. Leaf labels SHALL choose black or white from the
-selected depth colour with at least 4.5:1 contrast when no post-palette overlay is active.
+Every decorated Folders card SHALL retain an explicit outer boundary independent of the palette
+colours on either side. A selected surface profile MAY add directional bevels, but a bevel-free
+profile SHALL keep the flat centre and boundary without synthesizing extra colour bands. Every edge
+treatment SHALL fade out before it could consume a tiny card and SHALL not shrink its hit target.
+Leaf labels SHALL choose black or white from the selected depth colour with at least 4.5:1 contrast
+when no post-palette overlay is active.
 
 #### Scenario: Two saturated depth colours touch
 
 - **WHEN** a decorated child card is drawn over a differently coloured parent or sibling
 - **THEN** a dark boundary SHALL separate the two surfaces without depending on their hue distance
-- **AND** the top and left inside edges SHALL be brighter than the bottom and right inside edges
+- **AND** Classic Bevel SHALL make the top and left inside edges brighter than the bottom and right
+  inside edges
+- **AND** Crisp SHALL omit those bevel bands
 - **AND** the card centre SHALL retain the selected palette colour instead of a whole-tile gradient
 
 #### Scenario: A card becomes too small for edge decoration
@@ -159,3 +162,80 @@ selected depth colour with at least 4.5:1 contrast when no post-palette overlay 
   black-or-white label
 - **AND** Cushion and active recency or temporal overlays SHALL retain the established safe white
   label treatment
+
+### Requirement: Native Folders review separates surface from palette
+
+While the visual decision is open, Folders SHALL expose exactly six numbered surface profiles that
+are independent of the ten depth palettes. Switching surface SHALL repaint and, where required,
+re-nest the currently displayed rectangles without a filesystem scan or a new Squarify layout.
+
+#### Scenario: The user opens the surface picker
+
+- **WHEN** Folders is selected
+- **THEN** the view SHALL offer `1. Crisp`, `2. Fine Lines`, `3. Tinted Frames`,
+  `4. Color Headers`, `5. Soft Cards`, and `6. Classic Bevel`
+- **AND** the current surface and current color palette SHALL be identified independently
+- **AND** an absent or invalid surface preference SHALL resolve to `1. Crisp`
+
+#### Scenario: The user switches surface on a displayed tree
+
+- **WHEN** a different surface number is selected
+- **THEN** the app SHALL keep the same filesystem tree, Squarify layout, root, selection, and
+  navigation state
+- **AND** it SHALL rebuild card instances, post-nesting display rectangles, labels, and the Folders
+  hit grid together
+- **AND** the complete pre-gap display rectangle SHALL remain clickable
+
+### Requirement: Surface profiles address distinct structural failures
+
+The comparison SHALL include bevel-free, narrow-frame, quiet-container, header-color, soft-edge,
+and source-inspired treatments. Quiet-container treatments SHALL derive folder chrome from the
+selected depth color rather than extension identity, while leaves SHALL retain the exact selected
+depth color.
+
+#### Scenario: Crisp or Fine Lines is selected
+
+- **THEN** cards SHALL use a flat center and SHALL NOT draw a directional bevel
+- **AND** parent-frame padding SHALL be smaller than Classic Bevel
+- **AND** every decorated card SHALL retain a visible boundary
+
+#### Scenario: Tinted Frames is selected
+
+- **THEN** expanded-folder frames SHALL be darker and less chromatic than their selected depth color
+- **AND** files, aggregates, and collapsed content blocks SHALL retain the unmodified depth color
+
+#### Scenario: Color Headers is selected
+
+- **THEN** an expanded folder SHALL use quiet chrome around its children
+- **AND** its reserved title row SHALL retain the selected depth color
+- **AND** the folder title SHALL choose black or white for measured contrast without a dark chip
+
+#### Scenario: Classic Bevel is selected
+
+- **THEN** the source-inspired dark outline and bright-top-left/dark-bottom-right dual bevel SHALL
+  remain available as the reference control
+
+### Requirement: Folder title rows preserve the name before metadata
+
+Every labelled expanded folder SHALL own the usable width of its reserved header row instead of
+placing text inside an intrinsic rounded chip. Size metadata SHALL appear only when the row can fit
+it without materially squeezing the folder name.
+
+#### Scenario: A long folder name has limited width
+
+- **WHEN** the header is wide enough for a name but not both a long name and size metadata
+- **THEN** the title row SHALL omit the size
+- **AND** the folder name SHALL retain the row's available width with middle truncation only as a
+  final containment measure
+- **AND** the title row SHALL remain clipped to the folder's displayed rectangle
+
+### Requirement: Folders surface selection is isolated from Cushion
+
+Changing surface SHALL have no effect on Cushion instances, coefficients, shading, layout,
+resolved-color cache identity, labels, or hit targets.
+
+#### Scenario: Surface numbers are compared in Cushion
+
+- **WHEN** Cushion is active and any two Folders surfaces are selected
+- **THEN** the offscreen Cushion output SHALL remain pixel-identical
+- **AND** no card-role marker or frame geometry SHALL enter the Cushion instance path

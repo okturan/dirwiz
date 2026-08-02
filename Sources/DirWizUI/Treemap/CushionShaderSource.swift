@@ -19,7 +19,7 @@ enum CushionShaderSource {
         int    hoveredIndex;
         int    selectedIndex;
         int    styleMode;      // 0 = cushion, 1 = card
-        float  padding2;
+        int    cardSurfaceMode; // 1...6; 0 keeps legacy card callers on Classic Bevel
     };
 
     struct VertexOut {
@@ -80,11 +80,30 @@ enum CushionShaderSource {
 
         if (uniforms.styleMode == 1) {
             // ---- Card style -------------------------------------------------------
-            // Hierarchy is drawn (containers + gaps), not lit, so no cushion normal.
-            // Keep the interior flat. Structure comes from a stable dark outline plus
-            // directional bevel edges, matching the contrast roles in SpaceMonger's
-            // DrawBox + DrawDualBox path instead of washing the whole tile with a gradient.
+            // Palette and surface are independent. Palette supplies `baseLinear`; the
+            // numbered surface controls chrome, edge weight, and optional bevel. Zero is
+            // accepted as Classic Bevel so old offscreen callers keep their reference.
+            int surfaceMode = uniforms.cardSurfaceMode;
+            if (surfaceMode < 1 || surfaceMode > 6) { surfaceMode = 6; }
+
+            // `coefs.w` is a role marker only in the card path. Cushion retains the real
+            // coefficient. A value of one means an expanded folder; leaves, aggregates,
+            // and collapsed folders remain zero and keep the unmodified depth colour.
+            bool isExpandedFolder = in.coefs.w > 0.5 && in.coefs.w < 1.5;
+
             litColor = baseLinear;
+            if (isExpandedFolder && (surfaceMode == 3 || surfaceMode == 4)) {
+                float luma = dot(baseLinear, float3(0.2126, 0.7152, 0.0722));
+                float chroma = surfaceMode == 3 ? 0.28 : 0.16;
+                litColor = mix(float3(luma), baseLinear, chroma) * 0.55;
+
+                // Color Headers keeps the body quiet but restores the selected depth
+                // colour in the 18-point title row that CardNesting already reserved.
+                float yInPixels = py * in.rectSize.y;
+                if (surfaceMode == 4 && yInPixels <= min(18.0, in.rectSize.y)) {
+                    litColor = baseLinear;
+                }
+            }
 
             // Rounded-box SDF in pixel space. Radius and inset scale with the rect's
             // smaller side and reach zero for small rects, so a shrinking card loses its
@@ -93,8 +112,15 @@ enum CushionShaderSource {
             float2 halfSize = in.rectSize * 0.5;
             float  minSide  = min(in.rectSize.x, in.rectSize.y);
             float  decorate = step(6.0, minSide);
-            float  radius   = decorate * min(6.0, minSide * 0.12);
-            float  inset    = decorate * min(2.0, minSide * 0.06);
+            float insetScale = 1.0;
+            float radiusScale = 1.0;
+            if (surfaceMode == 1) { insetScale = 0.55; radiusScale = 0.65; }
+            if (surfaceMode == 2) { insetScale = 0.35; radiusScale = 0.35; }
+            if (surfaceMode == 3) { insetScale = 0.55; radiusScale = 0.65; }
+            if (surfaceMode == 4) { insetScale = 0.45; radiusScale = 0.55; }
+            if (surfaceMode == 5) { insetScale = 0.75; radiusScale = 0.80; }
+            float  radius = decorate * min(6.0, minSide * 0.12) * radiusScale;
+            float  inset = decorate * min(2.0, minSide * 0.06) * insetScale;
 
             float2 p = (in.rectPos - 0.5) * in.rectSize;
             float2 b = max(halfSize - inset - radius, float2(0.0));
@@ -108,14 +134,31 @@ enum CushionShaderSource {
             // Distance to the card's own edge drives hover/selection outlines below.
             edgeDist = -sdf;
 
-            // Large cards get an explicit boundary independent of the colours on either
-            // side. The treatment fades in between 6 and 12px so dense tiny tiles keep
-            // their occupied colour instead of turning into an all-outline black field.
+            // Large cards get an explicit boundary independent of neighbouring hues. The
+            // treatment fades in between 6 and 12px so dense tiles keep their occupied
+            // colour instead of becoming an all-outline field.
             float edgeDecoration = smoothstep(6.0, 12.0, minSide);
-            float outlineWidth = edgeDecoration
-                * min(1.5, max(0.75, minSide * 0.025));
-            float bevelWidth = edgeDecoration
-                * min(2.25, max(0.75, minSide * 0.035));
+            float outlineWidth = 0.95;
+            float outlineOpacity = 0.82;
+            float bevelStrength = 0.0;
+            float bevelWidth = 0.0;
+            if (surfaceMode == 2) {
+                outlineWidth = 0.65; outlineOpacity = 0.62;
+            } else if (surfaceMode == 3) {
+                outlineWidth = 0.90; outlineOpacity = 0.76;
+            } else if (surfaceMode == 4) {
+                outlineWidth = 0.90; outlineOpacity = 0.72;
+            } else if (surfaceMode == 5) {
+                outlineWidth = 0.90; outlineOpacity = 0.55;
+                bevelWidth = 1.20; bevelStrength = 0.28;
+            } else if (surfaceMode == 6) {
+                outlineWidth = min(1.5, max(0.75, minSide * 0.025));
+                outlineOpacity = 0.97;
+                bevelWidth = min(2.25, max(0.75, minSide * 0.035));
+                bevelStrength = 0.82;
+            }
+            outlineWidth *= edgeDecoration;
+            bevelWidth *= edgeDecoration;
 
             // Distances from the four straight edges, after the visual gap. Rounded
             // corners are still governed by the SDF above; these only choose whether an
@@ -124,24 +167,33 @@ enum CushionShaderSource {
             float rightDistance  = (1.0 - px) * in.rectSize.x - inset;
             float topDistance    = py * in.rectSize.y - inset;
             float bottomDistance = (1.0 - py) * in.rectSize.y - inset;
-            float bevelStart = outlineWidth + 0.35;
-            float lightEdge = 1.0 - smoothstep(
-                bevelStart, bevelStart + bevelWidth, min(leftDistance, topDistance));
-            float darkEdge = 1.0 - smoothstep(
-                bevelStart, bevelStart + bevelWidth, min(rightDistance, bottomDistance));
-            float signedBevel = lightEdge - darkEdge;
+            if (bevelStrength > 0.0) {
+                float bevelStart = outlineWidth + 0.35;
+                float lightEdge = 1.0 - smoothstep(
+                    bevelStart, bevelStart + bevelWidth, min(leftDistance, topDistance));
+                float darkEdge = 1.0 - smoothstep(
+                    bevelStart, bevelStart + bevelWidth, min(rightDistance, bottomDistance));
+                float signedBevel = lightEdge - darkEdge;
+                float brightMix = surfaceMode == 6 ? 0.34 : 0.20;
+                float darkScale = surfaceMode == 6 ? 0.52 : 0.72;
+                float3 brightColor = mix(litColor, float3(1.0), brightMix);
+                float3 darkColor = litColor * darkScale;
+                litColor = mix(litColor, brightColor,
+                               max(signedBevel, 0.0) * bevelStrength);
+                litColor = mix(litColor, darkColor,
+                               max(-signedBevel, 0.0) * bevelStrength);
+            }
 
-            float3 brightColor = mix(baseLinear, float3(1.0), 0.34);
-            float3 darkColor = baseLinear * 0.52;
-            litColor = mix(litColor, brightColor, max(signedBevel, 0.0) * 0.82);
-            litColor = mix(litColor, darkColor, max(-signedBevel, 0.0) * 0.82);
-
-            // SpaceMonger uses a black box outside its coloured bevel. Put that role
-            // inside the card's drawn area so CardGeometry and hit testing remain exact.
+            // The outline stays inside the drawn rectangle, so the complete pre-gap rect
+            // remains the hit target. Fine Lines uses a depth-tinted near-black boundary;
+            // the other profiles use a neutral one.
             float outlineAlpha = edgeDecoration * (
                 1.0 - smoothstep(max(0.0, outlineWidth - 0.45),
                                  outlineWidth + 0.45, edgeDist));
-            litColor = mix(litColor, float3(0.004), outlineAlpha * 0.97);
+            float3 outlineColor = surfaceMode == 2
+                ? baseLinear * 0.10
+                : float3(0.004);
+            litColor = mix(litColor, outlineColor, outlineAlpha * outlineOpacity);
         } else {
             // ---- Cushion style (unchanged) ----------------------------------------
             // Compute cushion surface normal from parabolic coefficients.

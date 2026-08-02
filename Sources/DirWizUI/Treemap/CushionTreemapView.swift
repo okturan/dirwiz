@@ -17,6 +17,7 @@ public struct CushionTreemapView: NSViewRepresentable {
     public var isRecencyOverlayEnabled: Bool
     public var renderStyle: TreemapRenderStyle
     public var foldersColorScheme: FoldersColorScheme
+    public var foldersSurfaceStyle: FoldersSurfaceStyle
     public var temporalDiffKinds: [UInt8]
     public var temporalDiffStrengths: [Float]
     public var isTemporalDiffEnabled: Bool
@@ -40,6 +41,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         isRecencyOverlayEnabled: Bool = false,
         renderStyle: TreemapRenderStyle = .cushion,
         foldersColorScheme: FoldersColorScheme = .spaceMonger,
+        foldersSurfaceStyle: FoldersSurfaceStyle = .crisp,
         temporalDiffKinds: [UInt8] = [],
         temporalDiffStrengths: [Float] = [],
         isTemporalDiffEnabled: Bool = false,
@@ -62,6 +64,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         self.isRecencyOverlayEnabled = isRecencyOverlayEnabled
         self.renderStyle = renderStyle
         self.foldersColorScheme = foldersColorScheme
+        self.foldersSurfaceStyle = foldersSurfaceStyle
         self.temporalDiffKinds = temporalDiffKinds
         self.temporalDiffStrengths = temporalDiffStrengths
         self.isTemporalDiffEnabled = isTemporalDiffEnabled
@@ -111,6 +114,7 @@ public struct CushionTreemapView: NSViewRepresentable {
         // instances because CardNesting and final fills live there, but never relayout.
         let styleChanged = coordinator.renderStyle != renderStyle
         let foldersSchemeChanged = coordinator.foldersColorScheme != foldersColorScheme
+        let foldersSurfaceChanged = coordinator.foldersSurfaceStyle != foldersSurfaceStyle
 
         coordinator.currentFileTree = fileTree
         coordinator.currentTreeRevision = treeRevision
@@ -127,6 +131,12 @@ public struct CushionTreemapView: NSViewRepresentable {
             coordinator.foldersColorScheme = foldersColorScheme
             // Folders substitutes one static depth table at instance-build time. The raw
             // Cushion colour cache and layout stay valid, so this is a cheap repaint.
+            coordinator.instanceBufferDirty = true
+        }
+        if foldersSurfaceChanged {
+            coordinator.foldersSurfaceStyle = foldersSurfaceStyle
+            // Surface can change CardNesting as well as shader treatment. Rebuild the
+            // instances and publish the same post-nesting geometry to labels and hit tests.
             coordinator.instanceBufferDirty = true
         }
         if paletteChanged {
@@ -170,7 +180,8 @@ public struct CushionTreemapView: NSViewRepresentable {
         }
 
         if treeChanged || rootChanged || revisionChanged || selectionChanged || paletteChanged
-            || recencyChanged || temporalChanged || styleChanged || foldersSchemeChanged {
+            || recencyChanged || temporalChanged || styleChanged || foldersSchemeChanged
+            || foldersSurfaceChanged {
             mtkView.needsDisplay = true
         }
     }

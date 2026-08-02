@@ -142,6 +142,38 @@ The flat centre also gives label contrast a deterministic input. Folders selects
 or white has the larger WCAG contrast against the scheme's depth colour. Cushion and post-palette
 recency or temporal overlays keep white because their final shaded colour is not the raw depth table.
 
+### 8. Compare six orthogonal surface profiles
+
+The installed 894 GB `1. SpaceMonger` result accepts the unified depth semantic but rejects one
+surface recipe as universal. A deep path exposes the parent at every `containerPad`, then every
+visible card adds a black outline and two bevel bands. The individual operations are crisp, but their
+repetition forms the perceived haze. A purple frame is not random: it is the visible depth-7 parent
+around depth-0 children. The label chip adds yet another rounded dark island and competes with size
+metadata for intrinsic width.
+
+Color and surface are therefore independent review axes. The ten palettes continue to answer which
+depth hues are used. A new six-value `FoldersSurfaceStyle` answers how those hues form boundaries:
+
+| # | Surface | Boundary | Expanded-folder chrome | Frame scale |
+|---|---|---|---|---|
+| 1 | Crisp | dark one-pixel edge, no bevel | full depth color | reduced |
+| 2 | Fine Lines | thin depth-tinted edge, no bevel | full depth color | tight |
+| 3 | Tinted Frames | dark edge, no bevel | darkened/desaturated depth tint | reduced |
+| 4 | Color Headers | dark edge, no bevel | quiet frame; full depth title row | reduced |
+| 5 | Soft Cards | lower-opacity edge, shallow bevel | full depth color | reduced |
+| 6 | Classic Bevel | black edge, full dual bevel | full depth color | source control |
+
+The role marker uses the otherwise-unused card copy of `CushionInstance.coefs.w`; Cushion instances
+retain their real coefficient and never see the marker. The surface number occupies the final
+four-byte uniform padding slot, preserving the 48-byte Swift/Metal stride. Profiles that change frame
+width pass through `CardNesting` and publish the resulting `displayRects` to labels and the hit grid;
+they never mutate the cached Squarify layout or apply the shader's visual gap to hit geometry.
+
+Folder labels become width-owning title rows inside the already-reserved 18-point header. Metadata
+is admitted only for short names in sufficiently wide rows. Color Headers draws contrast-selected
+text directly on its depth band; other profiles use one flat, non-rounded dark title row. This removes
+the chip-on-card layering and gives the name priority over size.
+
 ## Risks / Trade-offs
 
 - Ten choices are too many for a final product control. This is intentional evaluation scaffolding.
@@ -151,6 +183,10 @@ recency or temporal overlays keep white because their final shaded colour is not
   their dark chips because they can span several differently coloured descendants.
 - Strong outlines can overwhelm dense regions. The shader fades edge treatment out between the
   plain-fill floor and full-size cards, and the offscreen test keeps sub-floor cards fully occupied.
+- Six surfaces multiply the native comparison space to sixty combinations. This is temporary review
+  scaffolding; the final decision should retain a small product-facing set, not both full pickers.
+- Quiet container profiles intentionally vary chroma by role, but never hue identity or leaf color.
+  They are explicit alternatives for the vivid-parent-frame failure, not a return to extension color.
 - An aggregate intentionally trades per-file identity for honest occupied area below the legibility
   threshold. It is non-selectable as a fake file; zooming its owner reveals the underlying detail.
 - A single screenshot may favor one volume's nesting shape. The picker persists so the same
@@ -159,4 +195,5 @@ recency or temporal overlays keep white because their final shaded colour is not
 ## Open Questions
 
 - Which numbered scheme does Okan select on the restored tree?
+- Which numbered surface does Okan select, and does that change the preferred color scheme?
 - After selection, should the picker disappear or should a smaller subset remain user-configurable?

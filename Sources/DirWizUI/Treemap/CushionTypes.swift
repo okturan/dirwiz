@@ -20,15 +20,17 @@ struct CushionUniforms {
     var lightDir: SIMD4<Float>   // w unused; matches Metal float4 layout exactly
     var hoveredIndex: Int32
     var selectedIndex: Int32 = -1
-    /// 0 = cushion (default, unchanged), 1 = card. Occupies the first slot of what used to
-    /// be `padding2`, so the struct stride stays 48 and the layout assertion still holds.
+    /// 0 = cushion (default, unchanged), 1 = card. Occupies the first slot of the old
+    /// uniform padding, so the struct stride stays 48 and the layout assertion still holds.
     var styleMode: Int32 = 0
-    var padding2: Float = 0
+    /// Numbered `FoldersSurfaceStyle`. Zero resolves to Classic Bevel for old construction
+    /// sites and tests; production always sends the persisted value when cards are active.
+    var cardSurfaceMode: Int32 = 0
 }
 
 /// Verify Metal struct layout matches Swift struct layout. Called once from coordinator init.
 /// CushionInstance: 3 × SIMD4<Float> = 48 bytes.
-/// CushionUniforms: SIMD2 + float + pad + SIMD4 + 2×int32 + 2×float pad = 48 bytes.
+/// CushionUniforms: SIMD2 + float + pad + SIMD4 + 4×int32 = 48 bytes.
 func verifyCushionLayouts() {
     assert(MemoryLayout<CushionInstance>.stride == 48,
            "CushionInstance stride is \(MemoryLayout<CushionInstance>.stride), expected 48 - update Metal shader struct")

@@ -68,6 +68,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// testing, zoom and the spatial index keep working off one set of rects regardless.
     var renderStyle: TreemapRenderStyle = .cushion
     var foldersColorScheme: FoldersColorScheme = .spaceMonger
+    var foldersSurfaceStyle: FoldersSurfaceStyle = .crisp
 
     /// Bumped by the view whenever any resolved source colour changes (palette, recency,
     /// temporal diff). Style and Folders-scheme changes deliberately do not bump it:
@@ -404,7 +405,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             }
             nestedRect.reserveCapacity(items.count)
             var hidden = Set<UInt32>()
-            for placed in CardNesting.place(items) {
+            for placed in CardNesting.place(items, surfaceStyle: foldersSurfaceStyle) {
                 nestedRect[placed.nodeIndex] = placed
                 if placed.suppressed { hidden.insert(placed.nodeIndex) }
             }
@@ -525,8 +526,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 ? resolver.applyingOverlays(to: roleColor, nodeIndex: nodeIdx)
                 : roleColor
 
-            // Use cached coefficients instead of recomputing.
-            let coefs = tmRect.cachedCoefs
+            // Cushion keeps the real ridge coefficient. Card shading does not consume
+            // coefficients, so its otherwise-unused `w` slot carries one role bit that
+            // lets quiet-frame surfaces distinguish expanded folders from occupied blocks.
+            var coefs = tmRect.cachedCoefs
+            if nestCards {
+                coefs.w = (tmRect.isBackground && !isCollapsedFolder) ? 1 : 0
+            }
 
             instances.append(CushionInstance(
                 rect: SIMD4<Float>(x, y, w, h),
@@ -681,7 +687,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             lightDir: SIMD4<Float>(ld.x, ld.y, ld.z, 0),
             hoveredIndex: hoveredInstance,
             selectedIndex: selectedInstance,
-            styleMode: effectiveRenderStyle == .cards ? 1 : 0
+            styleMode: effectiveRenderStyle == .cards ? 1 : 0,
+            cardSurfaceMode: effectiveRenderStyle == .cards
+                ? Int32(foldersSurfaceStyle.rawValue)
+                : 0
         )
 
         if uniformBuffers[currentBufferIndex] == nil {

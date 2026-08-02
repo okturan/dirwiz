@@ -13,9 +13,8 @@ struct CardStyleTests {
 
     // MARK: - Cushion output must be unchanged
 
-    /// `styleMode` was carved out of the old `padding2` precisely so the uniform buffer
-    /// keeps its 48-byte stride and the Swift↔Metal layout contract still holds. If this
-    /// breaks, every uniform after `lightDir` is read at the wrong offset by the GPU.
+    /// `styleMode` and `cardSurfaceMode` occupy the old padding precisely so the uniform
+    /// buffer keeps its 48-byte stride and the Swift↔Metal layout contract still holds.
     @Test("Uniform layout is unchanged at 48 bytes")
     func uniformStrideUnchanged() {
         #expect(MemoryLayout<CushionUniforms>.stride == 48)
@@ -36,6 +35,7 @@ struct CardStyleTests {
             selectedIndex: -1
         )
         #expect(u.styleMode == 0, "styleMode 0 is the cushion branch")
+        #expect(u.cardSurfaceMode == 0, "old callers keep the legacy card reference")
         #expect(TreemapRenderStyle.cushion.rawValue == "cushion")
     }
 
@@ -57,6 +57,8 @@ struct CardStyleTests {
         #expect(src.contains("uniforms.styleMode == 1"))
         #expect(src.contains("discard_fragment()"))
         #expect(src.contains("int    styleMode"), "Metal uniform struct must mirror the Swift one")
+        #expect(src.contains("int    cardSurfaceMode"))
+        #expect(src.contains("isExpandedFolder"), "card instances must carry a folder-role marker")
     }
 
     // MARK: - Geometry degrades instead of vanishing
@@ -91,6 +93,45 @@ struct CardStyleTests {
         #expect(CardGeometry.headerHeight(width: 200, height: 150) == CardGeometry.headerHeight)
         #expect(CardGeometry.headerHeight(width: 40, height: 150) == 0)
         #expect(CardGeometry.headerHeight(width: 200, height: 20) == 0)
+    }
+
+    @Test("Six numbered surface profiles have distinct structural recipes")
+    func surfaceComparisonSetIsComplete() {
+        let surfaces = FoldersSurfaceStyle.allCases
+        #expect(surfaces.map(\.rawValue) == Array(1...6))
+        #expect(surfaces.map(\.reviewLabel) == [
+            "1. Crisp", "2. Fine Lines", "3. Tinted Frames",
+            "4. Color Headers", "5. Soft Cards", "6. Classic Bevel",
+        ])
+        #expect(Set(surfaces.map(\.recipe)).count == surfaces.count)
+        #expect(FoldersSurfaceStyle.crisp.recipe.bevelStrength == 0)
+        #expect(FoldersSurfaceStyle.fineLines.recipe.bevelStrength == 0)
+        #expect(FoldersSurfaceStyle.tintedFrames.recipe.quietsExpandedFolders)
+        #expect(FoldersSurfaceStyle.colorHeaders.recipe.usesColorHeader)
+        #expect(FoldersSurfaceStyle.softCards.recipe.bevelStrength > 0)
+        #expect(FoldersSurfaceStyle.classicBevel.recipe.bevelStrength
+                > FoldersSurfaceStyle.softCards.recipe.bevelStrength)
+    }
+
+    @Test("Flat surfaces spend less space on repeated parent frames")
+    func flatSurfacesReduceContainerPad() {
+        let classic = CardGeometry.containerPad(
+            width: 400, height: 300, surfaceStyle: .classicBevel)
+        let crisp = CardGeometry.containerPad(
+            width: 400, height: 300, surfaceStyle: .crisp)
+        let fine = CardGeometry.containerPad(
+            width: 400, height: 300, surfaceStyle: .fineLines)
+        #expect(classic == CardGeometry.maxContainerPad)
+        #expect(crisp < classic)
+        #expect(fine < crisp)
+        #expect(fine > 0, "even the tight profile keeps an explicit parent frame")
+    }
+
+    @Test("Folder title metadata yields to long names")
+    func folderSizeAdmissionPrioritizesName() {
+        #expect(CardGeometry.shouldShowFolderSize(width: 260, nameCharacterCount: 8))
+        #expect(!CardGeometry.shouldShowFolderSize(width: 180, nameCharacterCount: 8))
+        #expect(!CardGeometry.shouldShowFolderSize(width: 260, nameCharacterCount: 24))
     }
 
     // MARK: - Density budget
@@ -451,20 +492,31 @@ struct CardStyleTests {
         #expect(state.treemapRenderStyle == .cushion, "cushion is the default")
         #expect(state.foldersColorScheme == .spaceMonger,
             "review starts with the source-traceable reference palette")
+        #expect(state.foldersSurfaceStyle == .crisp,
+            "new and invalid stores start on the bevel-free surface")
 
         state.treemapRenderStyle = .cards
         state.foldersColorScheme = .forest
+        state.foldersSurfaceStyle = .tintedFrames
         state.resetForNewScan()
         #expect(state.treemapRenderStyle == .cards)
         #expect(state.foldersColorScheme == .forest)
+        #expect(state.foldersSurfaceStyle == .tintedFrames)
 
         // A relaunch reading the same store sees the choice; `.standard` is untouched.
         #expect(AppState(defaults: defaults).treemapRenderStyle == .cards)
         #expect(AppState(defaults: defaults).foldersColorScheme == .forest)
+        #expect(AppState(defaults: defaults).foldersSurfaceStyle == .tintedFrames)
         #expect(defaults.string(forKey: AppState.renderStyleKey) == "cards",
                 "the choice is written to the injected store, not to .standard")
         #expect(defaults.integer(forKey: AppState.foldersColorSchemeKey)
                 == FoldersColorScheme.forest.rawValue)
+        #expect(defaults.integer(forKey: AppState.foldersSurfaceStyleKey)
+                == FoldersSurfaceStyle.tintedFrames.rawValue)
+
+        defaults.set(999, forKey: AppState.foldersSurfaceStyleKey)
+        #expect(AppState(defaults: defaults).foldersSurfaceStyle == .crisp,
+                "an invalid persisted review value must fail back to the flat default")
     }
 }
 
@@ -490,7 +542,9 @@ struct CardStyleRenderTests {
     private func render(
         styleMode: Int32,
         side: Int,
-        color: SIMD4<Float> = SIMD4<Float>(0.5, 0.5, 0.5, 1)
+        color: SIMD4<Float> = SIMD4<Float>(0.5, 0.5, 0.5, 1),
+        cardSurfaceMode: Int32 = 0,
+        expandedFolder: Bool = false
     ) throws -> Rendered? {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue() else { return nil }   // CI without a GPU
@@ -509,9 +563,13 @@ struct CardStyleRenderTests {
         guard let texture = device.makeTexture(descriptor: texDesc) else { return nil }
 
         // One mid-grey instance covering the whole viewport, with a plausible cushion ridge.
+        var coefs = SIMD4<Float>(-1.6, 1.6, -1.6, 1.6)
+        if styleMode == 1 {
+            coefs.w = expandedFolder ? 1 : 0
+        }
         var instance = CushionInstance(
             rect: SIMD4<Float>(0, 0, Float(side), Float(side)),
-            coefs: SIMD4<Float>(-1.6, 1.6, -1.6, 1.6),
+            coefs: coefs,
             color: color
         )
         let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
@@ -522,7 +580,8 @@ struct CardStyleRenderTests {
             lightDir: SIMD4<Float>(ld.x, ld.y, ld.z, 0),
             hoveredIndex: -1,
             selectedIndex: -1,
-            styleMode: styleMode
+            styleMode: styleMode,
+            cardSurfaceMode: cardSurfaceMode
         )
 
         let rp = MTLRenderPassDescriptor()
@@ -615,6 +674,105 @@ struct CardStyleRenderTests {
         #expect(left > right + 40, "left bevel must be brighter than right bevel")
     }
 
+    @Test("Crisp has a flat symmetric interior without a directional bevel")
+    func crispIsFlat() throws {
+        let side = 128
+        guard let crisp = try render(
+            styleMode: 1,
+            side: side,
+            color: SIMD4<Float>(0.25, 0.65, 0.95, 1),
+            cardSurfaceMode: Int32(FoldersSurfaceStyle.crisp.rawValue)
+        ) else { return }
+
+        func energy(_ pixel: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(pixel.b) + Int(pixel.g) + Int(pixel.r)
+        }
+        let top = energy(crisp.rgb(x: 64, y: 5))
+        let bottom = energy(crisp.rgb(x: 64, y: 122))
+        let left = energy(crisp.rgb(x: 5, y: 64))
+        let right = energy(crisp.rgb(x: 122, y: 64))
+        #expect(abs(top - bottom) <= 4, "Crisp must not imply a top light source")
+        #expect(abs(left - right) <= 4, "Crisp must not imply a left light source")
+    }
+
+    @Test("Quiet-frame surfaces alter expanded folders but not occupied blocks")
+    func quietFramesUseRoleMarker() throws {
+        let side = 128
+        let color = SIMD4<Float>(1.0, 0.50, 0.50, 1)
+        let mode = Int32(FoldersSurfaceStyle.tintedFrames.rawValue)
+        guard let folder = try render(
+            styleMode: 1, side: side, color: color,
+            cardSurfaceMode: mode, expandedFolder: true),
+              let leaf = try render(
+                styleMode: 1, side: side, color: color,
+                cardSurfaceMode: mode, expandedFolder: false),
+              let crispLeaf = try render(
+                styleMode: 1, side: side, color: color,
+                cardSurfaceMode: Int32(FoldersSurfaceStyle.crisp.rawValue),
+                expandedFolder: false) else { return }
+
+        func energy(_ pixel: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(pixel.b) + Int(pixel.g) + Int(pixel.r)
+        }
+        #expect(energy(folder.rgb(x: 64, y: 64)) + 80
+                < energy(leaf.rgb(x: 64, y: 64)),
+                "only expanded-folder chrome should become quiet")
+        #expect(leaf.rgb(x: 64, y: 64) == crispLeaf.rgb(x: 64, y: 64),
+                "leaf depth colour must not depend on a quiet-frame profile")
+    }
+
+    @Test("Color Headers reserves depth color for the title band")
+    func colorHeadersSeparateTitleFromBody() throws {
+        let side = 128
+        guard let card = try render(
+            styleMode: 1,
+            side: side,
+            color: SIMD4<Float>(0.50, 1.0, 1.0, 1),
+            cardSurfaceMode: Int32(FoldersSurfaceStyle.colorHeaders.rawValue),
+            expandedFolder: true
+        ) else { return }
+
+        func energy(_ pixel: (b: UInt8, g: UInt8, r: UInt8)) -> Int {
+            Int(pixel.b) + Int(pixel.g) + Int(pixel.r)
+        }
+        #expect(energy(card.rgb(x: 64, y: 10))
+                > energy(card.rgb(x: 64, y: 64)) + 90,
+                "the title row must keep the selected depth color over quiet chrome")
+    }
+
+    @Test("All six surface profiles produce distinct card output")
+    func surfaceProfilesArePixelDistinct() throws {
+        var results: [(FoldersSurfaceStyle, [UInt8])] = []
+        for surface in FoldersSurfaceStyle.allCases {
+            guard let rendered = try render(
+                styleMode: 1,
+                side: 128,
+                color: SIMD4<Float>(0.50, 1.0, 1.0, 1),
+                cardSurfaceMode: Int32(surface.rawValue),
+                expandedFolder: true
+            ) else { return }
+            results.append((surface, rendered.pixels))
+        }
+        for i in results.indices {
+            for j in results.indices where j > i {
+                #expect(results[i].1 != results[j].1,
+                        "\(results[i].0.reviewLabel) and \(results[j].0.reviewLabel) rendered identically")
+            }
+        }
+    }
+
+    @Test("Folders surface uniform is pixel-inert in Cushion")
+    func cushionIgnoresSurfaceMode() throws {
+        guard let crisp = try render(
+            styleMode: 0, side: 128,
+            cardSurfaceMode: Int32(FoldersSurfaceStyle.crisp.rawValue)),
+              let classic = try render(
+                styleMode: 0, side: 128,
+                cardSurfaceMode: Int32(FoldersSurfaceStyle.classicBevel.rawValue)) else { return }
+        #expect(crisp.pixels == classic.pixels,
+                "surface selection must not enter Cushion shading")
+    }
+
     /// A card small enough to lose its decoration renders as plain fill. This is the
     /// degradation promise: small rects stay visible instead of dissolving into padding.
     @Test("Below the decoration floor a card fills its rect like cushion does")
@@ -671,6 +829,32 @@ struct CardNestingTests {
         // Siblings stay adjacent and in order - nesting must not reshuffle the layout.
         #expect(a.x < b.x)
         #expect(abs((a.x + a.width) - b.x) < 0.01, "siblings stay flush with each other")
+    }
+
+    @Test("Surface changes nesting only, while preserving complete display rectangles")
+    func surfaceControlsPublishedNesting() throws {
+        let items = [
+            item(0, parent: 0, 0, 0, 400, 300, container: true),
+            item(1, parent: 0, 0, 0, 400, 300),
+        ]
+        let crisp = try #require(placed(
+            CardNesting.place(items, surfaceStyle: .crisp), 1))
+        let classic = try #require(placed(
+            CardNesting.place(items, surfaceStyle: .classicBevel), 1))
+
+        #expect(crisp.x < classic.x)
+        #expect(crisp.width > classic.width)
+        #expect(crisp.y < classic.y,
+                "both reserve the same title row; only repeated frame padding changes")
+
+        let rect = TreemapRect(nodeIndex: crisp.nodeIndex, x: crisp.x, y: crisp.y,
+                               width: crisp.width, height: crisp.height, depth: 1)
+        let grid = SpatialGrid(viewportWidth: 400, viewportHeight: 300, rects: [rect])
+        #expect(grid.hitTest(
+            point: (x: crisp.x + 0.1, y: crisp.y + crisp.height / 2),
+            rects: [rect]
+        ) == crisp.nodeIndex,
+        "the complete post-nesting rect remains clickable; shader inset never enters the grid")
     }
 
     /// Nesting composes: a grandchild sits inside the child, which sits inside the parent.

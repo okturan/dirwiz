@@ -160,6 +160,15 @@ public final class AppState {
         }
     }
 
+    /// Numbered native Folders surface comparison. Surface is independent from palette:
+    /// it controls boundaries, parent chrome, title rows, and nesting pad only.
+    public var foldersSurfaceStyle: FoldersSurfaceStyle = .crisp {
+        didSet {
+            guard foldersSurfaceStyle != oldValue else { return }
+            defaults.set(foldersSurfaceStyle.rawValue, forKey: AppState.foldersSurfaceStyleKey)
+        }
+    }
+
     /// Presents the full file-type table. It used to be a whole tab, which duplicated the
     /// always-visible sidebar legend; the legend is now the only file-type surface and this
     /// sheet is its "see everything" affordance.
@@ -167,6 +176,7 @@ public final class AppState {
 
     static let renderStyleKey = "DirWizTreemapRenderStyle"
     static let foldersColorSchemeKey = "DirWizFoldersColorScheme"
+    static let foldersSurfaceStyleKey = "DirWizFoldersSurfaceStyle"
 
     /// Whether the bottom treemap pane is collapsed to give the detail pane full height.
     /// A layout preference like `treemapRenderStyle`: persisted, and NOT reset by
@@ -188,6 +198,10 @@ public final class AppState {
 
     static func loadFoldersColorScheme(_ defaults: UserDefaults) -> FoldersColorScheme {
         FoldersColorScheme(rawValue: defaults.integer(forKey: foldersColorSchemeKey)) ?? .spaceMonger
+    }
+
+    static func loadFoldersSurfaceStyle(_ defaults: UserDefaults) -> FoldersSurfaceStyle {
+        FoldersSurfaceStyle(rawValue: defaults.integer(forKey: foldersSurfaceStyleKey)) ?? .crisp
     }
 
     // MARK: - Space Analysis
@@ -432,6 +446,7 @@ public final class AppState {
         // user's real defaults domain (it did, once).
         self.treemapRenderStyle = AppState.loadRenderStyle(defaults)
         self.foldersColorScheme = AppState.loadFoldersColorScheme(defaults)
+        self.foldersSurfaceStyle = AppState.loadFoldersSurfaceStyle(defaults)
         self.isTreemapPaneCollapsed = defaults.bool(forKey: AppState.treemapCollapsedKey)
         self.liveRefreshPaused = defaults.bool(forKey: AppState.livePausedKey)
     }

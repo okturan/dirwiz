@@ -99,3 +99,25 @@
 - [x] 9.6 Run focused, full, `CI=true`, and strict OpenSpec verification.
 - [x] 9.7 Commit, build, install, relaunch, and inspect the 4.54-million-item native tree before
   palette selection; the saved `7. Earth` scheme confirms the boundary treatment is scheme-wide.
+
+## 10. Compare surface structure separately from color
+
+- [x] 10.1 Record the supplied 894 GB `1. SpaceMonger` result: color semantics are now coherent,
+  but repeated parent fill, outline, and dual bevel layers accumulate into haze; vivid parent-depth
+  frames read as stray purple boundaries; intrinsic dark chips squeeze long folder names.
+- [x] 10.2 Add exactly six numbered surface profiles independent of the ten color palettes: Crisp,
+  Fine Lines, Tinted Frames, Color Headers, Soft Cards, and Classic Bevel.
+- [x] 10.3 Default new installs to Crisp, persist the selected surface through the injected defaults
+  store, and repaint/re-nest the displayed tree without rescanning or changing the Squarify layout.
+- [x] 10.4 Give Crisp and Fine Lines no bevel, reduce their parent-frame padding, and keep an explicit
+  edge; make Tinted Frames and Color Headers quiet vivid parent borders without changing leaf depth
+  colors; retain the current source-inspired treatment as Classic Bevel.
+- [x] 10.5 Replace intrinsic rounded folder-name chips with width-owning title rows; hide the size
+  before it can squeeze a long name, and let Color Headers use measured black-or-white text directly
+  on the depth-colored header.
+- [x] 10.6 Add deterministic gates for six sequential profiles, pairwise-distinct recipes, reduced
+  frame geometry, role-aware shader inputs, offscreen pixel differences, title-size admission,
+  preference persistence, hit geometry, and complete Cushion isolation.
+- [x] 10.7 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
+- [ ] 10.8 Commit, build, install, relaunch, and inspect several surface numbers on the same native
+  tree before choosing one; do not call a final surface winner from synthetic pixels alone.

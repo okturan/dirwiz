@@ -71,7 +71,7 @@ public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    struct Recipe: Equatable, Sendable {
+    struct Recipe: Hashable, Sendable {
         /// One map colour for every `depth & 7` value. An explicit table is
         /// intentional: a shared base-plus-step equation made ten numerically different
         /// recipes look like one dark scheme with ten strength settings.
@@ -145,6 +145,98 @@ public enum FoldersColorScheme: Int, CaseIterable, Identifiable, Sendable {
     ]
 
     var recipe: Recipe { Self.recipes[rawValue - 1] }
+}
+
+/// How Folders turns the selected depth colours into cards and folder chrome.
+///
+/// Colour and surface are deliberately independent while the native comparison is open:
+/// a palette answers which hues identify depth, while this value controls edge weight,
+/// bevel, parent-frame treatment, and nesting pad. Numbered labels keep screenshots and
+/// feedback unambiguous.
+public enum FoldersSurfaceStyle: Int, CaseIterable, Identifiable, Sendable {
+    case crisp = 1
+    case fineLines
+    case tintedFrames
+    case colorHeaders
+    case softCards
+    case classicBevel
+
+    public var id: Int { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .crisp:          return "Crisp"
+        case .fineLines:      return "Fine Lines"
+        case .tintedFrames:   return "Tinted Frames"
+        case .colorHeaders:   return "Color Headers"
+        case .softCards:      return "Soft Cards"
+        case .classicBevel:   return "Classic Bevel"
+        }
+    }
+
+    public var reviewLabel: String { "\(rawValue). \(displayName)" }
+
+    public var explanation: String {
+        switch self {
+        case .crisp:
+            return "Flat cards, compact parent frames, and a clear one-pixel edge"
+        case .fineLines:
+            return "Tight nesting with the thinnest depth-tinted boundaries"
+        case .tintedFrames:
+            return "Quiet parent chrome with unchanged depth colors inside"
+        case .colorHeaders:
+            return "Quiet parent bodies with depth color reserved for folder titles"
+        case .softCards:
+            return "A restrained edge and shallow directional relief"
+        case .classicBevel:
+            return "The full SpaceMonger-inspired outline and dual bevel reference"
+        }
+    }
+
+    struct Recipe: Hashable, Sendable {
+        let containerPadScale: Float
+        let visualInsetScale: Float
+        let outlineWidth: Float
+        let outlineOpacity: Float
+        let bevelStrength: Float
+        let quietsExpandedFolders: Bool
+        let usesColorHeader: Bool
+    }
+
+    var recipe: Recipe {
+        switch self {
+        case .crisp:
+            return Recipe(containerPadScale: 0.65, visualInsetScale: 0.55,
+                          outlineWidth: 0.95, outlineOpacity: 0.82,
+                          bevelStrength: 0, quietsExpandedFolders: false,
+                          usesColorHeader: false)
+        case .fineLines:
+            return Recipe(containerPadScale: 0.35, visualInsetScale: 0.35,
+                          outlineWidth: 0.65, outlineOpacity: 0.62,
+                          bevelStrength: 0, quietsExpandedFolders: false,
+                          usesColorHeader: false)
+        case .tintedFrames:
+            return Recipe(containerPadScale: 0.65, visualInsetScale: 0.55,
+                          outlineWidth: 0.90, outlineOpacity: 0.76,
+                          bevelStrength: 0, quietsExpandedFolders: true,
+                          usesColorHeader: false)
+        case .colorHeaders:
+            return Recipe(containerPadScale: 0.65, visualInsetScale: 0.45,
+                          outlineWidth: 0.90, outlineOpacity: 0.72,
+                          bevelStrength: 0, quietsExpandedFolders: true,
+                          usesColorHeader: true)
+        case .softCards:
+            return Recipe(containerPadScale: 0.65, visualInsetScale: 0.75,
+                          outlineWidth: 0.90, outlineOpacity: 0.55,
+                          bevelStrength: 0.28, quietsExpandedFolders: false,
+                          usesColorHeader: false)
+        case .classicBevel:
+            return Recipe(containerPadScale: 1.00, visualInsetScale: 1.00,
+                          outlineWidth: 1.50, outlineOpacity: 0.97,
+                          bevelStrength: 0.82, quietsExpandedFolders: false,
+                          usesColorHeader: false)
+        }
+    }
 }
 
 /// Corner radius and gap for card style, as pure functions of a rect's smaller side.
@@ -316,10 +408,15 @@ public enum CardGeometry {
     /// it, so small folders still spend their pixels on children rather than on frame.
     public static let maxContainerPad: Float = 5
 
-    public static func containerPad(width: Float, height: Float) -> Float {
+    public static func containerPad(
+        width: Float,
+        height: Float,
+        surfaceStyle: FoldersSurfaceStyle = .classicBevel
+    ) -> Float {
         let minSide = min(width, height)
         guard minSide >= minSideForDecoration * 3 else { return 0 }
-        return min(maxContainerPad, minSide * 0.02)
+        let sourcePad = min(maxContainerPad, minSide * 0.02)
+        return sourcePad * surfaceStyle.recipe.containerPadScale
     }
 
     /// The region a container's children are remapped into: its own rect, minus the
@@ -329,9 +426,10 @@ public enum CardGeometry {
     /// fill it edge to edge exactly as they do in cushion style. That is the degradation
     /// floor: nesting decoration is the first thing sacrificed, never the child itself.
     public static func innerRect(
-        x: Float, y: Float, width: Float, height: Float
+        x: Float, y: Float, width: Float, height: Float,
+        surfaceStyle: FoldersSurfaceStyle = .classicBevel
     ) -> (x: Float, y: Float, width: Float, height: Float)? {
-        let pad = containerPad(width: width, height: height)
+        let pad = containerPad(width: width, height: height, surfaceStyle: surfaceStyle)
         let header = headerHeight(width: width, height: height)
         guard pad > 0 || header > 0 else { return nil }
         let innerW = width - 2 * pad
@@ -339,6 +437,13 @@ public enum CardGeometry {
         // Never hand back a degenerate or inverted region.
         guard innerW >= minSideForDecoration, innerH >= minSideForDecoration else { return nil }
         return (x: x + pad, y: y + pad + header, width: innerW, height: innerH)
+    }
+
+    /// Folder metadata is secondary to the folder name. A pure admission rule keeps the
+    /// view deterministic and ensures a long name never competes with its size in a narrow
+    /// 18-point title row.
+    public static func shouldShowFolderSize(width: Float, nameCharacterCount: Int) -> Bool {
+        width >= 210 && nameCharacterCount <= 18
     }
 }
 
@@ -411,7 +516,10 @@ public enum CardNesting {
     }
 
     /// `items` must be in layout order (parents before their children).
-    public static func place(_ items: [Item]) -> [Placed] {
+    public static func place(
+        _ items: [Item],
+        surfaceStyle: FoldersSurfaceStyle = .classicBevel
+    ) -> [Placed] {
         // container node -> (rect it originally occupied, interior its children get)
         var boxes: [UInt32: (outer: Item, inner: (x: Float, y: Float, width: Float, height: Float))] = [:]
         var out: [Placed] = []
@@ -445,7 +553,10 @@ public enum CardNesting {
             var collapsed = false
             if item.isContainer {
                 if CardGeometry.canSubdivide(width: w, height: h),
-                   let inner = CardGeometry.innerRect(x: x, y: y, width: w, height: h) {
+                   let inner = CardGeometry.innerRect(
+                       x: x, y: y, width: w, height: h,
+                       surfaceStyle: surfaceStyle
+                   ) {
                     // Keyed on the ORIGINAL rect: children arrive in original coordinates,
                     // so mapping original -> inner is what composes. Using the remapped
                     // rect as `outer` would apply the parent's inset twice to every child.

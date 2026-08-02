@@ -149,6 +149,7 @@ public struct InteractiveTreemapView: View {
 
             if appState.treemapRenderStyle == .cards {
                 foldersSchemePicker
+                foldersSurfacePicker
             }
 
             // Show size of current root.
@@ -237,6 +238,38 @@ public struct InteractiveTreemapView: View {
         .accessibilityValue(appState.foldersColorScheme.reviewLabel)
     }
 
+    /// Surface is a separate review axis from colour. Changing it keeps the same tree and
+    /// Squarify layout, then rebuilds card nesting, labels, and hit geometry together.
+    private var foldersSurfacePicker: some View {
+        Menu {
+            ForEach(FoldersSurfaceStyle.allCases) { surface in
+                Button {
+                    appState.foldersSurfaceStyle = surface
+                } label: {
+                    if appState.foldersSurfaceStyle == surface {
+                        Label(surface.reviewLabel, systemImage: "checkmark")
+                    } else {
+                        Text(surface.reviewLabel)
+                    }
+                }
+                .help(surface.explanation)
+            }
+        } label: {
+            Label(
+                "Surface \(appState.foldersSurfaceStyle.rawValue)",
+                systemImage: "square.3.layers.3d"
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(
+            "\(appState.foldersSurfaceStyle.reviewLabel): "
+                + appState.foldersSurfaceStyle.explanation
+        )
+        .accessibilityLabel("Folders surface style")
+        .accessibilityValue(appState.foldersSurfaceStyle.reviewLabel)
+    }
+
     private func navButton(systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
@@ -276,6 +309,7 @@ public struct InteractiveTreemapView: View {
                 isRecencyOverlayEnabled: appState.isRecencyOverlayEnabled,
                 renderStyle: appState.treemapRenderStyle,
                 foldersColorScheme: appState.foldersColorScheme,
+                foldersSurfaceStyle: appState.foldersSurfaceStyle,
                 temporalDiffKinds: appState.temporalDiff.temporalDiffKinds,
                 temporalDiffStrengths: appState.temporalDiff.temporalDiffStrengths,
                 isTemporalDiffEnabled: appState.temporalDiff.isTemporalDiffEnabled,
@@ -398,39 +432,56 @@ public struct InteractiveTreemapView: View {
         }
     }
 
-    /// A folder's own name, pinned to the top-left of the region it owns. Drawn on a dark
-    /// chip so it stays readable over whatever its children happen to be coloured, and it
-    /// deliberately sits ABOVE the leaf labels in z-order for the same reason.
+    /// A folder owns the full usable width of its reserved title row. The name gets first
+    /// claim on that width; size metadata appears only when it cannot squeeze the name.
+    /// Color Headers supplies the row colour in Metal, while the other surfaces use one
+    /// flat dark row instead of stacking an intrinsic rounded chip on the card.
     private func containerLabel(for rect: TreemapRect, tree: FileTree?) -> some View {
         let name = tree?.name(at: rect.nodeIndex) ?? ""
         let node = tree?.node(at: rect.nodeIndex)
-        let wide = rect.width > 150
+        let showSize = node != nil && CardGeometry.shouldShowFolderSize(
+            width: rect.width,
+            nameCharacterCount: name.count
+        )
+        let directColorHeader = isFoldersStylePainted
+            && appState.foldersSurfaceStyle == .colorHeaders
+            && !appState.isRecencyOverlayEnabled
+            && !appState.temporalDiff.isTemporalDiffEnabled
+        let useDarkText = directColorHeader && CardGeometry.prefersDarkLabel(
+            depth: Int(rect.depth),
+            scheme: appState.foldersColorScheme
+        )
+        let foreground = useDarkText ? Color.black : Color.white
+        let secondary = foreground.opacity(0.72)
+        let shadow = useDarkText ? Color.white.opacity(0.7) : Color.black.opacity(0.72)
+        let rowWidth = max(0, CGFloat(rect.width) - 4)
 
         return HStack(spacing: 5) {
             Image(systemName: "folder.fill")
                 .font(.system(size: 8))
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(secondary)
             Text(name)
                 .font(.system(size: 10, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if wide, let node {
+            Spacer(minLength: 3)
+            if showSize, let node {
                 Text(SizeFormatter.shared.format(node.displaySize))
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(secondary)
+                    .fixedSize()
             }
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
+        .foregroundStyle(foreground)
+        .shadow(color: shadow, radius: directColorHeader ? 0.7 : 0, x: 0, y: 1)
+        .padding(.horizontal, 4)
+        .frame(width: rowWidth, height: 16, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color.black.opacity(0.55))
+            Rectangle()
+                .fill(directColorHeader ? Color.clear : Color.black.opacity(0.54))
         )
-        .padding(2)
-        .frame(width: CGFloat(rect.width), height: CGFloat(rect.height), alignment: .topLeading)
         .clipped()
-        .offset(x: CGFloat(rect.x), y: CGFloat(rect.y))
+        .offset(x: CGFloat(rect.x) + 2, y: CGFloat(rect.y) + 1)
     }
 
     private func leafLabel(for rect: TreemapRect, tree: FileTree?) -> some View {
