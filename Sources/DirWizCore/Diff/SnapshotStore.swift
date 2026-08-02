@@ -16,7 +16,6 @@ public struct SnapshotStore: Sendable {
     /// receive a synthetic path.
     public let storageIdentity: String
 
-    private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
     private static let indexFilename = "index.json"
 
     public init(rootPath: String, storageIdentity: String? = nil) {
@@ -27,14 +26,10 @@ public struct SnapshotStore: Sendable {
     // MARK: - Layout
 
     static func baseDirectory() -> URL {
-        if let override = ProcessInfo.processInfo.environment[appSupportOverrideEnv], !override.isEmpty {
-            return URL(fileURLWithPath: override, isDirectory: true)
-                .appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
-        }
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        return support.appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
+        // Centralized resolution - see DirWizOwnedPaths.applicationSupportBase for the
+        // test-harness redirect that keeps fixture stores out of the real location.
+        URL(fileURLWithPath: DirWizOwnedPaths.applicationSupportBase(), isDirectory: true)
+            .appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
     }
 
     public var directory: URL {

@@ -94,7 +94,6 @@ public struct TemporalSnapshot: Sendable {
 
     // MARK: Persistence
 
-    private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
 
     /// URL where the snapshot for a given root path is persisted.
     /// Uses a hash suffix to avoid collisions between paths that differ only in
@@ -104,15 +103,10 @@ public struct TemporalSnapshot: Sendable {
     }
 
     private static func snapshotDirectoryURL() -> URL {
-        if let override = ProcessInfo.processInfo.environment[appSupportOverrideEnv], !override.isEmpty {
-            return URL(fileURLWithPath: override, isDirectory: true)
-                .appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
-        }
-
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        return support.appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
+        // Centralized resolution - see DirWizOwnedPaths.applicationSupportBase for the
+        // test-harness redirect that keeps fixture stores out of the real location.
+        URL(fileURLWithPath: DirWizOwnedPaths.applicationSupportBase(), isDirectory: true)
+            .appendingPathComponent("DirWiz/Snapshots", isDirectory: true)
     }
 
     private static func snapshotFilename(for rootPath: String) -> String {

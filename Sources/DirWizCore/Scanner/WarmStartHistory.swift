@@ -31,7 +31,6 @@ public enum WarmStartHistory {
     /// Oldest entries are evicted first once a volume's history exceeds this many.
     public static let maxEntries = 20
 
-    private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
 
     /// Append `entry` to `rootPath`'s history, capping at `maxEntries` (oldest evicted
     /// first). Best-effort: a write failure is silently swallowed - this is diagnostic
@@ -69,15 +68,10 @@ public enum WarmStartHistory {
     // MARK: - Location
 
     private static func historyDirectoryURL() -> URL {
-        if let override = ProcessInfo.processInfo.environment[appSupportOverrideEnv], !override.isEmpty {
-            return URL(fileURLWithPath: override, isDirectory: true)
-                .appendingPathComponent("DirWiz/WarmStartHistory", isDirectory: true)
-        }
-
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        return support.appendingPathComponent("DirWiz/WarmStartHistory", isDirectory: true)
+        // Centralized resolution - see DirWizOwnedPaths.applicationSupportBase for the
+        // test-harness redirect that keeps fixture stores out of the real location.
+        URL(fileURLWithPath: DirWizOwnedPaths.applicationSupportBase(), isDirectory: true)
+            .appendingPathComponent("DirWiz/WarmStartHistory", isDirectory: true)
     }
 
     private static func historyURL(for rootPath: String) -> URL {

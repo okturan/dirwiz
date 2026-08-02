@@ -38,7 +38,6 @@ public enum TreeCache {
         public let savedAt: Date
     }
 
-    private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
 
     private enum Binary {
         static let magic = Data([0x44, 0x57, 0x54, 0x43]) // "DWTC"
@@ -358,15 +357,11 @@ public enum TreeCache {
     // MARK: - Location
 
     private static func cacheDirectoryURL() -> URL {
-        if let override = ProcessInfo.processInfo.environment[appSupportOverrideEnv], !override.isEmpty {
-            return URL(fileURLWithPath: override, isDirectory: true)
-                .appendingPathComponent("DirWiz/TreeCache", isDirectory: true)
-        }
-
-        let support = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-        return support.appendingPathComponent("DirWiz/TreeCache", isDirectory: true)
+        // Resolution is centralized in DirWizOwnedPaths so the test-harness redirect
+        // (never fall back to the real Application Support under tests) covers every
+        // store with one rule.
+        URL(fileURLWithPath: DirWizOwnedPaths.applicationSupportBase(), isDirectory: true)
+            .appendingPathComponent("DirWiz/TreeCache", isDirectory: true)
     }
 
     private static func cacheFilename(
