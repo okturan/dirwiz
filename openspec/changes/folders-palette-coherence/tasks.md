@@ -51,5 +51,5 @@
 - [x] 6.4 Strengthen deterministic tests to require distinct outer colours, full depth tables, light
   and dark starting points, multiple trajectory directions, and raw file-colour identity.
 - [x] 6.5 Run focused, full, `CI=true`, and strict OpenSpec verification after the replacement.
-- [ ] 6.6 Commit, build, install, and relaunch the clean local comparison build before asking Okan to
+- [x] 6.6 Commit, build, install, and relaunch the clean local comparison build before asking Okan to
   choose again.
