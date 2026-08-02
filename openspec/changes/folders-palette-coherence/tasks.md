@@ -135,6 +135,6 @@
   geometry, nesting, labels, and Cushion output untouched.
 - [x] 11.4 Add deterministic floor, ceiling, gating, and monotonicity gates plus offscreen micro,
   reading, and structural pixel gates across profiles.
-- [ ] 11.5 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
-- [ ] 11.6 Commit, install, relaunch, and inspect dense and sparse regions natively; the final
+- [x] 11.5 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
+- [x] 11.6 Commit, install, relaunch, and inspect dense and sparse regions natively; the final
   surface choice remains with Okan.
