@@ -11,12 +11,17 @@ import Foundation
 /// to "your checkpoints are gone".
 public struct SnapshotStore: Sendable {
     public let rootPath: String
+    /// Scope-qualified identity used only for the on-disk directory name. Snapshot
+    /// metadata retains the real root path so path resolution and diff validation do not
+    /// receive a synthetic path.
+    public let storageIdentity: String
 
     private static let appSupportOverrideEnv = "DIRWIZ_APP_SUPPORT_DIR"
     private static let indexFilename = "index.json"
 
-    public init(rootPath: String) {
+    public init(rootPath: String, storageIdentity: String? = nil) {
         self.rootPath = rootPath
+        self.storageIdentity = storageIdentity ?? rootPath
     }
 
     // MARK: - Layout
@@ -34,7 +39,7 @@ public struct SnapshotStore: Sendable {
 
     public var directory: URL {
         SnapshotStore.baseDirectory()
-            .appendingPathComponent("v2-" + SnapshotStore.volumeKey(rootPath), isDirectory: true)
+            .appendingPathComponent("v2-" + SnapshotStore.volumeKey(storageIdentity), isDirectory: true)
     }
 
     private var indexURL: URL { directory.appendingPathComponent(SnapshotStore.indexFilename) }
@@ -214,6 +219,10 @@ public struct SnapshotStore: Sendable {
     /// file is renamed rather than deleted, so a failed migration is recoverable.
     @discardableResult
     public func importLegacySnapshotIfPresent() -> SnapshotCheckpoint? {
+        // A legacy snapshot carries only the real root path. It cannot prove whether a
+        // `/` tree crossed mounts, so only the legacy-compatible selected-volume store
+        // may adopt it; combined/unrestricted stores start clean.
+        guard storageIdentity == rootPath else { return nil }
         let legacyURL = TemporalSnapshot.snapshotURL(for: rootPath)
         let fm = FileManager.default
         guard fm.fileExists(atPath: legacyURL.path) else { return nil }

@@ -86,8 +86,36 @@ public final class AppState {
     /// Selected volume URL to scan.
     public var selectedVolume: URL?
 
+    /// Mount scope for the next scan selection. This is deliberately session-only:
+    /// relaunch and ordinary volume selection return to one-volume-at-a-time semantics.
+    public var selectedMountTraversalScope: MountTraversalScope = .selectedVolume
+
     /// Available volumes.
     public var availableVolumes: [VolumeInfo] = []
+
+    public var isCombinedVolumeSelection: Bool {
+        selectedMountTraversalScope == .combinedVolumes
+    }
+
+    /// Identity of the currently selected scan target, including scope. This is used for
+    /// diagnostics before a matching tree necessarily exists.
+    public var selectedScanPersistenceIdentity: String? {
+        guard let selectedVolume else { return nil }
+        return selectedMountTraversalScope.persistenceIdentity(for: selectedVolume.path)
+    }
+
+    /// Select one concrete volume and restore the default same-device boundary.
+    public func selectVolume(_ url: URL) {
+        selectedVolume = url
+        selectedMountTraversalScope = .selectedVolume
+    }
+
+    /// Select the explicit one-map overview. The scan root is `/`; scope, not path alone,
+    /// distinguishes this from an individual boot-volume scan.
+    public func selectCombinedVolumes() {
+        selectedVolume = URL(fileURLWithPath: "/", isDirectory: true)
+        selectedMountTraversalScope = .combinedVolumes
+    }
 
     /// Active tab in detail area.
     public var activeTab: DetailTab = .treeView
@@ -516,6 +544,7 @@ public final class AppState {
         cloneResults = []
         isCloneCheckRunning = false
         isBundleSizingRunning = false
+        storageTrendHistory = []
         fsEventsMonitor?.stop()
         fsEventsMonitor = nil
         liveRefreshTask?.cancel()

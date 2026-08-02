@@ -136,9 +136,10 @@ struct CardStyleTests {
 
     /// This uses the actual 17-color production palette rather than hand-picked moderate samples.
     /// The first attempt passed synthetic inputs while the near-primary real colors still looked
-    /// pasted onto the grey folder surface. Folders must pull both chroma and tone toward the parent
-    /// chrome, while retaining channel order and enough separation to read extensions apart.
-    @Test("Every production palette color settles into Folders chrome and stays distinct")
+    /// pasted onto the grey folder surface. The later 75% blend overcorrected and made the same
+    /// production colours read as grey. Folders must keep a clearly chromatic file key while its
+    /// quieter content-tinted panels bridge the old grey-to-primary discontinuity.
+    @Test("Every production palette color stays chromatic in Folders and remains distinct")
     func productionLeafColorsBelongToChrome() {
         var palette = ExtensionPalette()
         let stats = (0..<17).map { index in
@@ -169,13 +170,13 @@ struct CardStyleTests {
             let outOrder = [out.x, out.y, out.z].enumerated().sorted { $0.element > $1.element }.map(\.offset)
             #expect(baseOrder == outOrder, "channel dominance must survive desaturation")
 
-            // Retain 20-30% of the original channel spread. The real Samsung8TB scan proved
-            // that the previous 45% still made large blue, red, green, and magenta regions
-            // dominate the neutral hierarchy instead of reading as accents within it.
+            // Retain 55-65% of the original channel spread. The supplied 5.35 TB view proved
+            // 25% is a grey wash; the panel tint now creates continuity without erasing the
+            // extension signal carried by leaves.
             let spread = { (c: SIMD4<Float>) in max(c.x, max(c.y, c.z)) - min(c.x, min(c.y, c.z)) }
             let retainedSpread = spread(out) / spread(base)
-            #expect(retainedSpread >= 0.20 && retainedSpread <= 0.30,
-                    "production chroma must settle into a narrow, intentional range")
+            #expect(retainedSpread >= 0.55 && retainedSpread <= 0.65,
+                    "production file colours must remain visibly chromatic")
 
             // Tone moves toward the actual surrounding chrome. Holding the old color's luma
             // constant was part of why bright tiles still looked pasted on.
@@ -186,7 +187,7 @@ struct CardStyleTests {
 
         // Uniform muting must preserve the production palette's existing relative separation.
         // Some source hues are already close after Oklab gamut clipping; Folders must not make
-        // that worse beyond the same intentional 25% scale applied to every color.
+        // that worse beyond the same intentional 60% scale applied to every color.
         for i in outputs.indices {
             for j in outputs.indices where j > i {
                 let baseDelta = productionColors[i] - productionColors[j]
@@ -197,10 +198,34 @@ struct CardStyleTests {
                 let delta = outputs[i] - outputs[j]
                 let squared = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z
                 let distance = sqrt(squared)
-                #expect(abs(distance / baseDistance - 0.25) < 0.01,
+                #expect(abs(distance / baseDistance - 0.60) < 0.01,
                         "Folders must scale, not unpredictably collapse, colors \(i) and \(j)")
             }
         }
+    }
+
+    @Test("Folder panels bridge content hue while collapsed folders keep file-like chroma")
+    func folderHierarchyCarriesRepresentativeHue() {
+        let dirBaseA = SIMD4<Float>(0.80, 0.30, 0.38, 1)
+        let dirBaseB = SIMD4<Float>(0.28, 0.40, 0.88, 1)
+        let panelA = CardGeometry.folderContainerFill(representativeColor: dirBaseA, depth: 0)
+        let panelB = CardGeometry.folderContainerFill(representativeColor: dirBaseB, depth: 0)
+        let collapsedA = CardGeometry.collapsedFolderFill(dirBaseA, containerDepth: 0)
+        let collapsedB = CardGeometry.collapsedFolderFill(dirBaseB, containerDepth: 0)
+
+        func distance(_ a: SIMD4<Float>, _ b: SIMD4<Float>) -> Float {
+            let d = a - b
+            return sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
+        }
+
+        let sourceDistance = distance(dirBaseA, dirBaseB)
+        #expect(abs(distance(panelA, panelB) / sourceDistance - 0.30) < 0.001,
+                "expanded panels need a quiet but deterministic content-hue bridge")
+        #expect(abs(distance(collapsedA, collapsedB) / sourceDistance - 0.90) < 0.001,
+                "collapsed folders represent content and must not be washed into panel grey")
+        #expect(CardGeometry.folderContainerFill(representativeColor: nil, depth: 0)
+                == CardGeometry.containerFill(depth: 0),
+                "an actually empty folder remains neutral")
     }
 
     @Test("Only Folders transforms the palette used for its visible color key")

@@ -89,7 +89,7 @@ NOTARY_KEY="${DIRWIZ_NOTARY_KEY:-}"
 NOTARY_KEY_ID="${DIRWIZ_NOTARY_KEY_ID:-}"
 NOTARY_ISSUER="${DIRWIZ_NOTARY_ISSUER:-}"
 
-if [[ "$SIGN_IDENTITY" != "-" && -n "$NOTARY_KEY" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER" ]]; then
+if [[ "${DIRWIZ_SKIP_NOTARIZATION:-0}" != "1" && "$SIGN_IDENTITY" != "-" && -n "$NOTARY_KEY" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER" ]]; then
   if [[ ! -f "$NOTARY_KEY" ]]; then
     echo "Notarization key not found at: $NOTARY_KEY" >&2
     exit 1
@@ -114,6 +114,10 @@ if [[ "$SIGN_IDENTITY" != "-" && -n "$NOTARY_KEY" && -n "$NOTARY_KEY_ID" && -n "
   echo "Notarized and stapled: $APP"
   echo "Distributable (ticket embedded): $ZIP"
 else
-  echo "Skipped notarization (ad-hoc build). To enable: install a Developer ID Application"
-  echo "certificate and set DIRWIZ_NOTARY_KEY / _KEY_ID / _ISSUER (or scripts/notary.env)."
+  if [[ "${DIRWIZ_SKIP_NOTARIZATION:-0}" == "1" ]]; then
+    echo "Skipped notarization by DIRWIZ_SKIP_NOTARIZATION=1 (local build)."
+  else
+    echo "Skipped notarization (ad-hoc build). To enable: install a Developer ID Application"
+    echo "certificate and set DIRWIZ_NOTARY_KEY / _KEY_ID / _ISSUER (or scripts/notary.env)."
+  fi
 fi

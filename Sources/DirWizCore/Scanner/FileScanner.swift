@@ -59,13 +59,28 @@ private struct InodeKey: Hashable, Sendable {
 /// Thread-safe set tracking visited (dev, inode) pairs to avoid hardlink/mount loops,
 /// plus the firmlink duplicate paths that `(dev, inode)` provably cannot catch.
 private final class VisitedDirectories: Sendable {
+    enum TraversalDecision {
+        case traverse
+        case mountBoundary
+        case alreadyVisited
+        case firmlinkDuplicate
+    }
+
     private let seen = Mutex(Set<InodeKey>())
 
     /// Absolute Data-volume paths already reachable via a firmlink (see `FirmlinkTable`).
     /// Empty when deduplication is off, which reproduces the previous behavior exactly.
     private let firmlinkDuplicates: Set<String>
+    private let rootDevice: Int32?
+    private let mountTraversalScope: MountTraversalScope
 
-    init(firmlinkDuplicates: Set<String> = []) {
+    init(
+        rootDevice: Int32? = nil,
+        mountTraversalScope: MountTraversalScope = .selectedVolume,
+        firmlinkDuplicates: Set<String> = []
+    ) {
+        self.rootDevice = rootDevice
+        self.mountTraversalScope = mountTraversalScope
         self.firmlinkDuplicates = firmlinkDuplicates
     }
 
@@ -75,14 +90,26 @@ private final class VisitedDirectories: Sendable {
         return seen.withLock { $0.insert(key).inserted }
     }
 
+    /// Whether this device is outside an individual scan's known root device. A missing
+    /// root device deliberately fails open; combined and diagnostic scopes cross mounts.
+    func isMountBoundary(device: Int32) -> Bool {
+        guard mountTraversalScope == .selectedVolume, let rootDevice else { return false }
+        return device != rootDevice
+    }
+
     /// The single "should I descend into this directory?" gate.
     ///
     /// Checks the firmlink table FIRST and deliberately does not mark the inode visited
     /// when skipping: the `/`-side copy of the same content must stay free to claim it.
     /// Marking it here would trade a double count for a silent omission.
-    func shouldTraverse(path: String, dev: Int32, inode: UInt64) -> Bool {
-        if !firmlinkDuplicates.isEmpty, firmlinkDuplicates.contains(path) { return false }
-        return insert(dev: dev, inode: inode)
+    func traversalDecision(path: String, dev: Int32, inode: UInt64) -> TraversalDecision {
+        if !firmlinkDuplicates.isEmpty, firmlinkDuplicates.contains(path) {
+            return .firmlinkDuplicate
+        }
+        // Do not claim the inode when rejecting a mount. A separately encountered eligible
+        // path must remain free to traverse it, matching the firmlink skip discipline.
+        if isMountBoundary(device: dev) { return .mountBoundary }
+        return insert(dev: dev, inode: inode) ? .traverse : .alreadyVisited
     }
 }
 
@@ -232,7 +259,13 @@ private struct RawScanScratch {
     var children: [EncodedFileNode] = []
     var namePool = Data()
     var subdirs: [(nameOffset: Int, nameLength: Int, childIndex: Int, dev: Int32, inode: UInt64)] = []
-    var bundleDirs: [(nameOffset: Int, nameLength: Int, childIndex: Int)] = []
+    var bundleDirs: [(
+        nameOffset: Int,
+        nameLength: Int,
+        childIndex: Int,
+        dev: Int32,
+        inode: UInt64
+    )] = []
 
     init() {
         children.reserveCapacity(32)
@@ -545,6 +578,7 @@ public final class FileScanner: @unchecked Sendable {
     private let directoryWorkQueue = Mutex<DirectoryWorkQueue?>(nil)
     private let computeBundleSizes: Bool
     private let deferTreeMaterialization: Bool
+    private let mountTraversalScope: MountTraversalScope
     let filesystem: FilesystemProvider
 
     /// Test-only observation point after a transactional subtree splice and its aggregate
@@ -563,11 +597,16 @@ public final class FileScanner: @unchecked Sendable {
     public init(
         filesystem: FilesystemProvider = RealFilesystemProvider(),
         computeBundleSizes: Bool = ProcessInfo.processInfo.environment["DIRWIZ_SKIP_BUNDLE_SIZES"] != "1",
-        deferTreeMaterialization: Bool = ProcessInfo.processInfo.environment["DIRWIZ_DEFER_TREE"] != "0"
+        deferTreeMaterialization: Bool = ProcessInfo.processInfo.environment["DIRWIZ_DEFER_TREE"] != "0",
+        mountTraversalScope requestedMountTraversalScope: MountTraversalScope = .selectedVolume
     ) {
         self.filesystem = filesystem
         self.computeBundleSizes = computeBundleSizes
         self.deferTreeMaterialization = deferTreeMaterialization
+        self.mountTraversalScope = MountTraversalScope.resolved(
+            requested: requestedMountTraversalScope,
+            crossMountsEnvironmentValue: ProcessInfo.processInfo.environment["DIRWIZ_CROSS_MOUNTS"]
+        )
         self.firmlinkDuplicatesOverride = nil
         self.subtreeRescanPostCommitHook = nil
     }
@@ -577,11 +616,16 @@ public final class FileScanner: @unchecked Sendable {
         filesystem: FilesystemProvider = RealFilesystemProvider(),
         computeBundleSizes: Bool = false,
         deferTreeMaterialization: Bool = false,
-        firmlinkDuplicates: Set<String>
+        firmlinkDuplicates: Set<String>,
+        mountTraversalScope requestedMountTraversalScope: MountTraversalScope = .selectedVolume
     ) {
         self.filesystem = filesystem
         self.computeBundleSizes = computeBundleSizes
         self.deferTreeMaterialization = deferTreeMaterialization
+        self.mountTraversalScope = MountTraversalScope.resolved(
+            requested: requestedMountTraversalScope,
+            crossMountsEnvironmentValue: ProcessInfo.processInfo.environment["DIRWIZ_CROSS_MOUNTS"]
+        )
         self.firmlinkDuplicatesOverride = firmlinkDuplicates
         self.subtreeRescanPostCommitHook = nil
     }
@@ -591,11 +635,16 @@ public final class FileScanner: @unchecked Sendable {
         filesystem: FilesystemProvider = RealFilesystemProvider(),
         computeBundleSizes: Bool = false,
         deferTreeMaterialization: Bool = false,
-        subtreeRescanPostCommitHook: @escaping @Sendable () -> Void
+        subtreeRescanPostCommitHook: @escaping @Sendable () -> Void,
+        mountTraversalScope requestedMountTraversalScope: MountTraversalScope = .selectedVolume
     ) {
         self.filesystem = filesystem
         self.computeBundleSizes = computeBundleSizes
         self.deferTreeMaterialization = deferTreeMaterialization
+        self.mountTraversalScope = MountTraversalScope.resolved(
+            requested: requestedMountTraversalScope,
+            crossMountsEnvironmentValue: ProcessInfo.processInfo.environment["DIRWIZ_CROSS_MOUNTS"]
+        )
         self.firmlinkDuplicatesOverride = nil
         self.subtreeRescanPostCommitHook = subtreeRescanPostCommitHook
     }
@@ -816,11 +865,22 @@ public final class FileScanner: @unchecked Sendable {
         // own root: the warm-start equivalence gate asserts a patched tree equals a fresh
         // cold scan, so if cold skips the Data-side copies and a splice re-enumerated them,
         // the two would diverge the moment a firmlinked path changed.
+        let rootDevice = filesystem.deviceAndInode(forPath: treeRoot)?.device
         let visited = VisitedDirectories(
+            rootDevice: rootDevice,
+            mountTraversalScope: tree.mountTraversalScope,
             firmlinkDuplicates: resolveFirmlinkDuplicates(forScanRoot: treeRoot)
         )
 
-        let plans = planRescanTargets(rescannedRoots, tree: tree)
+        // A changed mount point can itself become a Phase-A root. Check it before seeding
+        // staging; otherwise the root queue entry bypasses the child-enqueue gate and an
+        // individual warm/living patch absorbs the foreign filesystem cold scan excludes.
+        let plans = planRescanTargets(rescannedRoots, tree: tree).filter { plan in
+            guard let device = filesystem.deviceAndInode(forPath: plan.targetPath)?.device,
+                  visited.isMountBoundary(device: device) else { return true }
+            progress.incrementSkippedMount(path: plan.targetPath)
+            return false
+        }
         let preflightAndPlanningEnd = clock.now
 
         let phaseAStart = clock.now
@@ -1556,6 +1616,7 @@ public final class FileScanner: @unchecked Sendable {
 
         // Store scan root path for correct absolute path reconstruction.
         tree.setRootPath(path)
+        tree.setMountTraversalScope(mountTraversalScope)
         // Every scan path (raw and provider-driven) records per-file link counts into
         // node flags, so mark them trustworthy for HardlinkFinder's fast path.
         tree.setLinkCountsCaptured(true)
@@ -1596,10 +1657,15 @@ public final class FileScanner: @unchecked Sendable {
         if !firmlinkDuplicates.isEmpty {
             scanLog.notice("Firmlink dedup active for \(path, privacy: .public): \(firmlinkDuplicates.count, privacy: .public) duplicate Data-volume paths will be skipped")
         }
-        let visited = VisitedDirectories(firmlinkDuplicates: firmlinkDuplicates)
+        let rootIdentity = filesystem.deviceAndInode(forPath: path)
+        let visited = VisitedDirectories(
+            rootDevice: rootIdentity?.device,
+            mountTraversalScope: mountTraversalScope,
+            firmlinkDuplicates: firmlinkDuplicates
+        )
 
         // Mark root as visited
-        if let di = filesystem.deviceAndInode(forPath: path) {
+        if let di = rootIdentity {
             rootNode.device = di.device
             rootNode.inode = di.inode
             _ = visited.insert(dev: di.device, inode: di.inode)
@@ -1849,7 +1915,10 @@ public final class FileScanner: @unchecked Sendable {
             }
 
             // Detect bundles: mark as opaque leaves and skip recursive enqueue.
-            let isBundle = isDir && isBundleName(entryName)
+            let directoryPath = isDir ? appendPathComponent(dirPath, entryName) : nil
+            let isForeignMount = directoryPath != nil
+                && visited.isMountBoundary(device: rawEntry.device)
+            let isBundle = isDir && !isForeignMount && isBundleName(entryName)
             if isBundle {
                 node.isBundle = true
             }
@@ -1858,7 +1927,9 @@ public final class FileScanner: @unchecked Sendable {
             children.append((node: node, name: entryName))
 
             if isDir {
-                if isBundle {
+                if isForeignMount, let directoryPath {
+                    progress.incrementSkippedMount(path: directoryPath)
+                } else if isBundle {
                     bundleDirs.append((name: entryName, childIndex: childLocalIndex))
                 } else {
                     subdirs.append((name: entryName, childIndex: childLocalIndex,
@@ -1914,7 +1985,17 @@ public final class FileScanner: @unchecked Sendable {
         for subdir in subdirs {
             guard !isCancelled else { break }
             let subdirPath = appendPathComponent(dirPath, subdir.name)
-            guard visited.shouldTraverse(path: subdirPath, dev: subdir.dev, inode: subdir.inode) else {
+            switch visited.traversalDecision(
+                path: subdirPath,
+                dev: subdir.dev,
+                inode: subdir.inode
+            ) {
+            case .traverse:
+                break
+            case .mountBoundary:
+                progress.incrementSkippedMount(path: subdirPath)
+                continue
+            case .alreadyVisited, .firmlinkDuplicate:
                 continue
             }
             let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
@@ -2015,7 +2096,13 @@ public final class FileScanner: @unchecked Sendable {
 
             if isDir {
                 if isBundle {
-                    scratch.bundleDirs.append((nameOffset: nameOffset, nameLength: nameLength, childIndex: childLocalIndex))
+                    scratch.bundleDirs.append((
+                        nameOffset: nameOffset,
+                        nameLength: nameLength,
+                        childIndex: childLocalIndex,
+                        dev: rawEntry.device,
+                        inode: rawEntry.inode
+                    ))
                 } else {
                     scratch.subdirs.append((
                         nameOffset: nameOffset,
@@ -2056,7 +2143,17 @@ public final class FileScanner: @unchecked Sendable {
             let subdirName = Self.nameString(in: scratch.namePool, offset: subdir.nameOffset, length: subdir.nameLength)
             guard !subdirName.isEmpty else { continue }
             let subdirPath = appendPathComponent(dirPath, subdirName)
-            guard visited.shouldTraverse(path: subdirPath, dev: subdir.dev, inode: subdir.inode) else {
+            switch visited.traversalDecision(
+                path: subdirPath,
+                dev: subdir.dev,
+                inode: subdir.inode
+            ) {
+            case .traverse:
+                break
+            case .mountBoundary:
+                progress.incrementSkippedMount(path: subdirPath)
+                continue
+            case .alreadyVisited, .firmlinkDuplicate:
                 continue
             }
             let childTreeIndex = firstChildIndex + UInt32(subdir.childIndex)
@@ -2093,18 +2190,29 @@ public final class FileScanner: @unchecked Sendable {
                 parentIndex: parentIndex
             )
 
-            if self.computeBundleSizes {
-                for bundle in scratch.bundleDirs {
-                    guard !self.isCancelled else { break }
-                    let bundleName = Self.nameString(in: scratch.namePool, offset: bundle.nameOffset, length: bundle.nameLength)
-                    guard !bundleName.isEmpty else { continue }
-                    let bundlePath = appendPathComponent(dirPath, bundleName)
+            for bundle in scratch.bundleDirs {
+                guard !self.isCancelled else { break }
+                let bundleName = Self.nameString(
+                    in: scratch.namePool,
+                    offset: bundle.nameOffset,
+                    length: bundle.nameLength
+                )
+                guard !bundleName.isEmpty else { continue }
+                let bundlePath = appendPathComponent(dirPath, bundleName)
+                let bundleTreeIndex = firstChildIndex + UInt32(bundle.childIndex)
+                if visited.isMountBoundary(device: bundle.dev) {
+                    progress.incrementSkippedMount(path: bundlePath)
+                    tree.updateNode(at: bundleTreeIndex) { node in
+                        node.isBundle = false
+                    }
+                    continue
+                }
+                if self.computeBundleSizes {
                     let (bundleFileSize, bundleAllocatedSize) = filesystem.computeBundleSize(
                         path: bundlePath,
                         isCancelled: { self.isCancelled }
                     )
                     guard bundleFileSize > 0 || bundleAllocatedSize > 0 else { continue }
-                    let bundleTreeIndex = firstChildIndex + UInt32(bundle.childIndex)
                     tree.updateNode(at: bundleTreeIndex) { node in
                         node.fileSize = bundleFileSize
                         node.allocatedSize = bundleAllocatedSize
@@ -2140,12 +2248,21 @@ public final class FileScanner: @unchecked Sendable {
         ) { scratch, parentIndex in
             // No tree node exists yet to patch after the fact - bundle sizes must be
             // baked into the scratch children before they are copied into the arena.
-            if self.computeBundleSizes {
-                for bundle in scratch.bundleDirs {
-                    guard !self.isCancelled else { break }
-                    let bundleName = Self.nameString(in: scratch.namePool, offset: bundle.nameOffset, length: bundle.nameLength)
-                    guard !bundleName.isEmpty else { continue }
-                    let bundlePath = appendPathComponent(dirPath, bundleName)
+            for bundle in scratch.bundleDirs {
+                guard !self.isCancelled else { break }
+                let bundleName = Self.nameString(
+                    in: scratch.namePool,
+                    offset: bundle.nameOffset,
+                    length: bundle.nameLength
+                )
+                guard !bundleName.isEmpty else { continue }
+                let bundlePath = appendPathComponent(dirPath, bundleName)
+                if visited.isMountBoundary(device: bundle.dev) {
+                    progress.incrementSkippedMount(path: bundlePath)
+                    scratch.children[bundle.childIndex].node.isBundle = false
+                    continue
+                }
+                if self.computeBundleSizes {
                     let (bundleFileSize, bundleAllocatedSize) = filesystem.computeBundleSize(
                         path: bundlePath,
                         isCancelled: { self.isCancelled }

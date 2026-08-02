@@ -1,59 +1,71 @@
-# Tasks - Mount-Aware Traversal
+# Tasks - Mount-Aware Traversal and Explicit Combined View
 
 ## 1. Establish the baseline honestly
 
-- [ ] 1.1 Record, on this machine, the current `/` scan total against the volume's real
-      capacity from `statfs`, and the item count. The gap is what this change closes; it must
-      be a recorded number, not a claim.
-- [ ] 1.2 Enumerate the mounts currently under `/` with their device numbers, and note which
-      the rule will exclude. Re-check with Simulator runtimes mounted, since that is the case
-      the 477,845-entry measurement came from.
+- [x] 1.1 Record the pooled `/` result: 6.27 TB and 5,889,027 cached items versus a
+      995 GB selected root filesystem.
+- [x] 1.2 Record live device identities for `/`, the Data volume, Update, and a mounted
+      Simulator runtime; do not invent an external-drive device ID after it was unplugged.
+- [x] 1.3 Confirm the product mechanism: `VisitedDirectories` deduplicates `(device, inode)`
+      but never rejects a foreign device, and living refresh reuses the same unrestricted
+      subtree staging path.
 
-## 2. The rule (DirWizCore)
+## 2. Specify the product decision
 
-- [ ] 2.1 Capture the scan root's device once per scan, beside the existing per-scan setup
-      (where `resolveFirmlinkDuplicates` already runs).
-- [ ] 2.2 Skip enqueueing a directory whose device differs. Fold it into
-      `VisitedDirectories.shouldTraverse(path:dev:inode:)`, which already owns exactly this
-      kind of decision, rather than threading a new parameter through every enumeration
-      signature.
-- [ ] 2.3 Do NOT mark a skipped mount's inode as visited, mirroring the firmlink decision:
-      marking it would trade a double count for a silent omission if the same inode is
-      reachable another way.
-- [ ] 2.4 Honour `DIRWIZ_CROSS_MOUNTS=1`, and fail open when the root device is unknown.
-- [ ] 2.5 Apply it in BOTH `scan` and `rescanSubtrees`. A rule present in one and absent from
-      the other breaks the warm-start equivalence gate the moment a mount changes, which is
-      exactly the trap the firmlink change documented.
+- [x] 2.1 Make individual-volume traversal the default and keep the mount point visible.
+- [x] 2.2 Add an explicit combined choice only when two or more eligible local volumes exist.
+- [x] 2.3 Pin hot-plug behavior: refresh availability without changing selection or scope.
+- [x] 2.4 Make combined selection session-only so relaunch cannot silently pool drives.
+- [x] 2.5 Include scope in displayed-tree ownership and cache identity.
 
-## 3. Surfacing (DirWizCore + DirWizUI)
+## 3. Core traversal and persistence
 
-- [ ] 3.1 Count skipped mounts and their paths in `ScanProgress`, alongside the existing
-      skipped-directory bookkeeping.
-- [ ] 3.2 Report them in the sidebar in the same quiet register as the protected-folders
-      line, naming what was not descended into and why. Wording must make clear this is a
-      deliberate exclusion, not a permission failure, because those are different problems
-      with different fixes.
+- [x] 3.1 Add a sendable mount-traversal scope and store it on `FileTree` before nodes are added.
+- [x] 3.2 Capture the scan-root device once and fold the relative-device decision into
+      `VisitedDirectories`, preserving firmlink-first and no-mark-on-skip behavior.
+- [x] 3.3 Apply the gate to provider and raw cold-scan paths, including opaque bundle roots.
+- [x] 3.4 Apply the tree-owned gate to warm and living subtree rescans, including when the
+      excluded mount is itself a changed root.
+- [x] 3.5 Preserve `DIRWIZ_CROSS_MOUNTS=1` and fail open when root identity is unavailable.
+- [x] 3.6 Add separate skipped-mount counters and sampled paths to `ScanProgress`.
+- [x] 3.7 Bump TreeCache to v3, encode/decode scope, and key cache files by root plus scope.
+- [x] 3.8 Scope-qualify checkpoints, session navigation, and scan diagnostics; do not record a
+      combined tree as the boot volume's single-volume capacity trend.
 
-## 4. Tests
+## 4. Product UI
 
-- [ ] 4.1 Same-device traversal is unchanged: a fixture scan with no mounts produces
-      byte-identical totals and paths before and after.
-- [ ] 4.2 A foreign device is skipped and reported. Use an injection seam for the device
-      number rather than requiring a real mount, following the `firmlinkDuplicates` test seam
-      precedent (a real mount cannot be created in a unit test).
-- [ ] 4.3 Rooting the scan AT the foreign device scans it fully: the rule is relative to the
-      scan root.
-- [ ] 4.4 The volume group survives: a fixture standing in for `/` plus a same-device
-      `/System/Volumes/Data` still traverses both.
-- [ ] 4.5 `DIRWIZ_CROSS_MOUNTS=1` reproduces pre-change behaviour exactly.
-- [ ] 4.6 Warm-start equivalence gates still green: patched tree ≡ fresh cold scan under the
-      new rule.
+- [x] 4.1 Add an **All Volumes** row with friendly count/explanation, shown only for 2+ volumes.
+- [x] 4.2 Selecting an individual row clears combined mode; selecting **All Volumes** uses `/`
+      with combined traversal.
+- [x] 4.3 Refresh the list on mount/unmount without changing a still-valid selection.
+- [x] 4.4 Show aggregate capacity for the combined selection and fall back safely when the
+      combined option disappears.
+- [x] 4.5 Extend the one state-driven scan control so path plus scope decide normal scan versus
+      Full Rescan, with explicit **Scan All Volumes** copy.
+- [x] 4.6 Surface excluded mounts separately from Full Disk Access skips and point to the
+      combined option when available.
 
-## 5. Verification
+## 5. Tests
 
-- [ ] 5.1 Re-run 1.1 and report the before/after totals against `statfs`. The remaining gap
-      should be only the documented clone/hardlink block sharing.
-- [ ] 5.2 Report the cold-scan time change, both with and without Simulator runtimes
-      mounted, so the conditional saving is stated rather than averaged into a single figure.
-- [ ] 5.3 CLAUDE.md: record why same-device works here while it cannot catch firmlinks, so
-      the two mechanisms are not later mistaken for redundant.
+- [x] 5.1 Same-device traversal, including a Data-volume stand-in, is unchanged.
+- [x] 5.2 A foreign device is retained as an empty mount point, excluded from totals, and reported.
+- [x] 5.3 Scanning at the foreign device root includes its contents.
+- [x] 5.4 Combined and diagnostic unrestricted modes include foreign contents.
+- [x] 5.5 Unknown root device fails open.
+- [x] 5.6 A foreign changed root cannot bypass the warm/living gate, and warm equals cold.
+- [x] 5.7 Scope round-trips in TreeCache; wrong-scope lookup and v2 cache reuse fail closed.
+- [x] 5.8 Volume-control tests pin combined availability, ownership, action copy, and callbacks.
+- [x] 5.9 Existing ScanSupervisionTests remain green without weakening named assertions.
+
+## 6. Repository workflow and verification
+
+- [x] 6.1 Add the CLAUDE.md rule: finish user-facing work with a local app build/install and
+      verify it, while never publishing that local artifact without separate release authority.
+- [x] 6.2 Record why same-device mount filtering and firmlink deduplication are complementary.
+- [x] 6.3 Run `openspec validate mount-aware-traversal --strict`.
+- [x] 6.4 Run focused mount/cache/UI tests, the full suite, and `CI=true` parity.
+- [x] 6.5 Build the local app bundle, install/relaunch it for this user, and verify the running
+      executable is the just-built binary. Do not upload or modify a GitHub release.
+- [ ] 6.6 With a second physical volume attached, verify individual totals stay isolated and
+      **All Volumes** combines only after explicit selection. If no second volume is available,
+      leave this manual hardware gate open rather than claiming it.

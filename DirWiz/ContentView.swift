@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var exportAlertMessage: String = ""
     @State private var showExportAlert: Bool = false
     @State private var showSkippedDirsPopover: Bool = false
+    @State private var showSkippedMountsPopover: Bool = false
     @State private var showWarmStartHistoryPopover: Bool = false
 
     @State private var showPinSheet = false
@@ -261,9 +262,6 @@ struct ContentView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Text(String(format: "%.1fs elapsed", appState.scanProgress.elapsedTime))
-                .font(.caption)
-                .foregroundStyle(.secondary)
             // Skipped-dirs line: only the quiet (FDA-granted) style renders here. The
             // FDA-missing case folds into `fullDiskAccessBanner` above - one alarm, one
             // action - instead of a second independent warning (skipped-dirs-honesty).
@@ -272,6 +270,9 @@ struct ContentView: View {
                 skippedCount: appState.scanProgress.skippedDirectories
             ) == .quietInfo {
                 skippedDirsQuietLine
+            }
+            if appState.scanProgress.skippedMounts > 0 {
+                skippedMountsQuietLine
             }
             warmStartHistoryLine
         }
@@ -307,7 +308,7 @@ struct ContentView: View {
     /// empty-history case.
     @ViewBuilder
     private var warmStartHistoryLine: some View {
-        if let path = appState.selectedVolume?.path {
+        if let identity = appState.selectedScanPersistenceIdentity {
             Button {
                 showWarmStartHistoryPopover.toggle()
             } label: {
@@ -322,13 +323,13 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showWarmStartHistoryPopover, arrowEdge: .trailing) {
-                warmStartHistoryPopover(path: path)
+                warmStartHistoryPopover(identity: identity)
             }
         }
     }
 
-    private func warmStartHistoryPopover(path: String) -> some View {
-        let entries = WarmStartHistory.load(for: path).reversed()
+    private func warmStartHistoryPopover(identity: String) -> some View {
+        let entries = WarmStartHistory.load(for: identity).reversed()
         return VStack(alignment: .leading, spacing: 8) {
             Text("Recent Scan Decisions")
                 .font(.system(size: 12, weight: .semibold))
@@ -418,6 +419,68 @@ struct ContentView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(paths, id: \.self) { path in
+                        Text(abbreviateHomePath(path))
+                            .font(.system(size: 11, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    if count > paths.count {
+                        Text("… and \(count - paths.count) more")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+        .padding(12)
+        .frame(width: 420)
+    }
+
+    /// Mount boundaries are an intentional scan-scope choice, not a permission failure.
+    /// Keep their explanation separate from the FDA/SIP presentation above.
+    private var skippedMountsQuietLine: some View {
+        let count = appState.scanProgress.skippedMounts
+        return Button {
+            showSkippedMountsPopover.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "externaldrive.badge.minus")
+                    .font(.caption2)
+                Text("\(count) mounted filesystem\(count == 1 ? "" : "s") kept separate")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showSkippedMountsPopover, arrowEdge: .trailing) {
+            skippedMountsPopover
+        }
+    }
+
+    private var skippedMountsPopover: some View {
+        let paths = appState.scanProgress.skippedMountPaths
+        let count = appState.scanProgress.skippedMounts
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Mounted Filesystems Kept Separate")
+                .font(.system(size: 12, weight: .semibold))
+            Text("This scan contains only the selected volume. Mounted drives and disk images do not contribute to its totals.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if appState.availableVolumes.count > 1 {
+                Text("Choose All Volumes in the sidebar to build one combined map.")
+                    .font(.system(size: 11, weight: .medium))
+            }
 
             Divider()
 

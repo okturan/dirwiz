@@ -140,6 +140,9 @@ public final class FileTree: @unchecked Sendable {
     /// access begins (in `FileScanner.scan()`) and never mutated after. All reads occur
     /// under the lock where the value is captured, so no data race is possible.
     public private(set) var rootPath: String = "/"
+    /// Mounted-filesystem boundary used to build this tree. Set once beside `rootPath`;
+    /// subtree rescans read it back so warm and living updates preserve cold-scan scope.
+    public private(set) var mountTraversalScope: MountTraversalScope = .selectedVolume
     /// Whether the scanned volume is case-sensitive (e.g., case-sensitive APFS).
     /// When true, the search index stores original-case names instead of lowercased.
     public private(set) var isCaseSensitive: Bool = false
@@ -160,6 +163,12 @@ public final class FileTree: @unchecked Sendable {
 
     public var isEmpty: Bool {
         lock.withLock { _ in nodes.isEmpty }
+    }
+
+    /// Root path plus mount scope for persistence stores whose contents describe this
+    /// exact tree. This is an identity token, never a filesystem path.
+    public var persistenceIdentity: String {
+        mountTraversalScope.persistenceIdentity(for: rootPath)
     }
 
     public init() {
@@ -186,6 +195,12 @@ public final class FileTree: @unchecked Sendable {
     public func setRootPath(_ path: String) {
         precondition(nodes.isEmpty, "setRootPath must be called before any nodes are added")
         rootPath = path
+    }
+
+    /// Set the tree's traversal scope. Must be called before concurrent access begins.
+    public func setMountTraversalScope(_ scope: MountTraversalScope) {
+        precondition(nodes.isEmpty, "setMountTraversalScope must be called before any nodes are added")
+        mountTraversalScope = scope
     }
 
     /// Set whether the volume is case-sensitive. Must be called before concurrent access begins.
@@ -786,6 +801,7 @@ public final class FileTree: @unchecked Sendable {
         nodes: [FileNode],
         stringPool: Data,
         rootPath: String,
+        mountTraversalScope: MountTraversalScope,
         isCaseSensitive: Bool,
         linkCountsCaptured: Bool
     ) {
@@ -793,6 +809,7 @@ public final class FileTree: @unchecked Sendable {
             self.nodes = nodes
             self.stringPool = stringPool
             self.rootPath = rootPath
+            self.mountTraversalScope = mountTraversalScope
             self.isCaseSensitive = isCaseSensitive
             self.linkCountsCaptured = linkCountsCaptured
             lowercaseNamePool.removeAll(keepingCapacity: true)

@@ -191,6 +191,87 @@ struct TreemapColorResolverTests {
         #expect(abs(blended.z - expectedB) < 0.0001)
     }
 
+    @Test("Folders representative color follows files through nested directory-only levels")
+    func foldersRepresentativeWalksNestedDirectories() throws {
+        let hash: UInt32 = 0xA1B2_C3D4
+        let palette = makePalette([("zst", hash, 1_000)])
+        let resolver = TreemapColorResolver(palette: palette)
+
+        var root = FileNode(fileSize: 1_000)
+        root.isDirectory = true
+        root.parentIndex = FileNode.invalid
+        root.firstChildIndex = 1
+        root.childCount = 1
+
+        var levelOne = FileNode(parentIndex: 0, firstChildIndex: 2, childCount: 1, fileSize: 1_000)
+        levelOne.isDirectory = true
+        var levelTwo = FileNode(parentIndex: 1, firstChildIndex: 3, childCount: 1, fileSize: 1_000)
+        levelTwo.isDirectory = true
+        let file = FileNode(parentIndex: 2, fileSize: 1_000, extensionHash: hash)
+        let nodes = [root, levelOne, levelTwo, file]
+
+        var scratch: [UInt32: UInt64] = [:]
+        #expect(resolver.representativeDescendantExtensionHash(
+            in: 0, nodes: nodes, scratchSizeByExt: &scratch
+        ) == hash)
+        let representative = try #require(resolver.resolveFoldersRepresentativeColor(
+            for: 0, depth: 0, nodes: nodes, scratchSizeByExt: &scratch
+        ))
+        let directoryBase = resolver.directoryBaseColor(depth: 0)
+        let extensionColor = palette.color(forHash: hash)
+        let expected = SIMD4<Float>(
+            directoryBase.x + 0.65 * (extensionColor.x - directoryBase.x),
+            directoryBase.y + 0.65 * (extensionColor.y - directoryBase.y),
+            directoryBase.z + 0.65 * (extensionColor.z - directoryBase.z),
+            1
+        )
+        #expect(abs(representative.x - expected.x) < 0.0001)
+        #expect(abs(representative.y - expected.y) < 0.0001)
+        #expect(abs(representative.z - expected.z) < 0.0001)
+        #expect(representative.w == expected.w)
+
+        // Cushion keeps the historical direct-child rule: this root has no direct files,
+        // so adding the Folders-only descendant path must not recolor Cushion.
+        let cushionDirectory = resolver.resolveColor(for: makeRect(nodeIndex: 0), nodes: nodes)
+        let base = resolver.directoryBaseColor(depth: 0)
+        #expect(cushionDirectory == SIMD4<Float>(base.x, base.y, base.z, 1))
+    }
+
+    @Test("Folders representative chooses aggregated direct files or the largest subtree deterministically")
+    func foldersRepresentativeUsesLargestContentShape() {
+        let red: UInt32 = 0x1111_1111
+        let blue: UInt32 = 0x2222_2222
+        let resolver = TreemapColorResolver()
+
+        func nodes(directBytes: UInt64, subtreeBytes: UInt64) -> [FileNode] {
+            var root = FileNode(fileSize: directBytes * 2 + subtreeBytes)
+            root.isDirectory = true
+            root.parentIndex = FileNode.invalid
+            root.firstChildIndex = 1
+            root.childCount = 3
+
+            var subtree = FileNode(
+                parentIndex: 0, firstChildIndex: 4, childCount: 1,
+                fileSize: subtreeBytes
+            )
+            subtree.isDirectory = true
+            let directOne = FileNode(parentIndex: 0, fileSize: directBytes, extensionHash: red)
+            let directTwo = FileNode(parentIndex: 0, fileSize: directBytes, extensionHash: red)
+            let nested = FileNode(parentIndex: 1, fileSize: subtreeBytes, extensionHash: blue)
+            return [root, subtree, directOne, directTwo, nested]
+        }
+
+        var scratch: [UInt32: UInt64] = [:]
+        #expect(resolver.representativeDescendantExtensionHash(
+            in: 0, nodes: nodes(directBytes: 400, subtreeBytes: 700),
+            scratchSizeByExt: &scratch
+        ) == red, "two direct red files aggregate to more than the blue subtree")
+        #expect(resolver.representativeDescendantExtensionHash(
+            in: 0, nodes: nodes(directBytes: 100, subtreeBytes: 700),
+            scratchSizeByExt: &scratch
+        ) == blue, "the larger subtree supplies the representative extension")
+    }
+
     // MARK: 4. Recency overlay disabled - alpha always 1.0
 
     @Test("Recency overlay disabled: alpha is 1.0 regardless of recencyFactors")

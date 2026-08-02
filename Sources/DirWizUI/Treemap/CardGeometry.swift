@@ -103,22 +103,32 @@ public enum CardGeometry {
         return SIMD4<Float>(0.25 + step, 0.27 + step, 0.32 + step, 1.0)
     }
 
-    /// Folders style only: settle a file's extension colour into the same tonal family as
-    /// the neutral folder chrome around it.
+    /// Folders style only: bring a file's extension colour into the same tonal family as
+    /// the folder surface without turning the extension key into grey.
     ///
     /// Cushion style has lighting to tie the map together - every tile carries the same
     /// parabolic shading, so a saturated tile still reads as part of one surface. Folders
     /// has no lighting, so a fully saturated blue sitting inside a graduated grey panel
     /// reads as a different picture pasted on top rather than as contents of that folder.
     ///
-    /// The first version moved only 25% toward the color's OWN luminance. That preserved the
-    /// brightness mismatch which made the tile look pasted on, and the near-primary production
-    /// palette retained 75% of its chroma. The second version moved 55% toward the surrounding
-    /// chrome, but a real 5.34 TB Folders view still read as solid fields of primary blue, red,
-    /// green, and magenta. Blend 75% instead: the extension remains a stable 25% accent, channel
-    /// order is preserved exactly, and folder structure becomes the dominant visual signal.
-    /// Parent depth keeps files coherent with the deliberately depth-shaded chrome around them.
-    public static let leafChromeBlend: Float = 0.75
+    /// A 75% chrome blend was an overcorrection: it retained only 25% of the production
+    /// palette's channel spread, so red, blue, and green all read as greyish slate on the
+    /// supplied multi-terabyte scan. Retain 60% instead. Folder panels now carry a quieter
+    /// tint from their representative descendants (below), which supplies the visual bridge
+    /// that the stronger leaf muting was trying to create by itself.
+    public static let leafChromeBlend: Float = 0.40
+
+    /// Expanded folder panels carry 30% of their representative descendant colour. The
+    /// resolver's directory colour already carries 65% of the representative extension,
+    /// so the visible panel carries about 19.5% of the raw signal: enough to avoid a hard
+    /// grey-to-red/blue boundary without competing with the files inside it.
+    public static let containerAccentStrength: Float = 0.30
+
+    /// A collapsed folder stands in for its contents, so it should be as chromatic as a
+    /// file tile rather than as quiet as an expanded panel. Its resolved directory colour
+    /// already retains 65% of the representative extension; a 10% settle leaves 58.5%,
+    /// deliberately aligned with direct leaves' 60%.
+    public static let collapsedFolderChromeBlend: Float = 0.10
 
     public static func leafFill(_ base: SIMD4<Float>, containerDepth: Int = 0) -> SIMD4<Float> {
         let chrome = containerFill(depth: containerDepth)
@@ -129,6 +139,38 @@ public enum CardGeometry {
             base.y + (neutral - base.y) * k,
             base.z + (neutral - base.z) * k,
             base.w
+        )
+    }
+
+    /// Subtle content tint for an expanded folder's structural panel.
+    public static func folderContainerFill(
+        representativeColor: SIMD4<Float>?,
+        depth: Int
+    ) -> SIMD4<Float> {
+        let chrome = containerFill(depth: depth)
+        guard let representativeColor else { return chrome }
+        let t = containerAccentStrength
+        return SIMD4<Float>(
+            chrome.x + (representativeColor.x - chrome.x) * t,
+            chrome.y + (representativeColor.y - chrome.y) * t,
+            chrome.z + (representativeColor.z - chrome.z) * t,
+            1.0
+        )
+    }
+
+    /// Content-bearing colour for a folder too small to subdivide.
+    public static func collapsedFolderFill(
+        _ representativeColor: SIMD4<Float>,
+        containerDepth: Int
+    ) -> SIMD4<Float> {
+        let chrome = containerFill(depth: containerDepth)
+        let neutral = (chrome.x + chrome.y + chrome.z) / 3
+        let k = collapsedFolderChromeBlend
+        return SIMD4<Float>(
+            representativeColor.x + (neutral - representativeColor.x) * k,
+            representativeColor.y + (neutral - representativeColor.y) * k,
+            representativeColor.z + (neutral - representativeColor.z) * k,
+            representativeColor.w
         )
     }
 
@@ -224,9 +266,9 @@ public enum CardBudget {
 /// a directory read as a card holding other cards. It composes to any depth because the
 /// layout always emits a parent before its children, so one forward pass suffices.
 ///
-/// This is a DRAWING transform. It must never be fed back into `SquarifyLayout` or into
-/// `SpatialGrid` - hit testing stays on untransformed layout rects, or clicks near a card's
-/// edge would land on the wrong node.
+/// This is a DRAWING transform. It must never be fed back into `SquarifyLayout`; Folders
+/// builds a separate `SpatialGrid` from the resulting placed rects so hits follow the tiles.
+/// The shader-only gap remains absent from those rects, preserving clickable card edges.
 public enum CardNesting {
     public struct Item: Sendable, Equatable {
         public var nodeIndex: UInt32

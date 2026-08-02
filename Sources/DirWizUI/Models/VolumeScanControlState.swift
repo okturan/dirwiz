@@ -1,4 +1,5 @@
 import Foundation
+import DirWizCore
 
 /// The one persistent scan control in the volume sidebar.
 ///
@@ -8,6 +9,7 @@ import Foundation
 /// after a volume switch.
 enum VolumeScanControlState: Equatable, Sendable {
     case scanVolume(enabled: Bool)
+    case scanAllVolumes(enabled: Bool)
     case fullRescan
     case checkingChanges
     case scanning
@@ -21,7 +23,9 @@ enum VolumeScanControlState: Equatable, Sendable {
 
     static func resolve(
         selectedVolume: URL?,
+        selectedMountTraversalScope: MountTraversalScope = .selectedVolume,
         displayedTreeRootPath: String?,
+        displayedTreeMountTraversalScope: MountTraversalScope? = .selectedVolume,
         isScanning: Bool,
         isPreparingScan: Bool,
         isApplyingChanges: Bool
@@ -36,24 +40,35 @@ enum VolumeScanControlState: Equatable, Sendable {
         }
         if displayedTreeBelongsToSelectedVolume(
             selectedVolume: selectedVolume,
-            displayedTreeRootPath: displayedTreeRootPath
+            selectedMountTraversalScope: selectedMountTraversalScope,
+            displayedTreeRootPath: displayedTreeRootPath,
+            displayedTreeMountTraversalScope: displayedTreeMountTraversalScope
         ) {
             return .fullRescan
+        }
+        if selectedMountTraversalScope == .combinedVolumes {
+            return .scanAllVolumes(enabled: selectedVolume != nil)
         }
         return .scanVolume(enabled: selectedVolume != nil)
     }
 
     static func displayedTreeBelongsToSelectedVolume(
         selectedVolume: URL?,
-        displayedTreeRootPath: String?
+        selectedMountTraversalScope: MountTraversalScope,
+        displayedTreeRootPath: String?,
+        displayedTreeMountTraversalScope: MountTraversalScope?
     ) -> Bool {
-        guard let selectedVolume, let displayedTreeRootPath else { return false }
+        guard let selectedVolume,
+              let displayedTreeRootPath,
+              let displayedTreeMountTraversalScope else { return false }
         return normalizedVolumePath(selectedVolume.path) == normalizedVolumePath(displayedTreeRootPath)
+            && selectedMountTraversalScope == displayedTreeMountTraversalScope
     }
 
     var title: String {
         switch self {
         case .scanVolume: "Scan Volume"
+        case .scanAllVolumes: "Scan All Volumes"
         case .fullRescan: "Full Rescan"
         case .checkingChanges: "Checking changes…"
         case .scanning: "Scanning…"
@@ -63,7 +78,7 @@ enum VolumeScanControlState: Equatable, Sendable {
 
     var systemImage: String? {
         switch self {
-        case .scanVolume: "magnifyingglass"
+        case .scanVolume, .scanAllVolumes: "magnifyingglass"
         case .fullRescan: "arrow.clockwise"
         case .checkingChanges, .scanning, .updating: nil
         }
@@ -72,13 +87,14 @@ enum VolumeScanControlState: Equatable, Sendable {
     var showsProgress: Bool {
         switch self {
         case .checkingChanges, .scanning, .updating: true
-        case .scanVolume, .fullRescan: false
+        case .scanVolume, .scanAllVolumes, .fullRescan: false
         }
     }
 
     var isEnabled: Bool {
         switch self {
         case .scanVolume(let enabled): enabled
+        case .scanAllVolumes(let enabled): enabled
         case .fullRescan: true
         case .checkingChanges, .scanning, .updating: false
         }
@@ -86,9 +102,10 @@ enum VolumeScanControlState: Equatable, Sendable {
 
     var action: Action {
         switch self {
-        case .scanVolume(enabled: true): .scanVolume
+        case .scanVolume(enabled: true), .scanAllVolumes(enabled: true): .scanVolume
         case .fullRescan: .fullRescan
-        case .scanVolume(enabled: false), .checkingChanges, .scanning, .updating: .none
+        case .scanVolume(enabled: false), .scanAllVolumes(enabled: false),
+             .checkingChanges, .scanning, .updating: .none
         }
     }
 
@@ -98,6 +115,10 @@ enum VolumeScanControlState: Equatable, Sendable {
             "Scan the selected volume"
         case .scanVolume(enabled: false):
             "Select a volume to scan"
+        case .scanAllVolumes(enabled: true):
+            "Scan all mounted volumes into one combined map"
+        case .scanAllVolumes(enabled: false):
+            "Connect at least two volumes to use a combined map"
         case .fullRescan:
             "Ignore the last scan's cache and re-enumerate everything"
         case .checkingChanges:

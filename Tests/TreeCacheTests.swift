@@ -14,9 +14,13 @@ import Foundation
 /// Build a small in-memory tree rooted at a real on-disk path (needed so TreeCache's
 /// volume-UUID lookup resolves to a real volume, not an empty string). 3 nodes total:
 /// root = 0, a.txt = 1, b.txt = 2.
-private func makeSimpleTree(rootPath: String) -> FileTree {
+private func makeSimpleTree(
+    rootPath: String,
+    scope: MountTraversalScope = .selectedVolume
+) -> FileTree {
     let tree = FileTree()
     tree.setRootPath(rootPath)
+    tree.setMountTraversalScope(scope)
 
     var root = FileNode()
     root.isDirectory = true
@@ -69,10 +73,10 @@ private func currentVolumeUUID(for path: String) -> String {
 /// Byte offsets of the fixed-position header fields that follow the variable-length
 /// rootPath/volumeUUID strings, mirroring TreeCache's write order exactly:
 /// magic(4) + formatVersion(4) + nodeStride(4) + savedAt(8) + lastEventId(8) +
-/// rootPathLen(2) + rootPath + isCaseSensitive(1) + linkCountsCaptured(1) +
+/// rootPathLen(2) + rootPath + isCaseSensitive(1) + linkCountsCaptured(1) + scope(1) +
 /// volumeUUIDLen(2) + volumeUUID + nodeCount(4) + stringPoolLen(8) + [nodes...].
 private func headerFieldOffsets(rootPath: String, volumeUUID: String) -> (nodeCount: Int, stringPoolLen: Int, nodesStart: Int) {
-    let beforeNodeCount = 4 + 4 + 4 + 8 + 8 + 2 + rootPath.utf8.count + 1 + 1 + 2 + volumeUUID.utf8.count
+    let beforeNodeCount = 4 + 4 + 4 + 8 + 8 + 2 + rootPath.utf8.count + 1 + 1 + 1 + 2 + volumeUUID.utf8.count
     let stringPoolLenOffset = beforeNodeCount + 4
     let nodesStart = stringPoolLenOffset + 8
     return (nodeCount: beforeNodeCount, stringPoolLen: stringPoolLenOffset, nodesStart: nodesStart)
@@ -130,6 +134,7 @@ struct TreeCacheTests {
             guard let payload else { return }
 
             #expect(payload.lastEventId == 12345)
+            #expect(payload.tree.mountTraversalScope == .selectedVolume)
             #expect(payload.tree.linkCountsCaptured,
                 "A scanned tree marks link counts captured; the cache must carry that through")
             guard case .success = TreeCache.loadResult(for: path) else {
@@ -163,6 +168,76 @@ struct TreeCacheTests {
                 query: "readme", nodes: loaded.nodes, searchPool: searchIndex.pool, searchEntries: searchIndex.entries
             )
             #expect(result.totalMatches == 1, "Should find readme.txt in the loaded tree")
+        }
+    }
+
+    @Test("Individual and combined caches coexist and round-trip their scope")
+    func traversalScopesHaveSeparateCacheIdentity() async throws {
+        try await withTemporaryAppSupportDir {
+            let (path, cleanup) = try createTempTree([:])
+            defer { cleanup() }
+
+            let individual = makeSimpleTree(rootPath: path, scope: .selectedVolume)
+            let combined = makeSimpleTree(rootPath: path, scope: .combinedVolumes)
+            try TreeCache.save(tree: individual, lastEventId: 11)
+            try TreeCache.save(tree: combined, lastEventId: 22)
+
+            #expect(
+                TreeCache.cacheURL(for: path, scope: .selectedVolume)
+                    != TreeCache.cacheURL(for: path, scope: .combinedVolumes)
+            )
+            #expect(TreeCache.load(for: path, scope: .selectedVolume)?.lastEventId == 11)
+            #expect(TreeCache.load(for: path, scope: .combinedVolumes)?.lastEventId == 22)
+            #expect(
+                TreeCache.load(for: path, scope: .combinedVolumes)?.tree.mountTraversalScope
+                    == .combinedVolumes
+            )
+        }
+    }
+
+    @Test("A v2 cache is rejected because it cannot prove traversal scope")
+    func preScopeCacheIsRejected() async throws {
+        try await withTemporaryAppSupportDir {
+            let (path, cleanup) = try createTempTree([:])
+            defer { cleanup() }
+            try TreeCache.save(tree: makeSimpleTree(rootPath: path), lastEventId: 1)
+
+            let url = TreeCache.cacheURL(for: path)
+            var data = try Data(contentsOf: url)
+            patchUInt32(&data, at: 4, to: 2)
+            recomputeChecksum(&data)
+            try data.write(to: url)
+
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected a v2 cache to be rejected")
+                return
+            }
+            #expect(reason == "cache format outdated")
+        }
+    }
+
+    @Test("The real pre-v3 root-only cache location is invalidated once")
+    func legacyCacheLocationIsInvalidated() async throws {
+        try await withTemporaryAppSupportDir {
+            let (path, cleanup) = try createTempTree([:])
+            defer { cleanup() }
+            let legacyURL = TreeCache.legacyCacheURL(for: path)
+            try FileManager.default.createDirectory(
+                at: legacyURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("legacy-v2-cache".utf8).write(to: legacyURL)
+
+            guard case .rejected(let reason) = TreeCache.loadResult(for: path) else {
+                Issue.record("expected the old root-only cache key to be rejected")
+                return
+            }
+            #expect(reason == "cache format outdated")
+            #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
+            guard case .noCacheFile = TreeCache.loadResult(for: path) else {
+                Issue.record("legacy rejection should happen once, then read as no cache")
+                return
+            }
         }
     }
 

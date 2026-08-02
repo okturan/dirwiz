@@ -359,6 +359,49 @@ extension AppSupportEnvSuites {
             }
         }
 
+        @Test("Individual and combined trees at the same root use separate timelines")
+        func perScopeIsolation() async throws {
+            try await withTemporaryAppSupportDir {
+                let root = "/TestRoot"
+                let individual = SnapshotStore(rootPath: root)
+                let combined = SnapshotStore(
+                    rootPath: root,
+                    storageIdentity: MountTraversalScope.combinedVolumes
+                        .persistenceIdentity(for: root)
+                )
+
+                _ = try individual.createCheckpoint(
+                    from: snapshot(rootPath: root, byPath: ["individual": 1])
+                )
+                _ = try combined.createCheckpoint(
+                    from: snapshot(rootPath: root, byPath: ["combined": 2])
+                )
+
+                #expect(individual.directory != combined.directory)
+                #expect(individual.loadLatest()?.pathTotals == ["individual": 1])
+                #expect(combined.loadLatest()?.pathTotals == ["combined": 2])
+            }
+        }
+
+        @Test("A scope-qualified timeline never adopts an ambiguous legacy snapshot")
+        func combinedTimelineRejectsLegacyImport() async throws {
+            try await withTemporaryAppSupportDir {
+                let root = "/TestRoot"
+                try snapshot(rootPath: root, byPath: ["legacy": 3]).save()
+                let combined = SnapshotStore(
+                    rootPath: root,
+                    storageIdentity: MountTraversalScope.combinedVolumes
+                        .persistenceIdentity(for: root)
+                )
+
+                #expect(combined.importLegacySnapshotIfPresent() == nil)
+                #expect(combined.list().isEmpty)
+                #expect(FileManager.default.fileExists(
+                    atPath: TemporalSnapshot.snapshotURL(for: root).path
+                ))
+            }
+        }
+
         @Test("Latest checkpoint is the default diff baseline")
         func loadLatest() async throws {
             try await withTemporaryAppSupportDir {

@@ -96,7 +96,12 @@ extension AppState {
 
     public func startSelectedVolumeScan() {
         guard let volumeURL = selectedVolume else { return }
-        startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: false)
+        startScan(
+            volumeURL: volumeURL,
+            mountTraversalScope: selectedMountTraversalScope,
+            runPostScanAnalyses: true,
+            forceCold: false
+        )
     }
 
     /// Bypasses any cached tree and always performs a full cold scan - the "Full
@@ -104,8 +109,13 @@ extension AppState {
     /// stale (e.g. Full Disk Access changed between sessions).
     public func startFullRescan() {
         guard let volumeURL = selectedVolume else { return }
-        startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: true,
-                  forceColdReason: "full rescan requested")
+        startScan(
+            volumeURL: volumeURL,
+            mountTraversalScope: selectedMountTraversalScope,
+            runPostScanAnalyses: true,
+            forceCold: true,
+            forceColdReason: "full rescan requested"
+        )
     }
 
     public func cancelScan() {
@@ -129,8 +139,13 @@ extension AppState {
     /// start's "what changed since the cache" question doesn't apply here.
     public func rescanVolume() {
         guard let volumeURL = selectedVolume else { return }
-        startScan(volumeURL: volumeURL, runPostScanAnalyses: false, forceCold: true,
-                  forceColdReason: "rescan after DirWiz changed files")
+        startScan(
+            volumeURL: volumeURL,
+            mountTraversalScope: selectedMountTraversalScope,
+            runPostScanAnalyses: false,
+            forceCold: true,
+            forceColdReason: "rescan after DirWiz changed files"
+        )
     }
 
     /// Called once from the app's launch entry point. Restores the last successfully
@@ -155,7 +170,7 @@ extension AppState {
         // reason into the exact same empty-launch-state silence as "never scanned
         // before" - indistinguishable, exactly the gap this change exists to close.
         let cached: TreeCache.Payload
-        switch TreeCache.loadResult(for: path) {
+        switch TreeCache.loadResult(for: path, scope: .selectedVolume) {
         case .success(let payload):
             cached = payload
         case .noCacheFile:
@@ -176,7 +191,7 @@ extension AppState {
             // would then silently point at a DIFFERENT volume than the one this message
             // just named, exactly in the external-drive/multi-volume scenario a
             // corrupted cache is most likely to occur in.
-            selectedVolume = URL(fileURLWithPath: path)
+            selectVolume(URL(fileURLWithPath: path))
             log.notice("Warm start skipped for \(path, privacy: .public): \(reason, privacy: .public)")
             lastScanSummary = ScanSummaryComposer.cacheRejectedAtLaunch(reason: reason)
             WarmStartHistory.record(
@@ -187,7 +202,7 @@ extension AppState {
         }
 
         let volumeURL = URL(fileURLWithPath: path)
-        selectedVolume = volumeURL
+        selectVolume(volumeURL)
         fileTree = cached.tree
 
         // Restore where the user left off (033/038): resolve the saved session's
@@ -211,7 +226,13 @@ extension AppState {
         staleViewAsOf = cached.savedAt
         lastScanSummary = ScanSummaryComposer.stale(savedAt: cached.savedAt)
 
-        startScan(volumeURL: volumeURL, runPostScanAnalyses: true, forceCold: false, preloadedCache: cached)
+        startScan(
+            volumeURL: volumeURL,
+            mountTraversalScope: .selectedVolume,
+            runPostScanAnalyses: true,
+            forceCold: false,
+            preloadedCache: cached
+        )
     }
 
     /// Entry point for every scan trigger (incl. `restoreOnLaunch`'s auto-refresh). If a
@@ -237,6 +258,7 @@ extension AppState {
     /// `scanProgress` in the same synchronous step) and add a `ScanSupervisionTests` case.
     private func startScan(
         volumeURL: URL,
+        mountTraversalScope requestedMountTraversalScope: MountTraversalScope,
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
         forceCold: Bool,
         forceColdReason: String? = nil,
@@ -249,6 +271,11 @@ extension AppState {
         // user-initiated, bounded window. The user's click is simply a no-op; nothing to
         // repair since nothing here gets published.
         guard !isApplyingChanges else { return }
+
+        let mountTraversalScope = MountTraversalScope.resolved(
+            requested: requestedMountTraversalScope,
+            crossMountsEnvironmentValue: ProcessInfo.processInfo.environment["DIRWIZ_CROSS_MOUNTS"]
+        )
 
         scanSupervisionTrace = ScanSupervisionTrace()
 
@@ -292,7 +319,7 @@ extension AppState {
                 // the same cache file from disk a second time.
                 cached = preloadedCache
             } else {
-                switch TreeCache.loadResult(for: path) {
+                switch TreeCache.loadResult(for: path, scope: mountTraversalScope) {
                 case .success(let payload):
                     cached = payload
                 case .noCacheFile:
@@ -331,6 +358,7 @@ extension AppState {
             }
             beginColdScan(
                 path: path,
+                mountTraversalScope: mountTraversalScope,
                 runPostScanAnalyses: shouldRunPostScanAnalyses,
                 coldFallbackReason: noCacheReason,
                 preservedExploration: captureExplorationIfPreserving()
@@ -376,7 +404,10 @@ extension AppState {
                 self.scanSupervisionTrace.plannerDecision = "cold fallback: \(reason)"
                 log.notice("Warm start fallback for \(path, privacy: .public): \(reason, privacy: .public)")
                 self.beginColdScan(
-                    path: path, runPostScanAnalyses: shouldRunPostScanAnalyses, coldFallbackReason: reason,
+                    path: path,
+                    mountTraversalScope: mountTraversalScope,
+                    runPostScanAnalyses: shouldRunPostScanAnalyses,
+                    coldFallbackReason: reason,
                     preservedExploration: self.captureExplorationIfPreserving()
                 )
             case .warm(let targets):
@@ -411,7 +442,12 @@ extension AppState {
     /// Records the volume that just finished scanning (warm or cold) so the next launch
     /// can restore it. Best-effort - `UserDefaults` writes don't throw, and a missed
     /// write just means the next launch opens empty, i.e. today's behavior.
-    private func persistLastScannedVolume(path: String) {
+    private func persistLastScannedVolume(
+        path: String,
+        mountTraversalScope: MountTraversalScope
+    ) {
+        // Combined is an explicit session choice, never the next launch's default.
+        guard mountTraversalScope == .selectedVolume else { return }
         defaults.set(path, forKey: Self.lastScannedVolumePathKey)
     }
 
@@ -432,13 +468,13 @@ extension AppState {
     func saveSelectionAndRootSession() {
         guard !isWarmPatchCommitInProgress,
               let tree = fileTree,
-              !tree.isEmpty,
-              let root = selectedVolume?.path else { return }
-        var snapshot = sessionStore.load(forVolume: root)
+              !tree.isEmpty else { return }
+        let identity = tree.persistenceIdentity
+        var snapshot = sessionStore.load(forVolume: identity)
             ?? SessionSnapshot(expandedPaths: [], selectedPath: nil, treemapRootPath: nil)
         snapshot.selectedPath = selectedNodeIndex.map { tree.path(at: $0) }
         snapshot.treemapRootPath = tree.path(at: navigation.treemapRootIndex)
-        sessionStore.save(snapshot, forVolume: root)
+        sessionStore.save(snapshot, forVolume: identity)
     }
 
     /// Merges `paths` into the stored session's `expandedPaths` field for
@@ -446,11 +482,12 @@ extension AppState {
     /// `TreeTableView` (which owns expansion state as view-local `@State`) on every
     /// expand/collapse. No-op without a selected volume.
     func saveExpandedPathsSession(_ paths: Set<String>) {
-        guard let root = selectedVolume?.path else { return }
-        var snapshot = sessionStore.load(forVolume: root)
+        guard let tree = fileTree, !tree.isEmpty else { return }
+        let identity = tree.persistenceIdentity
+        var snapshot = sessionStore.load(forVolume: identity)
             ?? SessionSnapshot(expandedPaths: [], selectedPath: nil, treemapRootPath: nil)
         snapshot.expandedPaths = Array(paths)
-        sessionStore.save(snapshot, forVolume: root)
+        sessionStore.save(snapshot, forVolume: identity)
     }
 
     /// Publishes the cached tree, patches only the directories the journal says changed,
@@ -581,6 +618,7 @@ extension AppState {
             ) {
                 abandonWarmPatch(
                     path: path,
+                    mountTraversalScope: tree.mountTraversalScope,
                     reason: reason,
                     shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
                     preservedExploration: preservedExploration
@@ -701,6 +739,7 @@ extension AppState {
         ) {
             abandonWarmPatch(
                 path: path,
+                mountTraversalScope: tree.mountTraversalScope,
                 reason: reason,
                 shouldRunPostScanAnalyses: shouldRunPostScanAnalyses,
                 preservedExploration: trailingExploration
@@ -764,6 +803,7 @@ extension AppState {
 
     private func abandonWarmPatch(
         path: String,
+        mountTraversalScope: MountTraversalScope,
         reason: String,
         shouldRunPostScanAnalyses: Bool,
         preservedExploration: ExplorationCapture?
@@ -775,6 +815,7 @@ extension AppState {
         log.notice("Warm start abandoned mid-patch for \(path, privacy: .public): \(reason, privacy: .public)")
         beginColdScan(
             path: path,
+            mountTraversalScope: mountTraversalScope,
             runPostScanAnalyses: shouldRunPostScanAnalyses,
             coldFallbackReason: reason,
             preservedExploration: preservedExploration
@@ -891,7 +932,10 @@ extension AppState {
         shouldRunPostScanAnalyses: Bool
     ) async {
         scanSession.markFinished()
-        persistLastScannedVolume(path: path)
+        persistLastScannedVolume(
+            path: path,
+            mountTraversalScope: tree.mountTraversalScope
+        )
         if refreshedRootCount == 0 {
             // `.changes([])` is a valid warm decision. No splice means neither canonical
             // invalidator rebuilt extension/hardlink state after resetForNewScan().
@@ -909,6 +953,7 @@ extension AppState {
 
         scanProgress.isScanning = false
         scanProgress.scanComplete = true
+        scanProgress.elapsedTime = elapsed
         scanProgress.currentPath = summary
         lastScanSummary = summary
         staleViewAsOf = nil
@@ -927,7 +972,7 @@ extension AppState {
                 itemCount: tree.count,
                 elapsedSeconds: elapsed
             ),
-            for: path
+            for: tree.persistenceIdentity
         )
 
         do {
@@ -968,6 +1013,7 @@ extension AppState {
     /// so the fallback is legible instead of only a log line.
     private func beginColdScan(
         path: String,
+        mountTraversalScope: MountTraversalScope,
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
         coldFallbackReason: String? = nil,
         preservedExploration: ExplorationCapture? = nil
@@ -979,7 +1025,8 @@ extension AppState {
 
         let scanner = FileScanner(
             computeBundleSizes: false,
-            deferTreeMaterialization: Self.appDefersTreeMaterialization
+            deferTreeMaterialization: Self.appDefersTreeMaterialization,
+            mountTraversalScope: mountTraversalScope
         )
         let tree = FileTree()
         let preservingStaleView = staleViewAsOf != nil
@@ -1013,7 +1060,10 @@ extension AppState {
                 // stays honest without this branch needing to say anything further.
                 guard !self.scanProgress.isCancelled else { return (false, nil) }
 
-                self.persistLastScannedVolume(path: path)
+                self.persistLastScannedVolume(
+                    path: path,
+                    mountTraversalScope: tree.mountTraversalScope
+                )
                 if preservingStaleView {
                     self.fileTree = tree
                     self.resetTreeDerivedState()
@@ -1043,7 +1093,7 @@ extension AppState {
                         date: Date(), wasWarm: false, reason: coldFallbackReason,
                         itemCount: tree.count, elapsedSeconds: self.scanProgress.elapsedTime
                     ),
-                    for: path
+                    for: tree.persistenceIdentity
                 )
                 self.beginDeferredBundleSizing(
                     scanner: scanner, tree: tree, token: token, eventIdAtScanStart: eventIdAtScanStart

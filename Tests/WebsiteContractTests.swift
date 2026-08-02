@@ -44,7 +44,7 @@ struct WebsiteContractTests {
     @Test("Browser Cards demo applies the app's Folders color policy")
     func browserCardsUseSettledPalette() throws {
         let page = try html
-        #expect(page.contains("const FOLDER_LEAF_CHROME_BLEND = .75;"))
+        #expect(page.contains("const FOLDER_LEAF_CHROME_BLEND = .40;"))
         #expect(page.contains("function folderLeafColor"))
         #expect(page.contains("mapStyle===1 ? folderLeafColor"),
                 "Cards must transform leaf colors while Cushions retain the raw palette")

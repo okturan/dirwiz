@@ -513,8 +513,7 @@ public struct TreeTableView: View {
     /// so it never clobbers expansion state already built up in this view's lifetime.
     private func seedExpansionFromSessionIfNeeded(tree: FileTree) {
         guard expandedPaths.isEmpty,
-              let root = appState.selectedVolume?.path,
-              let session = appState.sessionStore.load(forVolume: root),
+              let session = appState.sessionStore.load(forVolume: tree.persistenceIdentity),
               !session.expandedPaths.isEmpty
         else { return }
         expandedPaths = Set(session.expandedPaths)

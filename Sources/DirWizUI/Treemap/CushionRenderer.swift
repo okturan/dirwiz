@@ -75,6 +75,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     private var cachedColorsGeneration: UInt64 = .max
     private var cachedColorsLayoutIdentity: UInt64 = .max
 
+    /// Folders-only descendant colours for directory panels and collapsed folders. Kept
+    /// separate from `cachedColors` so Cushion's historical direct-child colouring stays
+    /// unchanged and switching styles does not repeat descendant walks.
+    private var cachedFolderAccents: [SIMD4<Float>] = []
+    private var cachedFolderAccentsGeneration: UInt64 = .max
+    private var cachedFolderAccentsLayoutIdentity: UInt64 = .max
+
     /// Bumped every time `cachedLayout` is replaced or rescaled. The colour cache is keyed
     /// on it as well as on `colorGeneration`: rect COUNT is not identity, and a relayout
     /// that happens to produce the same number of rects would otherwise repaint the new
@@ -117,7 +124,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Maps nodeIndex -> visible instance index for O(1) hover lookup.
     private var nodeToInstanceIndex: [UInt32: Int32] = [:]
 
-    /// Scratch dictionary reused by dominantDirectFileExtensionHash to avoid per-call allocation.
+    /// Scratch dictionary reused by directory colour resolution to avoid per-call allocation.
     private var scratchSizeByExt: [UInt32: UInt64] = [:]
 
     /// Callbacks for interaction.
@@ -364,13 +371,25 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         lookup.reserveCapacity(visibleCount)
 
         // Card style nests children inside their parent's padded interior so the directory
-        // container shows as a frame (and a header strip where a label fits). This is a
-        // DRAWING transform applied here at instance-build time - `cachedLayout` is left
-        // untouched, so `SpatialGrid` keeps hit-testing full layout rects and the gaps
-        // between cards stay clickable. Cushion style does none of this.
+        // container shows as a frame (and a header strip where a label fits). This drawing
+        // transform is applied here at instance-build time; `cachedLayout` stays untouched,
+        // while the Folders hit grid is rebuilt from the post-nesting `displayRects` below.
+        // The shader-only card gap is not applied to those rects, so edges stay clickable.
+        // Cushion style does none of this.
         let nestCards = (renderStyle == .cards)
             && CardBudget.decide(nodeCount: visibleCount) != .fallbackToCushion
         let cullTinyCards = (renderStyle == .cards)
+
+        // A negative alpha is an internal sentinel only; it is never sent to Metal.
+        let noFolderAccent = SIMD4<Float>(0, 0, 0, -1)
+        let folderAccentsValid = cachedFolderAccentsGeneration == colorGeneration
+            && cachedFolderAccentsLayoutIdentity == layoutIdentity
+            && cachedFolderAccents.count == layoutCount
+        var folderAccents: [SIMD4<Float>] = folderAccentsValid
+            ? cachedFolderAccents
+            : (nestCards
+                ? [SIMD4<Float>](repeating: noFolderAccent, count: layoutCount)
+                : [])
 
         // Precomputed by the pure `CardNesting` transform, keyed by node index.
         var nestedRect: [UInt32: CardNesting.Placed] = [:]
@@ -436,6 +455,25 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 colors[i] = baseColor
             }
 
+            var folderAccent: SIMD4<Float>?
+            if nestCards, nodes[nodeIdx].isDirectory {
+                let resolved: SIMD4<Float>
+                if folderAccentsValid {
+                    resolved = folderAccents[i]
+                } else {
+                    resolved = resolver.resolveFoldersRepresentativeColor(
+                        for: tmRect.nodeIndex,
+                        depth: tmRect.depth,
+                        nodes: nodes,
+                        scratchSizeByExt: &scratchSizeByExt
+                    ) ?? noFolderAccent
+                    folderAccents[i] = resolved
+                }
+                if resolved.w >= 0 {
+                    folderAccent = resolved
+                }
+            }
+
             // Sub-pixel culling: skip rects smaller than half a pixel in either dimension.
             guard tmRect.width >= 0.5, tmRect.height >= 0.5 else { continue }
 
@@ -463,17 +501,27 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 guard w >= 0.5, h >= 0.5 else { continue }
             }
 
-            // Folders style: containers are structure, so they take a neutral fill instead
-            // of their dominant child's hue. Overriding here rather than in the resolver
-            // keeps the colour cache style-independent.
+            // Expanded folders carry a quiet descendant tint so nested content does not
+            // jump from grey straight to red/blue. A collapsed folder stands in for that
+            // content and therefore keeps file-like chroma. Cushion continues to consume
+            // the historical style-independent base colour above.
             let drawColor: SIMD4<Float>
             if nestCards && tmRect.isBackground && !isCollapsedFolder {
-                drawColor = CardGeometry.containerFill(depth: tmRect.depth)
+                drawColor = CardGeometry.folderContainerFill(
+                    representativeColor: folderAccent,
+                    depth: tmRect.depth
+                )
+            } else if nestCards && tmRect.isBackground {
+                let parentDepth = max(0, tmRect.depth - 1)
+                if let folderAccent {
+                    drawColor = CardGeometry.collapsedFolderFill(
+                        folderAccent,
+                        containerDepth: parentDepth
+                    )
+                } else {
+                    drawColor = CardGeometry.containerFill(depth: parentDepth)
+                }
             } else if nestCards {
-                // A collapsed folder is standing in for its contents, so it keeps the
-                // colour those contents gave it - but like every other coloured tile in
-                // Folders style it is settled toward the neutral chrome around it, because
-                // this style has no lighting to tie a saturated tile to its surroundings.
                 drawColor = CardGeometry.leafFill(
                     baseColor,
                     containerDepth: max(0, tmRect.depth - 1)
@@ -510,6 +558,11 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             cachedColors = colors
             cachedColorsGeneration = colorGeneration
             cachedColorsLayoutIdentity = layoutIdentity
+        }
+        if nestCards, !folderAccentsValid {
+            cachedFolderAccents = folderAccents
+            cachedFolderAccentsGeneration = colorGeneration
+            cachedFolderAccentsLayoutIdentity = layoutIdentity
         }
 
         instanceCount = instances.count

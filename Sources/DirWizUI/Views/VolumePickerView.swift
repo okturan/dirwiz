@@ -2,6 +2,12 @@ import SwiftUI
 import DirWizCore
 import AppKit
 
+enum VolumePickerPolicy {
+    static func showsCombinedVolumes(volumeCount: Int) -> Bool {
+        volumeCount >= 2
+    }
+}
+
 /// Sidebar view listing mounted volumes with usage stats and a scan button.
 public struct VolumePickerView: View {
     @Bindable var appState: AppState
@@ -24,11 +30,29 @@ public struct VolumePickerView: View {
                     ForEach(appState.availableVolumes) { volume in
                         VolumeRow(
                             volume: volume,
-                            isSelected: appState.selectedVolume == volume.url
+                            isSelected: !appState.isCombinedVolumeSelection
+                                && appState.selectedVolume == volume.url
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            appState.selectedVolume = volume.url
+                            appState.selectVolume(volume.url)
+                        }
+                    }
+
+                    if VolumePickerPolicy.showsCombinedVolumes(
+                        volumeCount: appState.availableVolumes.count
+                    ) {
+                        Divider()
+                            .padding(.vertical, 2)
+
+                        CombinedVolumesRow(
+                            volumeCount: appState.availableVolumes.count,
+                            totalCapacity: combinedCapacity.total,
+                            isSelected: appState.isCombinedVolumeSelection
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            appState.selectCombinedVolumes()
                         }
                     }
                 }
@@ -43,6 +67,16 @@ public struct VolumePickerView: View {
             scanButton
         }
         .onAppear {
+            refreshVolumes()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(
+            for: NSWorkspace.didMountNotification
+        )) { _ in
+            refreshVolumes()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(
+            for: NSWorkspace.didUnmountNotification
+        )) { _ in
             refreshVolumes()
         }
     }
@@ -67,7 +101,30 @@ public struct VolumePickerView: View {
 
     @ViewBuilder
     private var selectedVolumeStats: some View {
-        if let url = appState.selectedVolume,
+        if appState.isCombinedVolumeSelection,
+           VolumePickerPolicy.showsCombinedVolumes(volumeCount: appState.availableVolumes.count) {
+            VStack(alignment: .leading, spacing: 6) {
+                LabeledContent("Volumes") {
+                    Text("\(appState.availableVolumes.count)")
+                        .font(.system(.body, design: .monospaced))
+                }
+                LabeledContent("Used") {
+                    Text(SizeFormatter.shared.format(combinedCapacity.used))
+                        .font(.system(.body, design: .monospaced))
+                }
+                LabeledContent("Available") {
+                    Text(SizeFormatter.shared.format(combinedCapacity.available))
+                        .font(.system(.body, design: .monospaced))
+                }
+                LabeledContent("Total") {
+                    Text(SizeFormatter.shared.format(combinedCapacity.total))
+                        .font(.system(.body, design: .monospaced))
+                }
+            }
+            .font(.callout)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        } else if let url = appState.selectedVolume,
            let volume = appState.availableVolumes.first(where: { $0.url == url }) {
             VStack(alignment: .leading, spacing: 6) {
                 LabeledContent("Used") {
@@ -121,7 +178,9 @@ public struct VolumePickerView: View {
     private var scanControlState: VolumeScanControlState {
         VolumeScanControlState.resolve(
             selectedVolume: appState.selectedVolume,
+            selectedMountTraversalScope: appState.selectedMountTraversalScope,
             displayedTreeRootPath: appState.fileTree?.rootPath,
+            displayedTreeMountTraversalScope: appState.fileTree?.mountTraversalScope,
             isScanning: appState.scanProgress.isScanning,
             isPreparingScan: appState.isPreparingScan,
             isApplyingChanges: appState.isApplyingChanges
@@ -151,10 +210,40 @@ public struct VolumePickerView: View {
             return VolumeInfo(url: url, values: values)
         }
 
-        // Auto-select root volume if nothing is selected.
-        if appState.selectedVolume == nil {
-            appState.selectedVolume = appState.availableVolumes.first?.url
+        if appState.isCombinedVolumeSelection {
+            // The combined choice only exists when there is something to combine. An
+            // unmount that removes it falls back to the first concrete volume.
+            if appState.availableVolumes.count < 2 {
+                if let first = appState.availableVolumes.first {
+                    appState.selectVolume(first.url)
+                } else {
+                    appState.selectedVolume = nil
+                    appState.selectedMountTraversalScope = .selectedVolume
+                }
+            }
+        } else if appState.selectedVolume == nil
+                    || !appState.availableVolumes.contains(where: { $0.url == appState.selectedVolume }) {
+            // Hot-plugging another drive does not enter this branch while the current
+            // selection remains mounted, so it cannot silently change scope or target.
+            if let first = appState.availableVolumes.first {
+                appState.selectVolume(first.url)
+            } else {
+                appState.selectedVolume = nil
+            }
         }
+    }
+
+    private var combinedCapacity: (used: UInt64, available: UInt64, total: UInt64) {
+        appState.availableVolumes.reduce(into: (used: 0, available: 0, total: 0)) {
+            $0.used = addingClamped($0.used, $1.usedCapacity)
+            $0.available = addingClamped($0.available, $1.availableCapacity)
+            $0.total = addingClamped($0.total, $1.totalCapacity)
+        }
+    }
+
+    private func addingClamped(_ lhs: UInt64, _ rhs: UInt64) -> UInt64 {
+        let result = lhs.addingReportingOverflow(rhs)
+        return result.overflow ? .max : result.partialValue
     }
 }
 
@@ -229,5 +318,49 @@ private struct VolumeRow: View {
     private var volumeIcon: Image {
         let nsImage = NSWorkspace.shared.icon(forFile: volume.url.path)
         return Image(nsImage: nsImage)
+    }
+}
+
+// MARK: - CombinedVolumesRow
+
+private struct CombinedVolumesRow: View {
+    let volumeCount: Int
+    let totalCapacity: UInt64
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 24))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("All Volumes")
+                    .font(.system(size: 13, weight: .medium))
+                Text("\(volumeCount) mounted volumes in one map")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text(SizeFormatter.shared.format(totalCapacity) + " total")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(
+                    isSelected ? Color.accentColor.opacity(0.4) : Color.clear,
+                    lineWidth: 1
+                )
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("All Volumes, \(volumeCount) mounted volumes in one map")
     }
 }

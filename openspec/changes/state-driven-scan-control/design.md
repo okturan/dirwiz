@@ -95,6 +95,19 @@ That control explains and resolves a particular safety condition; it is not a se
 choice in the volume scan-control area. The new invariant is scoped to the sidebar's normal scan
 control and does not weaken the existing storm guard.
 
+### 5. Completed status belongs to one operation
+
+`lastScanSummary`, `scanProgress` counters, and `scanProgress.elapsedTime` describe the most recently
+completed warm or cold scan. A living-view subtree apply mutates the already displayed tree but is
+not a new scan: it reports recency through `lastLiveApplyAt` and the living-view row, and must not
+replace only `lastScanSummary` while leaving the older scan's counters and elapsed time visible.
+
+A successful warm scan publishes its measured elapsed time into `scanProgress` at the same boundary
+that publishes the warm summary. The sidebar renders elapsed time once, inside that operation-owned
+summary, rather than repeating a separately sourced elapsed line below it. This preserves both facts
+in the reported case: the cold cache rebuild took 30.7 seconds, and a later living apply completed
+independently without pretending those values belonged to one operation.
+
 ## Risks / Trade-offs
 
 - **Equivalent paths compare unequal.** Volume roots can differ syntactically through trailing

@@ -4,18 +4,19 @@ import Foundation
 /// re-enumerating the volume. FAIL-CLOSED: `load` returns `nil` on ANY doubt -
 /// a nil cache simply means a cold scan, i.e. today's behavior.
 ///
-/// Binary format (little-endian), current version 2:
+/// Binary format (little-endian), current version 3:
 ///
 /// | Field | Type |
 /// |---|---|
 /// | magic | 4 bytes "DWTC" |
-/// | formatVersion | UInt32 = 2 |
+/// | formatVersion | UInt32 = 3 |
 /// | nodeStride | UInt32 = MemoryLayout<FileNode>.stride (layout guard) |
 /// | savedAt | Float64 (timeIntervalSince1970) |
 /// | lastEventId | UInt64 |
 /// | rootPathLen UInt16 + UTF-8 bytes | |
 /// | isCaseSensitive | UInt8 |
 /// | linkCountsCaptured | UInt8 (v2+) |
+/// | mountTraversalScope | UInt8 (v3+) |
 /// | volumeUUIDLen UInt16 + UTF-8 bytes | empty if unavailable at save time |
 /// | nodeCount | UInt32 |
 /// | stringPoolLen | UInt64 |
@@ -28,8 +29,8 @@ import Foundation
 /// `hasMultipleHardlinks` flag bit, new meaning assigned to existing bytes).
 ///
 /// Version history: v1 = original; v2 = flags bit 2 means hasMultipleHardlinks and the
-/// header carries `linkCountsCaptured` (v1 caches predate link-count capture, so they
-/// are rejected rather than presenting absent flags as "no hardlinks").
+/// header carries `linkCountsCaptured`; v3 records mount traversal scope. v2 caches are
+/// rejected because a `/` tree from that format may already contain pooled external drives.
 public enum TreeCache {
     public struct Payload: Sendable {
         public let tree: FileTree
@@ -41,7 +42,7 @@ public enum TreeCache {
 
     private enum Binary {
         static let magic = Data([0x44, 0x57, 0x54, 0x43]) // "DWTC"
-        static let formatVersion: UInt32 = 2
+        static let formatVersion: UInt32 = 3
     }
 
     /// Reasons a load can fail. Structural failures (the file itself is garbage) are
@@ -54,12 +55,13 @@ public enum TreeCache {
         case structuralInvalid
         case rootPathMismatch
         case volumeMismatch
+        case scopeMismatch
 
         var isStructuralCorruption: Bool {
             switch self {
             case .invalidHeader, .truncated, .checksumMismatch, .structuralInvalid:
                 return true
-            case .rootPathMismatch, .volumeMismatch:
+            case .rootPathMismatch, .volumeMismatch, .scopeMismatch:
                 return false
             }
         }
@@ -76,7 +78,7 @@ public enum TreeCache {
             case .truncated: return "cache file was incomplete"
             case .checksumMismatch: return "cache file was corrupted"
             case .structuralInvalid: return "cache data failed a consistency check"
-            case .rootPathMismatch, .volumeMismatch: return "cache doesn't apply here"
+            case .rootPathMismatch, .volumeMismatch, .scopeMismatch: return "cache doesn't apply here"
             }
         }
     }
@@ -87,6 +89,7 @@ public enum TreeCache {
         let (nodes, stringPool, rootPath) = tree.pathBuildingSnapshot()
         let isCaseSensitive = tree.isCaseSensitive
         let linkCountsCaptured = tree.linkCountsCaptured
+        let mountTraversalScope = tree.mountTraversalScope
 
         let rootPathBytes = Array(rootPath.utf8)
         guard rootPathBytes.count <= Int(UInt16.max) else {
@@ -115,6 +118,7 @@ public enum TreeCache {
         data.append(contentsOf: rootPathBytes)
         data.append(isCaseSensitive ? 1 : 0)
         data.append(linkCountsCaptured ? 1 : 0)
+        data.append(mountTraversalScope.rawValue)
         data.appendLE(UInt16(volumeUUIDBytes.count))
         data.append(contentsOf: volumeUUIDBytes)
         data.appendLE(UInt32(nodes.count))
@@ -124,7 +128,7 @@ public enum TreeCache {
 
         data.appendLE(fnv1a64(data))
 
-        let url = cacheURL(for: rootPath)
+        let url = cacheURL(for: rootPath, scope: mountTraversalScope)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -144,12 +148,29 @@ public enum TreeCache {
         case rejected(reason: String)
     }
 
-    public static func loadResult(for rootPath: String) -> LoadOutcome {
-        let url = cacheURL(for: rootPath)
-        guard let data = try? Data(contentsOf: url) else { return .noCacheFile }
+    public static func loadResult(
+        for rootPath: String,
+        scope: MountTraversalScope = .selectedVolume
+    ) -> LoadOutcome {
+        let url = cacheURL(for: rootPath, scope: scope)
+        guard let data = try? Data(contentsOf: url) else {
+            // v1/v2 keyed only by root path. Its scope is unknowable, and a root cache is
+            // known to have pooled external drives, so remove it once instead of silently
+            // leaving stale data around after the v3 key migration.
+            let legacyURL = legacyCacheURL(for: rootPath)
+            if FileManager.default.fileExists(atPath: legacyURL.path) {
+                try? FileManager.default.removeItem(at: legacyURL)
+                return .rejected(reason: DecodeError.invalidHeader.structuralCorruptionReason)
+            }
+            return .noCacheFile
+        }
 
         do {
-            return .success(try decode(data: data, requestedRootPath: rootPath))
+            return .success(try decode(
+                data: data,
+                requestedRootPath: rootPath,
+                requestedScope: scope
+            ))
         } catch let error as DecodeError {
             guard error.isStructuralCorruption else {
                 // rootPathMismatch/volumeMismatch: per the doc comment on DecodeError,
@@ -157,7 +178,7 @@ public enum TreeCache {
                 // THIS lookup, so it reads exactly like no cache existing at all.
                 return .noCacheFile
             }
-            invalidate(for: rootPath)
+            invalidate(for: rootPath, scope: scope)
             return .rejected(reason: error.structuralCorruptionReason)
         } catch {
             return .noCacheFile
@@ -167,24 +188,42 @@ public enum TreeCache {
     /// Fail-closed convenience over `loadResult`: nil on ANY doubt, discarding why.
     /// Unchanged behavior/signature for every existing caller - only `startScan`
     /// (AppState+Scan.swift) needs the richer `loadResult` to explain a rejection.
-    public static func load(for rootPath: String) -> Payload? {
-        if case .success(let payload) = loadResult(for: rootPath) {
+    public static func load(
+        for rootPath: String,
+        scope: MountTraversalScope = .selectedVolume
+    ) -> Payload? {
+        if case .success(let payload) = loadResult(for: rootPath, scope: scope) {
             return payload
         }
         return nil
     }
 
-    public static func invalidate(for rootPath: String) {
-        try? FileManager.default.removeItem(at: cacheURL(for: rootPath))
+    public static func invalidate(
+        for rootPath: String,
+        scope: MountTraversalScope = .selectedVolume
+    ) {
+        try? FileManager.default.removeItem(at: cacheURL(for: rootPath, scope: scope))
     }
 
-    public static func cacheURL(for rootPath: String) -> URL {
-        cacheDirectoryURL().appendingPathComponent(cacheFilename(for: rootPath))
+    public static func cacheURL(
+        for rootPath: String,
+        scope: MountTraversalScope = .selectedVolume
+    ) -> URL {
+        cacheDirectoryURL().appendingPathComponent(cacheFilename(for: rootPath, scope: scope))
+    }
+
+    /// Pre-v3 root-only location, kept solely for one-time invalidation and migration tests.
+    static func legacyCacheURL(for rootPath: String) -> URL {
+        cacheDirectoryURL().appendingPathComponent(legacyCacheFilename(for: rootPath))
     }
 
     // MARK: - Decode
 
-    private static func decode(data: Data, requestedRootPath: String) throws -> Payload {
+    private static func decode(
+        data: Data,
+        requestedRootPath: String,
+        requestedScope: MountTraversalScope
+    ) throws -> Payload {
         var cursor = 0
 
         guard let magic = data.readBytes(count: 4, at: &cursor), Data(magic) == Binary.magic else {
@@ -223,6 +262,16 @@ public enum TreeCache {
             throw DecodeError.truncated
         }
         let linkCountsCaptured = linkCountsByte[linkCountsByte.startIndex] != 0
+
+        guard let scopeByte = data.readBytes(count: 1, at: &cursor),
+              let mountTraversalScope = MountTraversalScope(
+                rawValue: scopeByte[scopeByte.startIndex]
+              ) else {
+            throw DecodeError.invalidHeader
+        }
+        guard mountTraversalScope == requestedScope else {
+            throw DecodeError.scopeMismatch
+        }
 
         let volumeUUIDLen: UInt16 = try data.readLE(at: &cursor)
         guard let volumeUUIDRaw = data.readBytes(count: Int(volumeUUIDLen), at: &cursor),
@@ -282,6 +331,7 @@ public enum TreeCache {
             nodes: nodes,
             stringPool: stringPool,
             rootPath: rootPath,
+            mountTraversalScope: mountTraversalScope,
             isCaseSensitive: isCaseSensitive,
             linkCountsCaptured: linkCountsCaptured
         )
@@ -319,9 +369,22 @@ public enum TreeCache {
         return support.appendingPathComponent("DirWiz/TreeCache", isDirectory: true)
     }
 
-    private static func cacheFilename(for rootPath: String) -> String {
+    private static func cacheFilename(
+        for rootPath: String,
+        scope: MountTraversalScope
+    ) -> String {
         // Readable prefix + FNV-1a hash suffix to guarantee uniqueness (mirrors
         // TemporalSnapshot's naming scheme).
+        let safe = rootPath
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "-")
+            .trimmingCharacters(in: .init(charactersIn: "_"))
+        let prefix = safe.isEmpty ? "root" : String(safe.prefix(40))
+        let identity = rootPath + "\u{0}" + scope.cacheKeyComponent
+        return "\(prefix)-\(scope.cacheKeyComponent)-\(String(fnv1a64(identity), radix: 16)).dwtc"
+    }
+
+    private static func legacyCacheFilename(for rootPath: String) -> String {
         let safe = rootPath
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: " ", with: "-")

@@ -224,20 +224,14 @@ extension AppState {
         guard decision == .apply else { return }
 
         await applyAccumulatedChanges()
-
-        lastLiveApplyAt = CFAbsoluteTimeGetCurrent()
-        lastLiveChangeAt = nil
-        liveRefreshGeneration &+= 1
-        liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
     }
 
     /// Apply the accumulated FSEvents changes to the displayed tree incrementally - the
-    /// "N folders changed · Refresh" badge's action (plan 037, user decision 3a: no
-    /// auto-apply/debounced live mode, ever - the view only changes on an explicit click).
-    /// Reuses the same `rescanSubtrees` splice engine `commitWarmStart` (AppState+Scan.swift)
-    /// uses for warm start, but deliberately skips that flow's `scanProgress.isScanning` /
-    /// `staleViewAsOf` plumbing: this patch is meant to feel instantaneous, and blanking the
-    /// detail pane while it runs would defeat that. `isApplyingChanges` is the one honest
+    /// living view's automatic (or explicitly resumed) patch action. Reuses the same
+    /// `rescanSubtrees` splice engine `commitWarmStart` (AppState+Scan.swift) uses for warm
+    /// start, but deliberately skips that flow's `scanProgress.isScanning` / `staleViewAsOf`
+    /// plumbing: this is not a new scan, and blanking the detail pane would defeat the live
+    /// view. `isApplyingChanges` is the one honest
     /// signal it needs - it drives the badge's spinner and slots into the existing
     /// `HeavyTaskKind` exclusivity matrix via `.applyChanges`.
     ///
@@ -264,7 +258,6 @@ extension AppState {
 
         let scanner = FileScanner()
         let progress = ScanProgress()
-        let startTime = CFAbsoluteTimeGetCurrent()
         let report = await scanner.rescanSubtrees(targets, tree: tree, progress: progress)
 
         // A new scan (warm or cold) superseded this apply while the splice was running.
@@ -305,9 +298,6 @@ extension AppState {
         invalidateAfterTreeMutation(restoring: capture)
         computeExtensionStats()
 
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        lastScanSummary = ScanSummaryComposer.warm(foldersRefreshed: report.rescannedRoots.count, seconds: elapsed)
-
         fsChanges = []
         fsEventsMonitor?.clearChanges()
 
@@ -317,13 +307,24 @@ extension AppState {
             log.error("TreeCache save failed after applying accumulated changes: \(error.localizedDescription, privacy: .public)")
         }
 
+        // A living-view splice is not a scan. Keep `lastScanSummary` and `scanProgress`
+        // describing the same completed warm/cold scan instead of replacing only the
+        // summary and leaving that scan's counters and elapsed time underneath it.
         isApplyingChanges = false
+        lastLiveApplyAt = CFAbsoluteTimeGetCurrent()
+        lastLiveChangeAt = nil
+        liveRefreshGeneration &+= 1
+        liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
     }
 
     // MARK: - Storage Trends
 
     public func recordScanTrend() async {
         guard let tree = fileTree, let volumeURL = selectedVolume else { return }
+        guard tree.mountTraversalScope == .selectedVolume else {
+            storageTrendHistory = []
+            return
+        }
         await Task.detached(priority: .background) {
             let trends = StorageTrends()
             try? await trends.recordScan(tree: tree, volumePath: volumeURL.path)
@@ -332,6 +333,10 @@ extension AppState {
 
     public func loadStorageTrends() async {
         guard let tree = fileTree else { return }
+        guard tree.mountTraversalScope == .selectedVolume else {
+            storageTrendHistory = []
+            return
+        }
         let rootPath = tree.path(at: 0)
         let history = await Task.detached(priority: .background) {
             let trends = StorageTrends()
@@ -386,6 +391,11 @@ extension AppState {
         volumePath: String,
         token: UInt64
     ) async {
+        guard tree.mountTraversalScope == .selectedVolume else {
+            guard scanToken == token else { return }
+            storageTrendHistory = []
+            return
+        }
         let rootPath = tree.path(at: 0)
         let history = await Task.detached(priority: .background) {
             let trends = StorageTrends()

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import DirWizCore
 @testable import DirWizUI
 
 @Suite("State-driven volume scan control")
@@ -32,6 +33,119 @@ struct VolumeScanControlStateTests {
                 displayedRoot: "/Volumes/Archive"
             ) == .fullRescan
         )
+    }
+
+    @Test("Combined selection has explicit scan copy and normal scan routing")
+    func combinedSelectionAction() {
+        let state = resolve(
+            selected: "/",
+            selectedScope: .combinedVolumes,
+            displayedRoot: nil,
+            displayedScope: nil
+        )
+
+        #expect(state == .scanAllVolumes(enabled: true))
+        #expect(state.title == "Scan All Volumes")
+        #expect(state.action == .scanVolume)
+        #expect(state.helpText.contains("combined map"))
+    }
+
+    @Test("Root path alone cannot make individual and combined trees share ownership")
+    func scopeIsPartOfDisplayedOwnership() {
+        #expect(
+            resolve(
+                selected: "/",
+                selectedScope: .combinedVolumes,
+                displayedRoot: "/",
+                displayedScope: .selectedVolume
+            ) == .scanAllVolumes(enabled: true)
+        )
+        #expect(
+            resolve(
+                selected: "/",
+                selectedScope: .selectedVolume,
+                displayedRoot: "/",
+                displayedScope: .combinedVolumes
+            ) == .scanVolume(enabled: true)
+        )
+        #expect(
+            resolve(
+                selected: "/",
+                selectedScope: .combinedVolumes,
+                displayedRoot: "/",
+                displayedScope: .combinedVolumes
+            ) == .fullRescan
+        )
+    }
+
+    @Test("Combined selection is session-only and a concrete volume clears it")
+    @MainActor
+    func appStateSelectionScope() {
+        let suiteName = "VolumeScanControlStateTests"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let state = AppState(defaults: defaults)
+        state.selectCombinedVolumes()
+        #expect(state.selectedVolume?.path == "/")
+        #expect(state.isCombinedVolumeSelection)
+
+        state.selectVolume(URL(fileURLWithPath: "/Volumes/Archive"))
+        #expect(state.selectedMountTraversalScope == .selectedVolume)
+        #expect(!state.isCombinedVolumeSelection)
+    }
+
+    @Test("Selected persistence identity distinguishes combined root from Macintosh HD")
+    @MainActor
+    func selectedPersistenceIdentityIncludesScope() {
+        let suiteName = "VolumeScanControlStateIdentityTests"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let state = AppState(defaults: defaults)
+
+        state.selectVolume(URL(fileURLWithPath: "/"))
+        let individual = state.selectedScanPersistenceIdentity
+        state.selectCombinedVolumes()
+        let combined = state.selectedScanPersistenceIdentity
+
+        #expect(individual == "/")
+        #expect(combined != individual)
+    }
+
+    @Test("Combined scans do not inherit single-volume capacity trends")
+    @MainActor
+    func combinedTrendsAreCleared() async {
+        let suiteName = "VolumeScanControlStateTrendTests"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let state = AppState(defaults: defaults)
+        state.storageTrendHistory = [
+            ScanSummary(
+                date: Date(), rootPath: "/", totalUsed: 1, totalFree: 2,
+                totalCapacity: 3, fileCount: 4, directoryCount: 5, topDirectories: []
+            )
+        ]
+        let tree = FileTree()
+        tree.setRootPath("/")
+        tree.setMountTraversalScope(.combinedVolumes)
+
+        await state.refreshStorageTrends(
+            tree: tree,
+            volumePath: "/",
+            token: state.scanToken
+        )
+
+        #expect(state.storageTrendHistory.isEmpty)
+    }
+
+    @Test("Combined row appears only when multiple concrete volumes exist")
+    func combinedAvailability() {
+        #expect(!VolumePickerPolicy.showsCombinedVolumes(volumeCount: 0))
+        #expect(!VolumePickerPolicy.showsCombinedVolumes(volumeCount: 1))
+        #expect(VolumePickerPolicy.showsCombinedVolumes(volumeCount: 2))
+        #expect(VolumePickerPolicy.showsCombinedVolumes(volumeCount: 5))
     }
 
     @Test("Cache policy cannot make an undisplayed tree look displayed")
@@ -170,14 +284,18 @@ struct VolumeScanControlStateTests {
 
     private func resolve(
         selected path: String?,
+        selectedScope: MountTraversalScope = .selectedVolume,
         displayedRoot: String?,
+        displayedScope: MountTraversalScope? = .selectedVolume,
         isScanning: Bool = false,
         isPreparing: Bool = false,
         isApplying: Bool = false
     ) -> VolumeScanControlState {
         VolumeScanControlState.resolve(
             selectedVolume: path.map { URL(fileURLWithPath: $0, isDirectory: true) },
+            selectedMountTraversalScope: selectedScope,
             displayedTreeRootPath: displayedRoot,
+            displayedTreeMountTraversalScope: displayedScope,
             isScanning: isScanning,
             isPreparingScan: isPreparing,
             isApplyingChanges: isApplying

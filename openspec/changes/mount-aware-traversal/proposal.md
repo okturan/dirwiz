@@ -1,63 +1,55 @@
-# Mount-Aware Traversal
+# Mount-Aware Traversal and Explicit Combined View
 
 ## Why
 
-This is a correctness bug that also costs time.
+The sidebar presents mounted volumes as separate scan targets, but a scan rooted at `/` currently
+walks straight through foreign filesystems mounted below it. Plugging in an external SSD can
+therefore add that SSD to the already-displayed boot-volume graph during a scan or living refresh.
+That breaks the selection model: choosing one drive does not actually mean one drive.
 
-`VisitedDirectories` deduplicates by `(device, inode)` but never rejects a foreign device
-(FileScanner.swift), so a scan of `/` descends into every mounted filesystem underneath it.
-The consequences:
+The failure is recorded on this machine, not inferred. The cached `/` tree saved on 2026-08-01
+contains 5,889,027 items and the UI reports 6.27 TB, while `df` reports the selected root filesystem
+as 995 GB. The same screenshot shows the attached Samsung8TB contributing 5.34 TB beneath
+`/Volumes`, which accounts for the impossible pooled total.
 
-- A mounted disk image is counted TWICE: once as the `.dmg` file that actually occupies
-  blocks, and again as the mounted volume's contents, which are a view of those same blocks.
-  This is the same shape of double count as the firmlink bug, and it is why the reported
-  total still exceeds physical capacity after that fix (about 1019 GB on a 926 GB volume).
-- A mounted external drive counts against the volume being scanned, which is nonsense: a
-  2 TB external cannot occupy space on a 926 GB SSD.
-- Measured traversal that is redundant or misattributed, with Simulator runtimes mounted:
-  four Simulator images at 477,845 entries (2.6 to 3.2 s), plus `/System/Volumes/Update` at
-  118,921 entries (0.9 s). Roughly 600,000 entries, about 13% of the scan.
+Foreign mounts also make ordinary single-volume totals misleading in smaller ways. Mounted disk
+images can be counted once as the image file and again as the mounted view, while Simulator and
+Update volumes add content that does not belong to the selected filesystem.
 
-Device numbers verified on this machine, which is what makes the fix implementable:
-
-| Path | Device |
-| --- | --- |
-| `/` | 16777233 |
-| `/System/Volumes/Data` | 16777233 |
-| `/Users` | 16777233 |
-| `/System/Volumes/Update` | 16777234 |
-
-The System and Data volumes share a device number, so ordinary `du -x` same-device semantics
-KEEP the macOS volume group intact while excluding genuinely separate mounts. This is the
-detail that makes the rule safe, and it is the opposite of the firmlink case, where both
-sides also share a device and so a mount rule cannot help. The two mechanisms are
-complementary and both are needed.
-
-The performance saving is real but conditional on what is mounted: with no Simulator
-runtimes mounted it is closer to 1 s, with them it is several seconds. The correctness fix is
-unconditional, which is the reason to do it.
+Pooling is still useful when it is intentional. With several drives attached, an explicit combined
+map is a good overview. The defect is making that the implicit consequence of selecting one volume
+or hot-plugging another.
 
 ## What Changes
 
-- Traversal skips a directory whose device differs from the scan root's device, the standard
-  `du -x` rule, with the volume group preserved because it shares a device.
-- Skipped mounts are reported, not silently dropped. A user who scanned `/` with an external
-  drive attached must be able to see that DirWiz deliberately did not descend into it,
-  consistent with the existing skipped-directory honesty (`358 system-protected folders
-  skipped`). Silence here would read as missing data.
-- Scanning a mount directly still works and scans all of it. Rooting a scan at
-  `/Volumes/External` or `/System/Volumes/Data` measures that volume in full; the rule is
-  relative to the scan root, never absolute.
-- `DIRWIZ_CROSS_MOUNTS=1` restores the old behaviour, matching the repo's habit of shipping
-  an escape hatch beside a traversal change (`DIRWIZ_NO_FIRMLINK_DEDUP`).
-- Fails open: if the scan root's device cannot be determined, traverse everything exactly as
-  today. Losing content is never an acceptable outcome of an optimisation.
-- Out of scope: presenting skipped mounts as separate scannable volumes in the sidebar, and
-  any change to firmlink deduplication.
+- A normal volume scan uses the scan root's device identity as its traversal boundary, matching
+  `du -x`. The macOS System/Data volume group remains complete because both paths report the same
+  device identity on this machine.
+- A foreign mount remains visible as a mount-point directory, but DirWiz does not descend into it or
+  add its contents to the selected volume's totals.
+- When two or more eligible local volumes are present, the sidebar offers a distinct **All Volumes**
+  row with copy explaining that it produces one combined map. It never replaces or silently changes
+  the selected individual volume.
+- Selecting **All Volumes** is the only product UI path that intentionally restores cross-mount
+  traversal. Its scan/cache scope is distinct from an individual `/` scan, so the two trees cannot
+  be mistaken for one another.
+- Mount/unmount notifications refresh the volume list. Hot-plugging a drive can reveal the combined
+  option, but cannot select it or mutate an individual scan into a combined one.
+- Skipped mounts are reported separately from permission-denied/system-protected directories, with
+  a pointer to the explicit combined option.
+- `DIRWIZ_CROSS_MOUNTS=1` remains a diagnostic escape hatch that reproduces unrestricted historic
+  traversal.
+- The tree-cache format records traversal scope and changes version, preventing a previously pooled
+  `/` cache from being restored as an individual-volume tree.
 
 ## Impact
 
-- The volume total stops exceeding the volume's capacity, which is the headline.
-- Cold scan drops by roughly 1 s normally and several seconds with disk images mounted.
-- Risk is that "whole disk" semantics must remain honest. The mitigation is that the rule is
-  relative to the scan root and the skips are surfaced, so nothing is quietly missing.
+- Selecting Macintosh HD or an external volume means that filesystem only, both for a cold scan and
+  for warm/living updates.
+- Attaching a new SSD no longer causes an existing graph to jump by terabytes.
+- Users with several volumes retain the useful pooled overview, but choose it deliberately through a
+  clearly labelled row.
+- Existing pooled caches are invalidated once by the cache-format change. That first scan is cold;
+  later scans can warm-start within the same scope.
+- No firmlink behavior changes. Firmlinks share a device ID and remain covered by the separate
+  `FirmlinkTable` mechanism.

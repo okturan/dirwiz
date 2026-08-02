@@ -40,13 +40,23 @@
 - [x] 3.6 Update the repository's UI behavior documentation to state that the persistent sidebar has
   one scan control and that displayed-tree ownership selects its idle meaning.
 
-## 4. Verification
+## 4. Operation-Coherent Completion Status
 
-- [x] 4.1 Run the focused scan-control, launch-restore, and living-view test groups.
-- [x] 4.2 Run `swift test --skip-build` after a clean prebuild, or the repository's equivalent full
+- [x] 4.1 Add deterministic living-apply coverage that seeds a completed scan summary and elapsed
+  time, applies filesystem changes, and requires both scan values to remain unchanged.
+- [x] 4.2 Move successful living-apply bookkeeping to the separate live status (`lastLiveApplyAt` and
+  generation) for both automatic and explicit apply paths.
+- [x] 4.3 Publish a successful warm scan's measured elapsed time into `scanProgress` at the same
+  completion boundary as its warm summary.
+- [x] 4.4 Remove the redundant independently rendered elapsed line from the completed-scan block.
+
+## 5. Verification
+
+- [x] 5.1 Run the focused scan-control, launch-restore, living-view, and scan-summary test groups.
+- [x] 5.2 Run `swift test --skip-build` after a clean prebuild, or the repository's equivalent full
   suite command, and record the exact result.
-- [x] 4.3 Run CI-parity verification and confirm no scan-supervision, warm-patch, or living-view
+- [x] 5.3 Run CI-parity verification and confirm no scan-supervision, warm-patch, or living-view
   regression was introduced.
-- [ ] 4.4 Exercise the sidebar manually through fresh launch, restored launch, active scan, live apply,
+- [ ] 5.4 Exercise the sidebar manually through fresh launch, restored launch, active scan, live apply,
   completed tree, and volume switch; confirm `Scan Volume` and `Full Rescan` never appear together
-  in the persistent scan-control area.
+  in the persistent scan-control area and completed status never combines two operations.

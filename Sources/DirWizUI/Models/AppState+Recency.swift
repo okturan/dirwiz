@@ -47,11 +47,15 @@ extension AppState {
         guard !temporalDiff.isSnapshotBuilding, let tree = fileTree else { return }
         temporalDiff.isSnapshotBuilding = true
         let token = scanToken
+        let storageIdentity = tree.persistenceIdentity
         snapshotBuildTask = Task {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
             let saveError: String? = {
                 do {
-                    let store = SnapshotStore(rootPath: snapshot.meta.rootPath)
+                    let store = SnapshotStore(
+                        rootPath: snapshot.meta.rootPath,
+                        storageIdentity: storageIdentity
+                    )
                     _ = try store.createCheckpoint(from: snapshot, name: name, pinned: name != nil)
                     return nil
                 } catch {
@@ -81,11 +85,12 @@ extension AppState {
     public func autoCheckpointIfDue() {
         guard let tree = fileTree, tree.count > 0 else { return }
         let rootPath = tree.path(at: 0)
+        let storageIdentity = tree.persistenceIdentity
         let totalBytes = tree.rootDisplaySize
         let token = scanToken
 
         Task.detached(priority: .background) {
-            let store = SnapshotStore(rootPath: rootPath)
+            let store = SnapshotStore(rootPath: rootPath, storageIdentity: storageIdentity)
             _ = store.importLegacySnapshotIfPresent()
             guard AutoCheckpointPolicy.shouldCheckpoint(
                 latest: store.list().first, now: Date(), currentTotalBytes: totalBytes
@@ -117,11 +122,12 @@ extension AppState {
     public func selectDiffBaseline(_ checkpoint: SnapshotCheckpoint?) {
         guard let tree = fileTree else { return }
         let rootPath = tree.path(at: 0)
+        let storageIdentity = tree.persistenceIdentity
         let token = scanToken
         temporalDiff.selectedBaselineID = checkpoint?.id
 
         Task.detached(priority: .userInitiated) {
-            let store = SnapshotStore(rootPath: rootPath)
+            let store = SnapshotStore(rootPath: rootPath, storageIdentity: storageIdentity)
             let snapshot: TemporalSnapshot? = {
                 guard let checkpoint else { return store.loadLatest() }
                 return try? store.load(checkpoint)
@@ -145,9 +151,10 @@ extension AppState {
     public func refreshCheckpointList() {
         guard let tree = fileTree else { return }
         let rootPath = tree.path(at: 0)
+        let storageIdentity = tree.persistenceIdentity
         let token = scanToken
         Task.detached(priority: .background) {
-            let store = SnapshotStore(rootPath: rootPath)
+            let store = SnapshotStore(rootPath: rootPath, storageIdentity: storageIdentity)
             let listed = store.list()
             let bytes = store.totalStoredBytes()
             await MainActor.run {
@@ -165,9 +172,10 @@ extension AppState {
             return
         }
         let token = scanToken
+        let rootPath = tree.path(at: 0)
+        let storageIdentity = tree.persistenceIdentity
         Task.detached(priority: .background) {
-            let rootPath = tree.path(at: 0)
-            let store = SnapshotStore(rootPath: rootPath)
+            let store = SnapshotStore(rootPath: rootPath, storageIdentity: storageIdentity)
             // One-time adoption of the pre-store single-slot file, so an existing baseline
             // is not silently lost on upgrade. No-op once the store has content.
             _ = store.importLegacySnapshotIfPresent()

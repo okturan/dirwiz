@@ -1,24 +1,28 @@
 ## Why
 
-Folders style still reads as bright extension-color fields pasted into grey folder panels. Two
-successive fixes proved too weak on real scans: a 25% move toward each color's own luminance left
-the brightness mismatch intact, and a 55% move toward folder chrome still retained 45% of the
-near-primary production palette. The Samsung8TB scan makes the failure unambiguous at volume scale.
+The 75% neutral blend shipped by this change was an overcorrection. On the supplied 5.35 TB scan it
+turns even production red, blue, and green into greyish slate. Repeated screenshots also expose the
+deeper discontinuity the blend could never solve: expanded folders are neutral grey even when all
+of their useful content is several directory levels down in one color family, then their visible
+leaves abruptly become red or blue.
 
-The sidebar legend also continues to show the raw vivid palette while Folders draws a transformed
-one, and the website's Cards demo still renders raw palette colors. The product therefore has three
-different answers for what a Folders color means.
+The earlier 55% blend attacked the leaf alone and therefore left that grey-to-color boundary intact.
+The correct unit is the hierarchy: panels need a quiet representative descendant tint, while files
+and collapsed folders need enough chroma to remain an honest extension key. Cushion, which already
+integrates raw colors through lighting, must remain unchanged.
 
 ## What Changes
 
-- Make extension color an accent inside Folders chrome, not the dominant visual field.
-- Pull production palette colors 75% toward the surrounding parent-container neutral, retaining a
-  measured 25% of relative color separation.
+- Restore clearly chromatic file colors in Folders by retaining a measured 60% of the production
+  palette's channel spread and pairwise separation.
+- Give expanded folder panels a quiet tint derived from the largest descendant content branch, so
+  non-empty nested folders do not fall back to unrelated grey.
+- Give collapsed folders file-like chroma because they stand in for the hidden contents.
 - Keep Cushion colors unchanged.
 - Make the visible File Types legend use a representative Folders swatch while Folders is selected.
-- Apply the same Folders color policy to the website's interactive Cards demo.
-- Pin the behavior against all 17 production colors and a same-generation/different-content palette
-  regression, rather than synthetic samples.
+- Apply the same direct-leaf Folders color strength to the website's interactive Cards demo.
+- Pin the behavior against all 17 production colors, deep directory-only chains, and competing
+  direct-file versus subtree content shapes.
 
 ## Capabilities
 
@@ -33,9 +37,10 @@ different answers for what a Folders color means.
 
 ## Impact
 
-- `Sources/DirWizUI/Treemap/CardGeometry.swift`: stronger, documented Folders color transform.
-- `Sources/DirWizUI/Treemap/CushionRenderer.swift`: keep parent-depth application for leaves and
-  collapsed folders.
+- `Sources/DirWizUI/Treemap/CardGeometry.swift`: chromatic leaves plus distinct expanded/collapsed
+  folder roles.
+- `Sources/DirWizUI/Treemap/TreemapColorResolver.swift` and `CushionRenderer.swift`: Folders-only,
+  descendant-aware representative colors with a generation-keyed cache.
 - `Sources/DirWizUI/Views/ExtensionLegend.swift` and `DirWiz/ContentView.swift`: style-aware legend
   swatches.
 - `docs/index.html`: Cards demo color parity.

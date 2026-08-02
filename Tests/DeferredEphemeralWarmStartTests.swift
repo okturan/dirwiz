@@ -819,8 +819,8 @@ struct DeferredEphemeralWarmStartTests {
         let (defaults, defaultsCleanup) = makeEphemeralDefaults()
         defer { defaultsCleanup() }
 
-        try await settleFixtureJournal(root: root)
-        let savedEventId = FSEventsJournal.currentEventId()
+        let savedEventId: UInt64 = 100
+        let replayEventId: UInt64 = 200
         let bootstrapTree = FileTree()
         await FileScanner().scan(
             path: root,
@@ -838,10 +838,6 @@ struct DeferredEphemeralWarmStartTests {
         try Data(count: 40).write(
             to: URL(fileURLWithPath: ephemeralRoot + "/new.txt")
         )
-        #expect(await waitForJournalChanges(
-            root: root,
-            since: savedEventId
-        ))
 
         let phaseAGate = GatedFilesystemProvider(gatedPath: ephemeralRoot)
         defer { phaseAGate.release() }
@@ -856,6 +852,12 @@ struct DeferredEphemeralWarmStartTests {
                     subtreeRescanPostCommitHook: {
                         postCommitGate.postCommit()
                     }
+                )
+            },
+            warmStartJournalReplay: { _, _ in
+                JournalReplay(
+                    outcome: .changes([interactiveRoot, ephemeralRoot]),
+                    newEventId: replayEventId
                 )
             }
         )

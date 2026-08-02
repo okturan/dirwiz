@@ -84,6 +84,8 @@ struct AppliedChangesTests {
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
+        state.lastScanSummary = "Scanned 4 items in 12.3s"
+        state.scanProgress.elapsedTime = 12.3
 
         try Data(count: 999).write(to: URL(fileURLWithPath: path).appendingPathComponent("docs/added.txt"))
 
@@ -98,7 +100,8 @@ struct AppliedChangesTests {
 
         #expect(!state.isApplyingChanges)
         #expect(state.fsChanges.isEmpty)
-        #expect(state.lastScanSummary?.hasPrefix("Refreshed") == true)
+        #expect(state.lastScanSummary == "Scanned 4 items in 12.3s")
+        #expect(state.scanProgress.elapsedTime == 12.3)
 
         let patchedTree = try #require(state.fileTree)
         let coldTree = await scanFixture(at: path)
@@ -154,9 +157,9 @@ struct AppliedChangesTests {
         #expect(newTree.path(at: state.navigation.treemapRootIndex) == docsPath)
     }
 
-    // MARK: - (c) Bookkeeping: cleared accumulator, rebaselined monitor, summary set
+    // MARK: - (c) Bookkeeping: live status advances without replacing scan status
 
-    @Test("A successful apply clears fsChanges, rebaselines the monitor, and sets the summary")
+    @Test("A successful apply clears changes and advances live status without replacing scan status")
     func bookkeepingCompleteAfterApply() async throws {
         try await withTemporaryAppSupportDir {
             try await self.bookkeepingCompleteAfterApplyBody()
@@ -175,6 +178,9 @@ struct AppliedChangesTests {
         state.fileTree = tree
         state.selectedVolume = URL(fileURLWithPath: path)
         state.setTreemapRoot(0, recordHistory: false)
+        state.lastScanSummary = "Scanned 4 items in 9.8s"
+        state.scanProgress.elapsedTime = 9.8
+        let priorLiveGeneration = state.liveRefreshGeneration
 
         // A monitor doesn't have to be running for the accumulator itself to be seeded -
         // exercised here as `nil` to prove the guard on `fsEventsMonitor` is optional-safe.
@@ -192,8 +198,12 @@ struct AppliedChangesTests {
         await state.applyAccumulatedChanges()
 
         #expect(state.fsChanges.isEmpty, "accumulator must be cleared after a successful apply")
-        #expect(state.lastScanSummary?.hasPrefix("Refreshed 1 folders from last scan in") == true,
-            "summary should report the one refreshed folder, got \(state.lastScanSummary ?? "nil")")
+        #expect(state.lastScanSummary == "Scanned 4 items in 9.8s",
+                "living apply must not replace the completed scan's operation summary")
+        #expect(state.scanProgress.elapsedTime == 9.8,
+                "living apply must not replace only one half of the completed scan timing")
+        #expect(state.lastLiveApplyAt != nil, "the separate living-view status records the apply")
+        #expect(state.liveRefreshGeneration == priorLiveGeneration &+ 1)
         #expect(!state.isApplyingChanges)
     }
 

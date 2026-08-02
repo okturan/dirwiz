@@ -113,3 +113,28 @@ NOT offer a manual incremental refresh action for that loaded volume.
 - **THEN** that contextual recovery affordance MAY remain alongside its warning
 - **AND** the persistent scan-control area SHALL still contain exactly one state-driven control
 
+### Requirement: Completed scan status is operation-coherent
+
+The completed-scan block SHALL describe one completed warm or cold scan. Its summary, counters, and
+timing MUST NOT combine values from different operations. Living-view apply SHALL report through the
+separate living-view status and SHALL NOT masquerade as a completed scan.
+
+#### Scenario: Living changes apply after a cold scan
+
+- **WHEN** a cold scan has published its completion summary and elapsed time
+- **AND** the living view later applies changed folders to the displayed tree
+- **THEN** the cold scan summary and scan elapsed time SHALL remain paired and unchanged
+- **AND** the living-view row SHALL report that the live tree was updated
+
+#### Scenario: A warm scan completes
+
+- **WHEN** a cache-aware scan finishes through a warm patch
+- **THEN** its warm summary and the completed scan's elapsed-time state SHALL use the same measured
+  operation duration
+- **AND** no independently sourced stale elapsed value SHALL be rendered beside it
+
+#### Scenario: Completed scan details are rendered
+
+- **WHEN** the sidebar shows a completed scan
+- **THEN** elapsed time SHALL appear once as part of the operation-owned completion summary
+- **AND** item and size counters MAY remain as separate current-tree facts

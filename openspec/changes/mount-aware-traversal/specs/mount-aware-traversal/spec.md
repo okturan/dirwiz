@@ -1,35 +1,103 @@
 ## ADDED Requirements
 
-### Requirement: A volume scan stays on the scan root's device
+### Requirement: An individual volume scan stays on the scan root's device
 
-The scanner SHALL use the scan root's device identity as the traversal boundary and SHALL NOT descend
-into a directory on a different device unless cross-mount traversal is explicitly enabled.
+The scanner SHALL use the scan root's device identity as the default traversal boundary and SHALL
+NOT descend into a directory on a different device unless a cross-mount scope is explicitly active.
 
-#### Scenario: A foreign mount is nested below the scan root
+#### Scenario: A foreign mount is nested below the selected volume
 
-- **WHEN** an encountered directory's device differs from the scan root's known device
-- **THEN** the scanner skips descending into that directory
-- **AND** the foreign mount's contents do not contribute to the scanned volume's totals
+- **WHEN** an encountered directory's device differs from the known scan-root device
+- **AND** the scan scope is an individual volume
+- **THEN** the scanner keeps the mount-point directory but skips its descendants
+- **AND** the foreign mount's contents do not contribute to the selected volume's totals
 
 #### Scenario: The macOS System and Data roots share a device
 
-- **WHEN** a root-volume scan reaches `/System/Volumes/Data` and it reports the scan root's device
+- **WHEN** a root-volume scan reaches `/System/Volumes/Data`
+- **AND** that directory reports the scan root's device
 - **THEN** traversal continues so the macOS volume group remains complete
 
-#### Scenario: The foreign volume is itself the scan root
+#### Scenario: A foreign volume is itself the scan root
 
-- **WHEN** the user starts a scan at that mounted volume
-- **THEN** its device becomes the traversal boundary and the volume is scanned normally
+- **WHEN** the user selects and scans that mounted volume directly
+- **THEN** its device becomes the traversal boundary
+- **AND** that volume is scanned normally
 
-### Requirement: Mount filtering fails open and has an escape hatch
+### Requirement: Combined traversal is explicit and discoverable
 
-The scanner SHALL preserve the existing cross-mount behavior when the root device cannot be
-determined or when `DIRWIZ_CROSS_MOUNTS=1` is set.
+The volume picker SHALL offer an explicit combined-volume selection when at least two eligible local
+volumes are mounted, and SHALL keep individual-volume selection as the default.
+
+#### Scenario: A second drive is attached
+
+- **WHEN** an individual volume is selected or displayed
+- **AND** another eligible local drive is mounted
+- **THEN** the volume list refreshes and offers **All Volumes**
+- **AND** the existing individual selection and traversal scope remain unchanged
+
+#### Scenario: The user chooses the combined view
+
+- **WHEN** the user selects **All Volumes**
+- **THEN** the scan control clearly offers to scan all volumes
+- **AND** the resulting tree intentionally traverses mounted filesystems beneath the root
+- **AND** the UI identifies that tree as a combined view rather than as an individual Macintosh HD scan
+
+#### Scenario: Only one eligible volume is mounted
+
+- **WHEN** the refreshed volume list contains fewer than two eligible local volumes
+- **THEN** the combined-volume selection is not shown
+- **AND** the remaining volume is selected individually
+
+#### Scenario: The app relaunches after a combined scan
+
+- **WHEN** the previous session explicitly selected the combined view
+- **THEN** the next launch does not silently make combined traversal the default
+- **AND** an individual volume remains the automatic selection unless the user chooses combined again
+
+### Requirement: Scan ownership includes traversal scope
+
+The system SHALL treat scan-root path and mount-traversal scope together as the identity of a
+displayed or persisted tree, including caches, checkpoints, session navigation, and scan history.
+
+#### Scenario: Individual and combined trees both use `/`
+
+- **WHEN** the selected scope and displayed tree share root path `/` but have different mount scopes
+- **THEN** the scan control offers the selected scope's normal scan action
+- **AND** it does not mislabel the other scope's tree as eligible for **Full Rescan**
+
+#### Scenario: A cache exists for the other scope
+
+- **WHEN** an individual `/` scan looks up a cache created by a combined `/` scan, or vice versa
+- **THEN** that cache is not loaded for the selected scope
+- **AND** saving one scope does not overwrite the other scope's cache
+
+#### Scenario: Scope-specific history exists for the same root path
+
+- **WHEN** individual and combined `/` trees create checkpoints, session state, or scan diagnostics
+- **THEN** each scope reads and writes its own persistence identity
+- **AND** a combined tree cannot restore or overwrite the individual volume's history
+
+#### Scenario: Combined capacity has no single-volume meaning
+
+- **WHEN** a combined tree completes post-scan analysis
+- **THEN** it does not record the boot volume's capacity as though it described the combined tree
+
+#### Scenario: A pre-scope cache exists
+
+- **WHEN** a cache from the earlier format does not record mount scope
+- **THEN** it is rejected as outdated
+- **AND** it cannot restore previously pooled content into an individual-volume view
+
+### Requirement: Mount filtering fails open and has a diagnostic escape hatch
+
+The scanner SHALL preserve unrestricted traversal when the root device cannot be determined or when
+`DIRWIZ_CROSS_MOUNTS=1` is set.
 
 #### Scenario: Root device lookup fails
 
 - **WHEN** the scanner cannot determine the scan root's device
-- **THEN** it traverses encountered devices as before rather than risking silent data loss
+- **THEN** it traverses encountered devices rather than risking silent data loss
 
 #### Scenario: Cross-mount override is enabled
 
@@ -38,29 +106,35 @@ determined or when `DIRWIZ_CROSS_MOUNTS=1` is set.
 
 ### Requirement: Skipped mounts are reported distinctly
 
-The system SHALL count and surface mount-boundary skips separately from permission-denied or system-
-protected directories, including the skipped mount path and the reason it was not traversed.
+The system SHALL count and surface mount-boundary skips separately from permission-denied or
+system-protected directories, including sampled paths and why they were excluded.
 
-#### Scenario: A mounted disk image is excluded
+#### Scenario: A mounted filesystem is excluded
 
-- **WHEN** a volume scan encounters and skips the disk image's mount point
-- **THEN** scan progress records that mount path
-- **AND** the sidebar explains that a separate mounted filesystem was deliberately excluded
+- **WHEN** an individual scan skips a foreign mount point
+- **THEN** scan progress records that mount path in the mount-specific count and sample
+- **AND** the sidebar explains that mounted filesystems were deliberately kept separate
+- **AND** it points to **All Volumes** when that combined choice is available
 
-### Requirement: Cold and warm traversal share the mount boundary
+### Requirement: Cold, warm, and living traversal share the mount boundary
 
-The same relative-device rule SHALL apply to full scans and subtree rescans so warm-patched and fresh
-cold trees retain equivalent volume scope.
+The same tree-owned mount scope SHALL apply to full scans, warm subtree rescans, and living-view
+subtree updates.
 
 #### Scenario: A changed path reaches a foreign mount during warm patching
 
-- **WHEN** `rescanSubtrees` encounters a device that the equivalent cold scan would exclude
+- **WHEN** `rescanSubtrees` encounters a device that an equivalent cold individual scan excludes
 - **THEN** the warm path also excludes and reports it
-- **AND** the completed warm tree remains equivalent to a fresh cold scan under the same policy
+- **AND** the completed warm tree remains equivalent to a fresh cold scan under the same scope
 
-#### Scenario: A skipped mount is reachable by another valid same-device path
+#### Scenario: A foreign mount is itself a changed root
+
+- **WHEN** an FSEvents update resolves directly to an excluded mount-point node
+- **THEN** warm/living staging does not bypass the mount boundary by treating that node as a new root
+- **AND** the previously empty mount point remains excluded
+
+#### Scenario: A skipped mount is reachable by another eligible path
 
 - **WHEN** a foreign-device occurrence is rejected
 - **THEN** its inode is not marked visited merely because of that rejection
 - **AND** a separately encountered eligible occurrence may still be traversed
-

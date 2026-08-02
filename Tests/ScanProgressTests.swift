@@ -194,6 +194,24 @@ struct ScanProgressFractionHonestyTests {
 @Suite("ScanProgress skipped-path recording")
 struct ScanProgressSkippedPathTests {
 
+    @Test("Mount skips publish and reset independently from permission skips")
+    func mountSkipsStaySeparate() {
+        let progress = ScanProgress()
+        progress.incrementSkippedDirectories(path: "/denied")
+        progress.incrementSkippedMount(path: "/Volumes/External")
+        progress.publishCounters()
+
+        #expect(progress.skippedDirectories == 1)
+        #expect(progress.skippedDirectoryPaths == ["/denied"])
+        #expect(progress.skippedMounts == 1)
+        #expect(progress.skippedMountPaths == ["/Volumes/External"])
+
+        progress.reset()
+        progress.publishCounters()
+        #expect(progress.skippedMounts == 0)
+        #expect(progress.skippedMountPaths.isEmpty)
+    }
+
     @Test("Recorded paths and count surface after publish")
     func recordsPathsUpToPublish() {
         let progress = ScanProgress()

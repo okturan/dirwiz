@@ -35,6 +35,13 @@ public final class ScanProgress: @unchecked Sendable {
     /// display, not the authoritative count.
     public var skippedDirectoryPaths: [String] = []
 
+    /// Mounted filesystems deliberately kept outside an individual-volume scan.
+    /// This is not a permission failure and is surfaced separately in the UI.
+    public var skippedMounts: Int = 0
+
+    /// Sample of mount points excluded by the device boundary.
+    public var skippedMountPaths: [String] = []
+
     /// Cap on recorded skipped paths. FDA-granted scans typically skip <30 dirs
     /// (SIP-protected locations); FDA-missing scans can skip thousands, where the
     /// count alone drives the UI and unbounded recording would be waste.
@@ -49,6 +56,8 @@ public final class ScanProgress: @unchecked Sendable {
         var allocatedBytes: UInt64 = 0
         var skipped: Int = 0
         var skippedPaths: [String] = []
+        var skippedMounts: Int = 0
+        var skippedMountPaths: [String] = []
         var path: String = ""
         var publishCount: Int = 0
     }
@@ -121,6 +130,8 @@ public final class ScanProgress: @unchecked Sendable {
             counters.allocatedBytes = 0
             counters.skipped = 0
             counters.skippedPaths = []
+            counters.skippedMounts = 0
+            counters.skippedMountPaths = []
             counters.path = ""
             counters.publishCount = 0
         }
@@ -138,6 +149,8 @@ public final class ScanProgress: @unchecked Sendable {
         scannedAllocatedBytes = 0
         skippedDirectories = 0
         skippedDirectoryPaths = []
+        skippedMounts = 0
+        skippedMountPaths = []
         treeLayoutRevision = 0
         estimateUndershot = false
     }
@@ -169,6 +182,17 @@ public final class ScanProgress: @unchecked Sendable {
         }
     }
 
+    /// Called from scanner background threads. Records a mount-boundary exclusion without
+    /// mixing it into permission/system-protection diagnostics.
+    public func incrementSkippedMount(path: String) {
+        hot.withLock { counters in
+            counters.skippedMounts += 1
+            if counters.skippedMountPaths.count < Self.maxRecordedSkippedPaths {
+                counters.skippedMountPaths.append(path)
+            }
+        }
+    }
+
     /// Called from scanner background threads. Does NOT trigger @Observable.
     public func updateCurrentPath(_ path: String) {
         hot.withLock { counters in
@@ -191,6 +215,8 @@ public final class ScanProgress: @unchecked Sendable {
         scannedAllocatedBytes = snapshot.allocatedBytes
         skippedDirectories = snapshot.skipped
         skippedDirectoryPaths = snapshot.skippedPaths
+        skippedMounts = snapshot.skippedMounts
+        skippedMountPaths = snapshot.skippedMountPaths
         currentPath = snapshot.path
 
         // Bump layout revision every 10 publishes (≈2.5s) or when forced at scan end.
