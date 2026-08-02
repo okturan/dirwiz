@@ -190,3 +190,5 @@ fallback.
 - **THEN** the previously persisted last-scanned path is not replaced merely by selecting or starting
   the fallback
 - **AND** it changes only after a fallback scan completes successfully
+- **AND** the AppState-visible completed state is not published before that successful ownership
+  write

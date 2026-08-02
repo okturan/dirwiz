@@ -29,6 +29,28 @@ struct FileScannerTests {
         #expect(progress.filesScanned > 0, "Should have scanned some files")
     }
 
+    @Test("A caller may defer terminal progress while retaining final scan evidence")
+    func callerOwnedTerminalProgress() async throws {
+        let (path, cleanup) = try createTempTree(Self.standardLayout)
+        defer { cleanup() }
+
+        let scanner = FileScanner()
+        let progress = ScanProgress()
+        let tree = FileTree()
+        await scanner.scan(
+            path: path,
+            progress: progress,
+            tree: tree,
+            publishesTerminalProgress: false
+        )
+
+        #expect(tree.count > 0)
+        #expect(progress.filesScanned > 0)
+        #expect(progress.elapsedTime > 0)
+        #expect(progress.isScanning, "the owning lifecycle has not published its handoff yet")
+        #expect(!progress.scanComplete, "completion belongs to the owning lifecycle")
+    }
+
     @Test("Root node is a directory with accumulated size")
     func rootNodeIsDirectory() async throws {
         let (path, cleanup) = try createTempTree(Self.standardLayout)

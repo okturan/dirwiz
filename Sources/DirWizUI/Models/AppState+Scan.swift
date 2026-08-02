@@ -1161,14 +1161,24 @@ extension AppState {
         let token = scanToken
 
         Task {
-            await scanner.scan(path: path, progress: scanProgress, tree: tree, estimatedItemsHint: staleItemCountHint)
+            await scanner.scan(
+                path: path,
+                progress: scanProgress,
+                tree: tree,
+                estimatedItemsHint: staleItemCountHint,
+                publishesTerminalProgress: false
+            )
             let handoff = await MainActor.run { () -> (scanCompleted: Bool, sizingTask: Task<Void, Never>?) in
                 guard self.scanToken == token else { return (false, nil) }
                 self.scanSession.markFinished()
                 // Cancellation mid-preserving-cold: leave the stale tree, selection, and
                 // badge exactly as they were - nothing newer replaces them, so the badge
                 // stays honest without this branch needing to say anything further.
-                guard !self.scanProgress.isCancelled else { return (false, nil) }
+                guard !self.scanProgress.isCancelled else {
+                    self.scanProgress.isScanning = false
+                    self.scanProgress.scanComplete = true
+                    return (false, nil)
+                }
 
                 self.persistLastScannedVolume(
                     path: path,
@@ -1213,6 +1223,10 @@ extension AppState {
                 // until it finishes, so there is nothing to gain by waiting.
                 self.startLiveMonitoring()
                 self.autoCheckpointIfDue()
+                // AppState completion means more than raw enumeration: durable ownership, the
+                // displayed tree, summary, and monitoring are now coherent as one operation.
+                self.scanProgress.isScanning = false
+                self.scanProgress.scanComplete = true
                 return (true, self.bundleSizingTask)
             }
 

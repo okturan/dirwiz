@@ -106,3 +106,5 @@
 - [x] 10.4 Run strict OpenSpec validation, focused tests, the full suite, and `CI=true` parity.
 - [x] 10.5 Build, install, relaunch, and verify the local app from the final clean tracked source;
       do not publish or alter the public release.
+- [x] 10.6 Make fallback ownership persistence precede the AppState-visible cold-scan completion
+      boundary, with a deterministic scanner-level gate and full-suite coverage.

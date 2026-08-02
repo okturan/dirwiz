@@ -1573,7 +1573,17 @@ public final class FileScanner: @unchecked Sendable {
     /// only loosely correlated with the true count on APFS (see `ScanProgress.
     /// fractionCompleted`'s doc comment); a prior scan's real count is a far better
     /// predictor of a refresh's total than inode statistics are.
-    public func scan(path: String, progress: ScanProgress, tree: FileTree, estimatedItemsHint: Int = 0) async {
+    ///
+    /// `publishesTerminalProgress` defaults to the standalone scanner contract. AppState passes
+    /// `false` so its durable ownership and displayed-tree handoff can finish before the shared UI
+    /// exposes completion; final counters, elapsed time, and cancellation still publish normally.
+    public func scan(
+        path: String,
+        progress: ScanProgress,
+        tree: FileTree,
+        estimatedItemsHint: Int = 0,
+        publishesTerminalProgress: Bool = true
+    ) async {
         // Reset cancellation so a scanner instance can be reused after cancel().
         cancelState.withLock { $0 = false }
 
@@ -1808,8 +1818,10 @@ public final class FileScanner: @unchecked Sendable {
         await MainActor.run {
             progress.publishCounters(forceLayoutRevision: true)
             progress.elapsedTime = totalElapsed
-            progress.isScanning = false
-            progress.scanComplete = true
+            if publishesTerminalProgress {
+                progress.isScanning = false
+                progress.scanComplete = true
+            }
             if wasCancelled {
                 progress.isCancelled = true
             }

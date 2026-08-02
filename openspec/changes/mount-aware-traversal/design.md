@@ -103,6 +103,13 @@ membership is never relabelled as the fallback. Persisted last-scan ownership ch
 fallback scan completes successfully, so cancellation cannot claim that an unfinished tree is
 durable.
 
+The cold scanner's raw enumeration completion is not the UI completion boundary for AppState. The
+AppState-owned path defers only the scanner's terminal progress flags, then persists the successful
+fallback, publishes its tree-derived state, and finally marks the shared progress complete. This
+prevents a loaded machine from briefly advertising completion while the next launch would still
+restore the removed drive. Direct `FileScanner` consumers keep the existing default terminal-state
+behavior.
+
 An active cold/warm scan is superseded by the fallback flow. A living-view splice is different: its
 scanner is intentionally unregistered and may already be committing into the displayed tree, so it
 cannot be cancelled safely. Availability is recorded immediately, but selection and tree ownership
