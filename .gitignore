@@ -15,7 +15,15 @@ docs/assets/*
 !docs/assets/*.webp
 !docs/assets/dirwiz-logo.svg
 !docs/index.html
+!docs/404.html
 .claude/worktrees/
 repomix-output*
 scripts/notary.env
 *.p8
+
+# Agent/tooling workspaces and internal planning docs - repo is public
+.agents/
+.claude/commands/
+.claude/skills/
+plans/
+skills-lock.json
