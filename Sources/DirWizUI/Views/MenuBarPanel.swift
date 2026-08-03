@@ -261,9 +261,15 @@ public struct DirWizMenuBarLabel: View {
             forResource: "DirWizMenuBarTemplate",
             withExtension: "svg"
         ), let image = NSImage(contentsOf: url) {
-            let _ = { image.isTemplate = true }()
+            // The status item draws the NSImage at its INTRINSIC size, not the SwiftUI
+            // frame - the SVG's 44×36pt viewBox rendered a glyph visibly larger than
+            // its menu bar siblings until `size` was set here (verified against real
+            // menu bar captures; the .frame alone changed nothing).
+            let _ = {
+                image.isTemplate = true
+                image.size = NSSize(width: 16, height: 13)
+            }()
             Image(nsImage: image)
-                .resizable()
                 .renderingMode(.template)
         } else {
             Image(systemName: "folder.fill")
