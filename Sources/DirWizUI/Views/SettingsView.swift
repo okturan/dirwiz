@@ -51,13 +51,23 @@ public struct SettingsView: View {
         .frame(width: 460, height: 430)
     }
 
-    /// Outer-to-inner depth swatches for the selected palette - the same eight colours
-    /// the sidebar key and every Folders card use (`CardGeometry.containerFill`).
     private func depthKey(for scheme: FoldersColorScheme) -> some View {
+        DepthKeyView(scheme: scheme)
+    }
+}
+
+/// Outer-to-inner depth swatches for a palette - the same eight colours the sidebar key
+/// and every Folders card use (`CardGeometry.containerFill`). Shared between the
+/// Settings window and the toolbar appearance popover.
+struct DepthKeyView: View {
+    let scheme: FoldersColorScheme
+
+    var body: some View {
         HStack(spacing: 3) {
             Text("outer")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .fixedSize()
             ForEach(0..<8, id: \.self) { depth in
                 let fill = CardGeometry.containerFill(depth: depth, scheme: scheme)
                 RoundedRectangle(cornerRadius: 3)
@@ -71,7 +81,44 @@ public struct SettingsView: View {
             Text("inner")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .fixedSize()
         }
         .accessibilityLabel("Depth colors, outer to inner")
+    }
+}
+
+/// Compact in-context Folders appearance controls, opened from the treemap toolbar's
+/// paintpalette button. Settings (⌘,) is the canonical home, but nobody opens Settings
+/// first - this popover mutates the same persisted state, so the map repaints live
+/// behind it while options are tried, and it links to the full window.
+public struct FoldersAppearancePopover: View {
+    @Bindable var appState: AppState
+
+    public init(appState: AppState) {
+        self.appState = appState
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Palette", selection: $appState.foldersColorScheme) {
+                ForEach(FoldersColorScheme.allCases) { scheme in
+                    Text(scheme.displayName).tag(scheme)
+                }
+            }
+            DepthKeyView(scheme: appState.foldersColorScheme)
+            Picker("Surface", selection: $appState.foldersSurfaceStyle) {
+                ForEach(FoldersSurfaceStyle.allCases) { surface in
+                    Text(surface.displayName).tag(surface)
+                }
+            }
+            Divider()
+            SettingsLink {
+                Label("All settings…", systemImage: "gearshape")
+            }
+            .controlSize(.small)
+        }
+        .pickerStyle(.menu)
+        .padding(12)
+        .frame(width: 310)
     }
 }

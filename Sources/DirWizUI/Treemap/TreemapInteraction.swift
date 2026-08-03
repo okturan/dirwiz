@@ -44,6 +44,7 @@ public struct InteractiveTreemapView: View {
     @State private var layoutRectByNode: [UInt32: TreemapRect] = [:]
     /// Drawn-rect count from the last layout, used to explain a card→cushion fallback.
     @State private var drawnRectCount: Int = 0
+    @State private var isAppearancePopoverShown = false
 
     private var selectedLayoutRect: CGRect? {
         guard let idx = appState.selectedNodeIndex else { return nil }
@@ -147,6 +148,10 @@ public struct InteractiveTreemapView: View {
 
             styleToggle
 
+            if appState.treemapRenderStyle == .cards {
+                appearanceButton
+            }
+
             // Show size of current root.
             if let tree = appState.fileTree,
                let rootNode = tree.node(at: appState.navigation.treemapRootIndex) {
@@ -199,6 +204,25 @@ public struct InteractiveTreemapView: View {
         .labelsHidden()
         .frame(width: 152)
         .help("Cushions: one shaded tile per file. Folders: files grouped inside labelled folder boxes.")
+    }
+
+    /// Discovery affordance for the Folders appearance settings: they live in the
+    /// Settings window, but users exploring the map should not need to find ⌘, first.
+    /// The popover mutates the same persisted palette/surface, so the treemap repaints
+    /// live behind it while options are tried.
+    private var appearanceButton: some View {
+        Button {
+            isAppearancePopoverShown.toggle()
+        } label: {
+            Image(systemName: "paintpalette")
+                .font(.system(size: 12, weight: .medium))
+        }
+        .buttonStyle(.borderless)
+        .help("Folders appearance: palette and surface")
+        .accessibilityLabel("Folders appearance")
+        .popover(isPresented: $isAppearancePopoverShown, arrowEdge: .bottom) {
+            FoldersAppearancePopover(appState: appState)
+        }
     }
 
     private func navButton(systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {

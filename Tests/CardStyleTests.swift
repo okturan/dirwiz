@@ -615,6 +615,9 @@ struct CardStyleTests {
         let state = AppState(defaults: defaults)
         state.foldersColorScheme = .earth
         _ = SettingsView(appState: state)
+        // The toolbar popover is the discovery affordance for the same settings - it
+        // must stay constructible against the same state it mutates in place.
+        _ = FoldersAppearancePopover(appState: state)
     }
 }
 
