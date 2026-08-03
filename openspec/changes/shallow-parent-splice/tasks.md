@@ -40,6 +40,22 @@
 
 - [x] 4.1 Update CLAUDE.md's warm-start section with the shallow/deep distinction and the
   new landmines.
-- [ ] 4.2 Commit, install, relaunch, and verify on the real volume: the launch decision and
+- [x] 4.2 Commit, install, relaunch, and verify on the real volume: the launch decision and
   WarmStartHistory should finally record a warm start, with the reason line naming honest
   numbers.
+
+## 5. Recorded residuals (verified live, Aug 3)
+
+- [x] 5.1 Launch 1 after install: cold with "change journal timed out" - the 26-hour replay
+  window over the session's test churn legitimately exceeds the 10s ceiling; designed behavior.
+- [x] 5.2 Launch 2: the estimate gate ADMITTED the patch (estimator fix confirmed), but one
+  promotion staged ~82% of the tree before the exact post-Phase-A guard abandoned it. Residual:
+  a structural change at a giant root's own level still costs stage-then-abandon; next step is
+  either a pre-staging promotion budget (cheap abandon) or adoption grafts in
+  `applyStagedReplacements` (replace one level, reuse child subtrees in the same compaction).
+- [x] 5.3 Launch 3: WARM - interactive tier 36 roots / 96,653 staged items / 0.599s, per-root
+  estimates matching actuals within a few items, trailing tier completed; WarmStartHistory
+  recorded `wasWarm: true` at 1.15s for 4,588,652 items versus 25-46s cold scans.
+- [x] 5.4 Observability gap found while diagnosing launch 2: per-root estimated/actual staged
+  counts log at `.info`, which does not persist to the log store - post-hoc attribution needed a
+  live `log stream`. Consider `.notice` for the per-root lines if this recurs.
