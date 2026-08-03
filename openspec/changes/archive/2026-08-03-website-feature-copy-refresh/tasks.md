@@ -22,7 +22,7 @@
 - [x] 3.1 Add a contract test that rejects the old hero phrase and requires the new hero and feature
   titles.
 - [x] 3.2 Assert menu-bar and window-toolbar wording matches the source inventory.
-- [ ] 3.3 Render the page at desktop and mobile widths; verify the nine-card grid, line breaks,
+- [x] 3.3 Render the page at desktop and mobile widths; verify the nine-card grid, line breaks,
   navigation, live demo, and download block.
 - [x] 3.4 Check local links/assets and run `openspec validate --all --strict`.
 - [x] 3.5 Before deployment, download the public release and verify every new feature claim against
@@ -30,3 +30,6 @@
   (build 13, tag/source `c69542d`, SHA-256 `0acc8061…13f09`): the tagged source and shipped binary
   contain the named living view, snapshot timeline, Find/Go menu commands, recency, temporal diff,
   CSV/JSON export, legend, search, duplicates, hardlinks, insights, warm start, and shared CLI.
+
+### Closure (2026-08-03)
+3.3 was performed during the folders finalization deploys: desktop (1440) and mobile (500) renders were reviewed with reduced motion forced, the grid, demo, and download block verified, and the page deployed twice via the allowlist with live verification.

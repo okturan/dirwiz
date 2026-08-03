@@ -152,6 +152,43 @@ struct ShallowParentSpliceTests {
         assertTreesEquivalent(tree, fresh, "promoted shallow patch")
     }
 
+    @Test("A doomed promotion abandons before staging, not after")
+    func oversizedPromotionAbandonsBeforeStaging() async throws {
+        var layout: [String: UInt64] = ["big/file1.txt": 100, "other/x.txt": 50]
+        for i in 0..<220 { layout["big/sub/f\(i).txt"] = 10 }
+        let (root, cleanup) = try createTempTree(layout)
+        defer { cleanup() }
+        let tree = await coldScan(root)
+        let before = summarizeTree(tree)
+
+        // Structural change at big/'s level forces a promotion whose cached subtree
+        // (~220+ items) dwarfs the remaining budget below.
+        try Data(count: 64).write(
+            to: URL(fileURLWithPath: root).appendingPathComponent("big/created.txt"))
+
+        let scanner = FileScanner()
+        let report = await scanner.rescanSubtrees(
+            [root + "/big"], tree: tree, progress: ScanProgress(),
+            shallowTargets: [root + "/big"],
+            options: SubtreeRescanOptions(
+                priority: .interactive,
+                resetsCancellation: true,
+                maximumStagedItemCount: 50,
+                // The production floor is 100k; the refusal mechanics are identical, so
+                // the fixture injects a floor its 220-item subtree clears.
+                promotionRefusalFloor: 100
+            )
+        )
+        let exceeded = try #require(report.stagedItemBudgetExceeded,
+                                    "the doomed promotion must refuse via the budget")
+        #expect(exceeded.actualStagedItemCount > 50,
+                "the refusal must carry the predicted size for the reason line")
+        #expect(report.metrics.stagedNodeCount == 0,
+                "the whole point: no Phase A staging happens for a doomed patch")
+        #expect(report.shallowRoots.isEmpty)
+        #expect(summarizeTree(tree) == before, "the tree is untouched")
+    }
+
     @Test("Files changing directly inside the scan root reconcile in place")
     func rootLevelShallowReconciles() async throws {
         let (root, cleanup) = try createTempTree([

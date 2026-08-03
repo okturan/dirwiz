@@ -966,9 +966,12 @@ extension AppState {
            !report.shallowRoots.contains(scanRoot) {
             return "a changed path resolved to the scan root - nothing narrower to patch"
         }
-        if report.stagedItemBudgetExceeded != nil {
+        if let exceeded = report.stagedItemBudgetExceeded {
+            // A pre-staging promotion refusal reports its PREDICTED size with nothing
+            // actually staged; the post-staging guard reports measured work. Use the
+            // larger so the reason line names honest numbers on both paths.
             return WarmStartPlanner.itemBudgetFallbackReason(
-                stagedItems: cumulativeStagedItemCount,
+                stagedItems: max(cumulativeStagedItemCount, exceeded.actualStagedItemCount),
                 cachedTotalItemCount: cachedTotalItemCount
             )
         }

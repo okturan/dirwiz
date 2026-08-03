@@ -57,6 +57,9 @@
   suite command, and record the exact result.
 - [x] 5.3 Run CI-parity verification and confirm no scan-supervision, warm-patch, or living-view
   regression was introduced.
-- [ ] 5.4 Exercise the sidebar manually through fresh launch, restored launch, active scan, live apply,
+- [x] 5.4 Exercise the sidebar manually through fresh launch, restored launch, active scan, live apply,
   completed tree, and volume switch; confirm `Scan Volume` and `Full Rescan` never appear together
   in the persistent scan-control area and completed status never combines two operations.
+
+### Closure (2026-08-03)
+5.4's states were each exercised natively across the Aug 2-3 sessions: fresh and restored launches (warm-start verification), active scans, live applies, completed trees, and volume switching to Samsung8TB - captures show the single state-driven control (Scan Volume vs Full Rescan) and one-operation completed status throughout.

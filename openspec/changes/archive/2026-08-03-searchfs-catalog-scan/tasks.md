@@ -62,3 +62,6 @@
       that it is per-volume rather than per-path, that path reconstruction from parent IDs was
       verified against `lstat`, and whichever way the gate in 1.3 resolved. A negative result
       is worth writing down permanently so it is not re-explored.
+
+### Closure (2026-08-03)
+Archived unstarted as deferred exploration, not planned work. CLAUDE.md already records searchfs timing as badly load-sensitive (26.9 s -> 54.6 s on load alone); getattrlistbulk remains the cold-scan engine. No spec delta is synced.

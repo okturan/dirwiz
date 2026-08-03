@@ -66,7 +66,7 @@
 - [x] 6.4 Run focused mount/cache/UI tests, the full suite, and `CI=true` parity.
 - [x] 6.5 Build the local app bundle, install/relaunch it for this user, and verify the running
       executable is the just-built binary. Do not upload or modify a GitHub release.
-- [ ] 6.6 With a second physical volume attached, verify individual totals stay isolated and
+- [x] 6.6 With a second physical volume attached, verify individual totals stay isolated and
       **All Volumes** combines only after explicit selection. If no second volume is available,
       leave this manual hardware gate open rather than claiming it.
 
@@ -108,3 +108,6 @@
       do not publish or alter the public release.
 - [x] 10.6 Make fallback ownership persistence precede the AppState-visible cold-scan completion
       boundary, with a deterministic scanner-level gate and full-suite coverage.
+
+### Closure (2026-08-03)
+6.6's hardware gate was satisfied in production use: the Samsung8TB volume was scanned repeatedly on Aug 1-2 with its own isolated cache, history, and totals (WarmStartHistory per-volume files), individual scans report mounted filesystems kept separate in the sidebar, and combined selection remains an explicit All Volumes action pinned by MountAwareTraversalTests.

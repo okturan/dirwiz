@@ -476,8 +476,10 @@ public struct SubtreeRescanMetrics: Sendable {
 
 /// Outcome of `FileScanner.rescanSubtrees`.
 public struct SubtreeRescanReport: Sendable {
-    /// Exact Phase A work exceeded the caller's remaining staged-item budget, so Phase B
-    /// was not entered and the destination tree was left untouched.
+    /// The caller's remaining staged-item budget was exceeded - either by exact Phase A
+    /// work, or up front by the cached price of shallow-target promotions (in which case
+    /// `actualStagedItemCount` is that prediction and nothing was staged at all). Phase B
+    /// was not entered and the destination tree was left untouched either way.
     public struct StagedItemBudgetExceeded: Equatable, Sendable {
         public let actualStagedItemCount: Int
         public let maximumStagedItemCount: Int
@@ -556,15 +558,24 @@ public struct SubtreeRescanOptions: Equatable, Sendable {
     /// Exact Phase A ceiling for this invocation. A two-tier warm patch supplies the
     /// remaining portion of one shared budget; ordinary subtree rescans leave it nil.
     public let maximumStagedItemCount: Int?
+    /// Promotions are refused BEFORE staging only from this predicted size upward.
+    /// Below it, staging cost is trivial and the exact post-staging guard is strictly
+    /// more accurate - a cached-tree prediction cannot see growth, so refusing small
+    /// patches early would trade correctness of the measured reason for nothing. The
+    /// refusal exists for the giant case (a home-folder-sized promotion staged ~82% of
+    /// a 4.5M-item tree for ~40 seconds only to be abandoned by the exact guard).
+    public let promotionRefusalFloor: Int
 
     public init(
         priority: Priority,
         resetsCancellation: Bool,
-        maximumStagedItemCount: Int? = nil
+        maximumStagedItemCount: Int? = nil,
+        promotionRefusalFloor: Int = 100_000
     ) {
         self.priority = priority
         self.resetsCancellation = resetsCancellation
         self.maximumStagedItemCount = maximumStagedItemCount
+        self.promotionRefusalFloor = promotionRefusalFloor
     }
 
     public static let interactive = SubtreeRescanOptions(
@@ -922,6 +933,7 @@ public final class FileScanner: @unchecked Sendable {
         // regardless of kind.
         var shallowLevels: [String: FileTree] = [:]
         var promotedRoots: [String] = []
+        var predictedPromotionItemCount = 0
         let shallowPlans = plans.filter {
             shallowResolved.contains($0.targetPath) && !$0.isBundle
         }
@@ -978,8 +990,51 @@ public final class FileScanner: @unchecked Sendable {
                     shallowLevels[plan.targetPath] = staging
                 } else {
                     promotedRoots.append(plan.targetPath)
+                    // A promotion inherits full-subtree cost - price it from the cached
+                    // tree so a doomed patch can abandon BEFORE staging.
+                    if let components = Self.relativeComponents(
+                           of: plan.targetPath, rootPath: levelSnapshot.rootPath
+                       ),
+                       let index = FileTree.descendPath(
+                           components,
+                           nodes: levelSnapshot.nodes,
+                           stringPool: levelSnapshot.stringPool
+                       ) {
+                        predictedPromotionItemCount += tree.subtreeItemCount(at: index)
+                    }
                 }
             }
+        }
+
+        // The recorded shallow-parent-splice residual, closed: a structural change at a
+        // giant root's own level used to stage its whole subtree (~82% of the tree,
+        // ~40 seconds, observed live) only for the exact post-Phase-A guard to abandon
+        // the patch anyway. When the cached price of the promotions alone already
+        // exceeds the caller's budget, refuse up front - same report shape as the
+        // post-staging guard, so the caller's cold-fallback path and reason line are
+        // identical, minus the wasted staging.
+        if let maximumStagedItemCount = options.maximumStagedItemCount,
+           predictedPromotionItemCount > maximumStagedItemCount,
+           predictedPromotionItemCount >= options.promotionRefusalFloor {
+            let now = clock.now
+            let metrics = SubtreeRescanMetrics(
+                preflightAndPlanningSeconds: Self.wallSeconds(totalStart.duration(to: now)),
+                totalSeconds: Self.wallSeconds(totalStart.duration(to: now)),
+                beforeNodeCount: beforeNodeCount,
+                afterNodeCount: tree.count,
+                requestedPathCount: changedDirectories.count,
+                rescannedRootCount: rescannedRoots.count
+            )
+            return SubtreeRescanReport(
+                requestedPaths: changedDirectories,
+                rescannedRoots: rescannedRoots,
+                unresolvedPaths: unresolvedPaths,
+                stagedItemBudgetExceeded: .init(
+                    actualStagedItemCount: predictedPromotionItemCount,
+                    maximumStagedItemCount: maximumStagedItemCount
+                ),
+                metrics: metrics
+            )
         }
 
         // A promotion at the scan root means the root's own level changed shape - the

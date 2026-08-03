@@ -63,3 +63,19 @@ shallow scoping into the same splice path.
   inside it
 - **THEN** the next apply SHALL reconcile that directory's level in place
 - **AND** SHALL NOT re-stage the directory's subtree
+
+### Requirement: Doomed promotions abandon before staging
+
+When a shallow target promotes to full-subtree semantics, the promotion's cached subtree price
+exceeds the caller's remaining staged-item budget, and the prediction is at or above the
+refusal floor (staging below it is trivial and the exact guard strictly more accurate), the
+patch SHALL refuse up front - reporting the predicted size through the same budget-exceeded shape - instead of
+staging the subtree only for the exact post-staging guard to abandon it.
+
+#### Scenario: A giant root's level changes shape
+
+- **WHEN** a structural change promotes a shallow target whose cached subtree exceeds the
+  remaining budget
+- **THEN** the rescan SHALL return the budget-exceeded report with nothing staged
+- **AND** the destination tree SHALL be untouched
+- **AND** the caller's cold-fallback reason SHALL name the predicted fraction honestly

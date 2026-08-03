@@ -71,3 +71,6 @@
 - [ ] 6.1 Revisit the default worker count with the new decomposition. The old knee (six on
       this machine, IPC 2.20 at four falling to 0.98 at ten) was measured against path-based
       opens and will move once the kernel path-lookup contention is reduced.
+
+### Closure (2026-08-03)
+Archived unstarted as deferred exploration, not planned work. A hardening idea with no current driver; revisit only with a concrete incident. No spec delta is synced.

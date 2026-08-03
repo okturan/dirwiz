@@ -49,7 +49,7 @@
 - [x] 4.2 Turn 1.1 into an assertion: batched Phase B must be within a small multiple of a
       single `removeChildren` on the same tree, pinning the O(tree) property rather than a
       flaky absolute time.
-- [ ] 4.3 Real-volume measurement with the headless harness: re-run the three-refresh
+- [x] 4.3 Real-volume measurement with the headless harness: re-run the three-refresh
       sequence on `/` and record the table. Warm patch must drop from 9.14 s to under 1 s.
       Report the actual numbers including memory peak, and STOP with them if it misses.
 
@@ -102,16 +102,19 @@ roots staged 540k items. A 48-root cap therefore permits anything from 48 items 
 Raising that number blindly would let a patch stage a large fraction of the tree and end up
 slower than the cold scan it was avoiding.
 
-- [ ] 5.1 Gate on ESTIMATED STAGED ITEMS as a fraction of the tree, not on root count. Warm
+- [x] 5.1 Gate on ESTIMATED STAGED ITEMS as a fraction of the tree, not on root count. Warm
       is worth it while that fraction is small, and the crossover is computable from the
       model in 4.3 because both paths enumerate at roughly the same rate. At 543k-653k of
       4.75M (11-14%) warm costs 3.6-5.0 s against 26.4 s cold, still a 5x to 7x win, so the
       current cap is far too conservative in items even where it is too permissive in roots.
-- [ ] 5.2 Keep a root-count ceiling only as a cheap sanity backstop, not as the primary gate.
-- [ ] 5.3 Re-run the three-refresh sequence and confirm the refreshes that previously fell
+- [x] 5.2 Keep a root-count ceiling only as a cheap sanity backstop, not as the primary gate.
+- [x] 5.3 Re-run the three-refresh sequence and confirm the refreshes that previously fell
       back cold now stay warm. That, not the patch time alone, is the user-visible win: two
       of the three refreshes paid a full cold scan purely because of the root count.
-- [ ] 5.4 Log the per-root staged item count. 18 roots covering 540k items means the roots are
+- [x] 5.4 Log the per-root staged item count. 18 roots covering 540k items means the roots are
       very large directories, so check whether one root dominates the patch. If a single huge
       root is being blamed for a small change, narrowing attribution beats both remaining
       throughput specs and is cheaper than either.
+
+### Closure (2026-08-03)
+Sections 4.3 and 5.x shipped under the follow-on plan-042 lineage and are recorded in CLAUDE.md as the current system: the measured 9.14 s -> 0.118-0.164 s single-compaction result, the estimated-changed-item-fraction gate as the primary admission rule, the 512-root sanity backstop, and per-root estimated/actual staged logging (extended again by shallow-parent-splice).

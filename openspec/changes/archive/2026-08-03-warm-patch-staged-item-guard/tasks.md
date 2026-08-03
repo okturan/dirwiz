@@ -60,3 +60,6 @@ proposed guard change remains stopped after section 1; sections 2–6 are untouc
 ## 6. Documentation
 
 - [ ] 6.1 Record in CLAUDE.md that the mid-patch guard judges remaining work rather than completed work, and why abandoning after staging is worse than finishing
+
+### Closure (2026-08-03)
+Archived by the recorded stop-after-1.4 finding: the regression attribution did not hold, so sections 2-5 were never executed and this change's spec delta is deliberately NOT synced into main specs. The stage-then-abandon waste this change gestured at was later closed differently by shallow-parent-splice's pre-staging promotion budget.
