@@ -230,7 +230,10 @@ public struct DirWizMenuBarLabel: View {
         HStack(spacing: 4) {
             ZStack(alignment: .bottomTrailing) {
                 templateImage
-                    .frame(width: 19, height: 16)
+                    // Sized to sit with the system items: siblings like Wi-Fi carry
+                    // internal padding, so a solid glyph filling a 19pt box read
+                    // oversized next to them (verified against a real menu bar capture).
+                    .frame(width: 16, height: 13)
                 if state == .scanning {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 7, weight: .bold))
