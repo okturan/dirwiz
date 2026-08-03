@@ -561,10 +561,10 @@ struct CardStyleTests {
 
         let state = AppState(defaults: defaults)
         #expect(state.treemapRenderStyle == .cushion, "cushion is the default")
-        #expect(state.foldersColorScheme == .spaceMonger,
-            "review starts with the source-traceable reference palette")
-        #expect(state.foldersSurfaceStyle == .crisp,
-            "new and invalid stores start on the bevel-free surface")
+        #expect(state.foldersColorScheme == .nord,
+            "new installs ship the review winner, Nord")
+        #expect(state.foldersSurfaceStyle == .fineLines,
+            "new installs ship the review winner, Fine Lines")
 
         state.treemapRenderStyle = .cards
         state.foldersColorScheme = .forest
@@ -586,8 +586,8 @@ struct CardStyleTests {
                 == FoldersSurfaceStyle.tintedFrames.rawValue)
 
         defaults.set(999, forKey: AppState.foldersSurfaceStyleKey)
-        #expect(AppState(defaults: defaults).foldersSurfaceStyle == .crisp,
-                "an invalid persisted review value must fail back to the flat default")
+        #expect(AppState(defaults: defaults).foldersSurfaceStyle == .fineLines,
+                "an invalid persisted value must fail back to the shipped default")
     }
 
     /// The pickers graduated from numbered toolbar review menus to the Settings window

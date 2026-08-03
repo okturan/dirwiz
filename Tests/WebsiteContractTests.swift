@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import DirWizUI
 
 @Suite("Website product contract")
 struct WebsiteContractTests {
@@ -41,12 +42,25 @@ struct WebsiteContractTests {
         #expect(page.contains("recency heatmap, snapshot pinning, temporal diff, CSV/JSON export"))
     }
 
-    @Test("Browser Cards demo keeps the raw native-review file palette")
-    func browserCardsKeepRawPalette() throws {
+    /// The demo's Folders mode mirrors the shipped semantics: depth colors from the
+    /// finalized Nord palette, applied through the same named seam. The eight RGB rows
+    /// are CardGeometry's Nord `chromeLevels` scaled to bytes - if the shipped palette
+    /// changes, this pin fails instead of the website silently drifting.
+    @Test("Browser Folders demo uses the shipped Nord depth palette")
+    func browserFoldersUsesShippedDepthPalette() throws {
         let page = try html
-        #expect(page.contains("const FOLDER_LEAF_CHROME_BLEND = .00;"))
+        #expect(page.contains("const FOLDERS_DEPTH = [[79,92,117],[92,130,163],[77,156,153],[122,161,125],"))
+        #expect(page.contains("[153,135,173],[110,140,184],[140,148,158],[179,102,107]];"))
         #expect(page.contains("function folderLeafColor"))
         #expect(page.contains("mapStyle===1 ? folderLeafColor"),
-                "Cards keeps a named parity seam while Cushions bypasses it")
+                "Folders keeps a named parity seam while Cushions bypasses it")
+
+        let nord = FoldersColorScheme.nord
+        for depth in 0..<8 {
+            let fill = CardGeometry.containerFill(depth: depth, scheme: nord)
+            let expected = "[\(Int((fill.x * 255).rounded())),\(Int((fill.y * 255).rounded())),\(Int((fill.z * 255).rounded()))]"
+            #expect(page.contains(expected),
+                    "depth \(depth) swatch \(expected) missing - demo drifted from the app palette")
+        }
     }
 }

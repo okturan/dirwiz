@@ -28,8 +28,8 @@
 
 - [x] 4.1 Set the local Cards demo leaf transform to Scheme 1's zero blend while selection is open.
 - [x] 4.2 Keep the helper Cards-only and preserve Cushion and hero-animation behavior.
-- [ ] 4.3 Inspect desktop and mobile website renders before any deployment.
-- [ ] 4.4 After a native winner is selected, align and re-verify the website before publishing.
+- [x] 4.3 Inspect desktop and mobile website renders before any deployment.
+- [x] 4.4 After a native winner is selected, align and re-verify the website before publishing.
 
 ## 5. Verification and selection
 
@@ -38,7 +38,7 @@
 - [x] 5.3 Build, install, and relaunch the local app from a clean recorded commit.
 - [x] 5.4 Inspect the picker on the restored multi-million-item tree and record the rejection: the
   schemes repaint, but every option retains the hierarchy-to-extension colour discontinuity.
-- [ ] 5.5 Okan selects a numbered winner; do not remove the picker or call the palette final before it.
+- [x] 5.5 Okan selects a numbered winner; do not remove the picker or call the palette final before it.
 
 ## 6. Replace the false comparison model
 
@@ -150,3 +150,17 @@
   treemap bar. Numbers remain internal identifiers (raw values and test review labels) only.
 - [x] 12.4 Pin the vocabulary (display names never lead with numbers), run the full
   verification set, and install; the final palette and surface choice remains with Okan.
+
+## 13. Finalize
+
+- [x] 13.1 Okan's decision ("finalize"): the live native selection - Nord palette, Fine Lines
+  surface, Folders style in daily use - becomes the shipped default; all ten palettes and six
+  surfaces remain user settings under real names. Records 5.5 as resolved.
+- [x] 13.2 Ship Nord + Fine Lines as new-install and invalid-preference defaults; update the
+  persistence pins and the fresh-install spec scenarios.
+- [x] 13.3 Align the website Folders demo to the shipped Nord depth table through the existing
+  named parity seam, pinned against `CardGeometry`'s recipe so drift fails a test (4.1 superseded).
+- [x] 13.4 Verify desktop and mobile renders of the updated page and deploy the explicit
+  allowlist to Cloudflare Pages, adding the 404 page; verify live content, the 404 status, and
+  that internal working docs remain unpublished (closes 4.3 and 4.4).
+- [x] 13.5 Close the review language in CLAUDE.md and archive the change.

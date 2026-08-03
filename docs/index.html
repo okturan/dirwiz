@@ -450,7 +450,7 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
     <div class="center-head">
       <h2 class="sec rv" style="--d:.05s">Have a play before you download</h2>
       <p class="lede rv" style="--d:.1s">A <span class="mono">dirwiz-cli</span> scan of a Mac, drawn in your browser by the app's
-      own renderer. Click a folder to zoom in; Esc backs out. The Cushions/Cards toggle
+      own renderer. Click a folder to zoom in; Esc backs out. The Cushions/Folders toggle
       is the same one the app has.</p>
     </div>
     <div class="demo-grid rv" style="--d:.15s">
@@ -694,7 +694,10 @@ const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
 const EXT17 = ["#5588fc","#fd3a2c","#0bad09","#95950b","#13a3a3","#e607e6","#c08007","#5089fd","#ff2c5c","#36ab01","#b657fd","#08ad38","#f905a7","#0e98e2","#f25002","#11a971","#7b7cfe"];
 const FALLBACK = "#9aa3b5";
 // Native review defaults to Scheme 1 (Pearl): direct file colours remain raw.
-const FOLDER_LEAF_CHROME_BLEND = .00;
+/* Folders colors by folder depth - the app's shipped Nord palette (CardGeometry
+   scheme 8), outer to inner, cycling every eight levels exactly like the app. */
+const FOLDERS_DEPTH = [[79,92,117],[92,130,163],[77,156,153],[122,161,125],
+                       [153,135,173],[110,140,184],[140,148,158],[179,102,107]];
 
 function hexRgb(h){return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]}
 function rgbCss(r,g,b,a=1){return `rgba(${r|0},${g|0},${b|0},${a})`}
@@ -749,9 +752,7 @@ function dirColor(n, extMap){
 /* Native review currently defaults to Scheme 1 Pearl: preserve direct-file color.
    Keep this named helper Cards-only so the final chosen recipe has one parity seam. */
 function folderLeafColor(rgb, containerDepth=0){
-  const step = (containerDepth & 7) * .034;
-  const neutral = ((.25+step)+(.27+step)+(.32+step))/3*255;
-  return rgb.map(c => c + (neutral-c)*FOLDER_LEAF_CHROME_BLEND);
+  return FOLDERS_DEPTH[containerDepth & 7];
 }
 
 /* ----- squarified treemap (Bruls et al.) ----- */
@@ -1194,7 +1195,7 @@ function makeTreemap(cfg){
       b.onclick = () => { mapStyle = val; paint(); renderMeta(); needsDraw = true; };
       return b;
     };
-    const b0 = mk("Cushions",0), b1 = mk("Cards",1);
+    const b0 = mk("Cushions",0), b1 = mk("Folders",1);
     const paint = () => {
       b0.style.background = mapStyle===0 ? "#3568d4" : "transparent";
       b0.style.color = mapStyle===0 ? "#fff" : "#3d4557";

@@ -25,8 +25,8 @@ relayout, navigation loss, or hit-testing changes.
 #### Scenario: The app relaunches during review
 
 - **WHEN** a scheme has been selected and the app relaunches or scans again
-- **THEN** the same numbered scheme SHALL remain selected
-- **AND** an absent or invalid preference SHALL resolve to `1. SpaceMonger`
+- **THEN** the same scheme SHALL remain selected
+- **AND** an absent or invalid preference SHALL resolve to Nord, the shipped default
 
 ### Requirement: Review candidates are complete map palettes
 
@@ -54,11 +54,11 @@ collapse boundary. Cushion SHALL continue to use production extension colours.
 - **AND** a folder or aggregate at that depth SHALL use the same colour
 - **AND** switching to Cushion SHALL restore the two production extension colours
 
-#### Scenario: A fresh comparison build is launched
+#### Scenario: A fresh install is launched
 
 - **WHEN** no stored scheme exists
-- **THEN** `1. SpaceMonger` SHALL be selected
-- **AND** its eight colours SHALL match the reference `BoxColors` base row
+- **THEN** Nord SHALL be selected as the finalized default
+- **AND** the SpaceMonger option SHALL still match the reference `BoxColors` base row
 
 ### Requirement: Folder roles follow the selected recipe
 
@@ -179,7 +179,8 @@ re-nest the currently displayed rectangles without a filesystem scan or a new Sq
 - **THEN** it SHALL offer Crisp, Fine Lines, Tinted Frames, Color Headers, Soft Cards, and
   Classic Bevel under their real names
 - **AND** the current surface and current color palette SHALL be identified independently
-- **AND** an absent or invalid surface preference SHALL resolve to Crisp
+- **AND** an absent or invalid surface preference SHALL resolve to Fine Lines, the shipped
+  default
 
 #### Scenario: The user switches surface on a displayed tree
 

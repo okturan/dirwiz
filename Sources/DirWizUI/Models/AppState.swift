@@ -151,18 +151,19 @@ public final class AppState {
         }
     }
 
-    /// Numbered native Folders colour comparison. It persists so a chosen candidate survives
-    /// relaunch and every screenshot refers to the same unambiguous scheme number.
-    public var foldersColorScheme: FoldersColorScheme = .spaceMonger {
+    /// The Folders depth palette, a user setting (Settings window). Nord is the shipped
+    /// default - the winner of the native review on real volume trees.
+    public var foldersColorScheme: FoldersColorScheme = .nord {
         didSet {
             guard foldersColorScheme != oldValue else { return }
             defaults.set(foldersColorScheme.rawValue, forKey: AppState.foldersColorSchemeKey)
         }
     }
 
-    /// Numbered native Folders surface comparison. Surface is independent from palette:
-    /// it controls boundaries, parent chrome, title rows, and nesting pad only.
-    public var foldersSurfaceStyle: FoldersSurfaceStyle = .crisp {
+    /// The Folders surface, a user setting independent from palette: it controls
+    /// boundaries, parent chrome, title rows, and nesting pad only. Fine Lines is the
+    /// shipped default - the review winner alongside Nord.
+    public var foldersSurfaceStyle: FoldersSurfaceStyle = .fineLines {
         didSet {
             guard foldersSurfaceStyle != oldValue else { return }
             defaults.set(foldersSurfaceStyle.rawValue, forKey: AppState.foldersSurfaceStyleKey)
@@ -197,11 +198,11 @@ public final class AppState {
     }
 
     static func loadFoldersColorScheme(_ defaults: UserDefaults) -> FoldersColorScheme {
-        FoldersColorScheme(rawValue: defaults.integer(forKey: foldersColorSchemeKey)) ?? .spaceMonger
+        FoldersColorScheme(rawValue: defaults.integer(forKey: foldersColorSchemeKey)) ?? .nord
     }
 
     static func loadFoldersSurfaceStyle(_ defaults: UserDefaults) -> FoldersSurfaceStyle {
-        FoldersSurfaceStyle(rawValue: defaults.integer(forKey: foldersSurfaceStyleKey)) ?? .crisp
+        FoldersSurfaceStyle(rawValue: defaults.integer(forKey: foldersSurfaceStyleKey)) ?? .fineLines
     }
 
     // MARK: - Space Analysis
