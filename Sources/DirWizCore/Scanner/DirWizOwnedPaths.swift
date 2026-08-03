@@ -49,17 +49,32 @@ public enum DirWizOwnedPaths {
     /// which would otherwise make the non-harness branches untestable.
     public static func isTestHarness(
         _ environment: [String: String] = ProcessInfo.processInfo.environment,
-        xctestLoaded: Bool = xctestRuntimeLoaded
+        xctestLoaded: Bool = xctestRuntimeLoaded,
+        executablePath: String = ProcessInfo.processInfo.arguments.first ?? ""
     ) -> Bool {
         environment["XCTestConfigurationFilePath"] != nil
             || environment["XCTestBundlePath"] != nil
             || environment["XCTestSessionIdentifier"] != nil
             || xctestLoaded
+            || isKnownTestExecutable(executablePath)
     }
 
     /// Whether XCTest is present in this process - resolved once; class lookup is not
     /// free and the answer cannot change after launch.
     public static let xctestRuntimeLoaded = NSClassFromString("XCTestCase") != nil
+
+    /// SwiftPM does not consistently load XCTest when a package uses Swift Testing.
+    /// GitHub's macOS runner executes through `swiftpm-testing-helper`; other SwiftPM
+    /// and Xcode versions launch the executable inside an `.xctest` bundle. Neither
+    /// form is used by DirWiz.app or dirwiz-cli, so these are safe fail-closed signals.
+    private static func isKnownTestExecutable(_ path: String) -> Bool {
+        let lowercasedPath = path.lowercased()
+        let executableName = URL(fileURLWithPath: lowercasedPath).lastPathComponent
+        return executableName == "swiftpm-testing-helper"
+            || executableName == "xctest"
+            || lowercasedPath.contains(".xctest/")
+            || lowercasedPath.hasSuffix(".xctest")
+    }
 
     public static func applicationSupportRoot(
         environment: [String: String] = ProcessInfo.processInfo.environment

@@ -22,6 +22,25 @@ struct AppSupportIsolationTests {
                 "the runner sets no recognized harness signal - update DirWizOwnedPaths.isTestHarness before anything else runs unguarded")
     }
 
+    @Test("SwiftPM and XCTest executable forms are harness signals")
+    func testExecutableFormsAreDetected() {
+        #expect(DirWizOwnedPaths.isTestHarness(
+            [:],
+            xctestLoaded: false,
+            executablePath: "/usr/libexec/swiftpm-testing-helper"
+        ))
+        #expect(DirWizOwnedPaths.isTestHarness(
+            [:],
+            xctestLoaded: false,
+            executablePath: "/tmp/DirWizTests.xctest/Contents/MacOS/DirWizTests"
+        ))
+        #expect(!DirWizOwnedPaths.isTestHarness(
+            [:],
+            xctestLoaded: false,
+            executablePath: "/Applications/DirWiz.app/Contents/MacOS/DirWiz"
+        ))
+    }
+
     @Test("An explicit override always wins, harness or not")
     func overrideWins() {
         let base = DirWizOwnedPaths.applicationSupportBase(environment: [
@@ -53,7 +72,11 @@ struct AppSupportIsolationTests {
 
     @Test("Production resolution without harness signals is unchanged")
     func productionFallback() {
-        #expect(!DirWizOwnedPaths.isTestHarness([:], xctestLoaded: false))
+        #expect(!DirWizOwnedPaths.isTestHarness(
+            [:],
+            xctestLoaded: false,
+            executablePath: "/Applications/DirWiz.app/Contents/MacOS/DirWiz"
+        ))
         let base = DirWizOwnedPaths.applicationSupportBase(
             environment: [:], testHarness: false)
         #expect(base.hasSuffix("/Library/Application Support"))
