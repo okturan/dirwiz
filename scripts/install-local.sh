@@ -22,7 +22,8 @@ COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
 # Only build inputs determine whether this artifact differs from the named commit. Repo-local
 # notes/agent helpers do not enter the bundle, while an untracked Swift source absolutely does.
 if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all -- \
-  Package.swift Sources DirWiz CLI scripts/package-release.sh)" ]]; then
+  Package.swift Sources DirWiz CLI scripts/package-release.sh \
+  scripts/extract-app-intents-metadata.sh)" ]]; then
   DIRTY="true"
 else
   DIRTY="false"

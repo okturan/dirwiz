@@ -33,6 +33,7 @@ cp "$ICON" "$APP/Contents/Resources/DirWiz.icns"
 cp "$ROOT/DirWiz/Resources/DirWizMenuBarTemplate.svg" "$APP/Contents/Resources/DirWizMenuBarTemplate.svg"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 chmod +x "$APP/Contents/MacOS/$APP_NAME"
+"$ROOT/scripts/extract-app-intents-metadata.sh" "$APP" "$BIN_PATH"
 xattr -cr "$APP" 2>/dev/null || true
 
 SIGN_IDENTITY="${DIRWIZ_CODESIGN_IDENTITY:-}"
