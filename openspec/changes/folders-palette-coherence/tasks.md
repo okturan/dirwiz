@@ -138,3 +138,15 @@
 - [x] 11.5 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
 - [x] 11.6 Commit, install, relaunch, and inspect dense and sparse regions natively; the final
   surface choice remains with Okan.
+
+## 12. Graduate pickers to named Settings
+
+- [x] 12.1 Record Okan's direction: palette and surface choices belong in a real Settings
+  window under their names; "1 2 3" numbering was review scaffolding, not product UI.
+- [x] 12.2 Add the app Settings scene (Cmd+,) with the style toggle, the named palette picker
+  plus its eight-swatch depth key, and the named surface picker, all bound to the same
+  persisted AppState properties.
+- [x] 12.3 Remove the numbered toolbar review menus; keep the Cushions/Folders toggle in the
+  treemap bar. Numbers remain internal identifiers (raw values and test review labels) only.
+- [x] 12.4 Pin the vocabulary (display names never lead with numbers), run the full
+  verification set, and install; the final palette and surface choice remains with Okan.

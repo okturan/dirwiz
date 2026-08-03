@@ -12,10 +12,12 @@ public enum TreemapRenderStyle: String, CaseIterable, Sendable {
     /// spends pixels at every nesting level. Bounded by `CardBudget`.
     case cards
 
+    /// Product vocabulary, matching the treemap toolbar toggle exactly - the raw values
+    /// ("cushion"/"cards") stay stable persistence identifiers.
     public var displayName: String {
         switch self {
-        case .cushion: return "Cushion"
-        case .cards:   return "Cards"
+        case .cushion: return "Cushions"
+        case .cards:   return "Folders"
         }
     }
 }

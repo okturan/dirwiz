@@ -75,6 +75,12 @@ struct DirWizApp: App {
                 .disabled(appState.navigation.treemapRootIndex == 0 || appState.scanProgress.isScanning)
             }
         }
+
+        // Appearance choices are product settings under their real names - the numbered
+        // toolbar review menus they replaced remain only as code/test identifiers.
+        Settings {
+            SettingsView(appState: appState)
+        }
     }
 
     private func openFullDiskAccessSettings() {

@@ -8,11 +8,12 @@ relayout, navigation loss, or hit-testing changes.
 
 #### Scenario: The user opens the Folders color picker
 
-- **WHEN** Folders is selected
-- **THEN** the native view SHALL offer schemes numbered 1 through 10 with distinct names
+- **WHEN** the app Settings window is opened
+- **THEN** it SHALL offer all ten schemes under their distinct real names, with numbering
+  retained only as internal identifiers
 - **AND** every option SHALL own a distinct outer-folder colour and a distinct eight-level folder
   palette
-- **AND** the current selection SHALL be visibly identified
+- **AND** the current selection SHALL be visibly identified, with its depth key shown
 
 #### Scenario: The user compares two schemes
 
@@ -174,11 +175,11 @@ re-nest the currently displayed rectangles without a filesystem scan or a new Sq
 
 #### Scenario: The user opens the surface picker
 
-- **WHEN** Folders is selected
-- **THEN** the view SHALL offer `1. Crisp`, `2. Fine Lines`, `3. Tinted Frames`,
-  `4. Color Headers`, `5. Soft Cards`, and `6. Classic Bevel`
+- **WHEN** the app Settings window is opened
+- **THEN** it SHALL offer Crisp, Fine Lines, Tinted Frames, Color Headers, Soft Cards, and
+  Classic Bevel under their real names
 - **AND** the current surface and current color palette SHALL be identified independently
-- **AND** an absent or invalid surface preference SHALL resolve to `1. Crisp`
+- **AND** an absent or invalid surface preference SHALL resolve to Crisp
 
 #### Scenario: The user switches surface on a displayed tree
 

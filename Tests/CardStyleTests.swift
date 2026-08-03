@@ -589,6 +589,33 @@ struct CardStyleTests {
         #expect(AppState(defaults: defaults).foldersSurfaceStyle == .crisp,
                 "an invalid persisted review value must fail back to the flat default")
     }
+
+    /// The pickers graduated from numbered toolbar review menus to the Settings window
+    /// under their real names. Numbers remain internal identifiers only - the UI
+    /// vocabulary is `displayName`, which must never lead with a review number, while
+    /// `reviewLabel` keeps its numbered form for tests and feedback references.
+    @Test("Settings vocabulary is names, not review numbers")
+    @MainActor
+    func settingsUsesNamesNotNumbers() {
+        for scheme in FoldersColorScheme.allCases {
+            #expect(scheme.displayName.first?.isNumber == false,
+                    "\(scheme.displayName) must not lead with a number in Settings")
+            #expect(scheme.reviewLabel.hasPrefix("\(scheme.rawValue). "))
+        }
+        for surface in FoldersSurfaceStyle.allCases {
+            #expect(surface.displayName.first?.isNumber == false,
+                    "\(surface.displayName) must not lead with a number in Settings")
+            #expect(surface.reviewLabel.hasPrefix("\(surface.rawValue). "))
+        }
+
+        let suite = "dirwiz.test.settingsview"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let state = AppState(defaults: defaults)
+        state.foldersColorScheme = .earth
+        _ = SettingsView(appState: state)
+    }
 }
 
 /// Offscreen GPU rendering. Everything above checks the *inputs* to the shader; this

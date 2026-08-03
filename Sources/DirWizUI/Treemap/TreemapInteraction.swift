@@ -147,11 +147,6 @@ public struct InteractiveTreemapView: View {
 
             styleToggle
 
-            if appState.treemapRenderStyle == .cards {
-                foldersSchemePicker
-                foldersSurfacePicker
-            }
-
             // Show size of current root.
             if let tree = appState.fileTree,
                let rootNode = tree.node(at: appState.navigation.treemapRootIndex) {
@@ -204,70 +199,6 @@ public struct InteractiveTreemapView: View {
         .labelsHidden()
         .frame(width: 152)
         .help("Cushions: one shaded tile per file. Folders: files grouped inside labelled folder boxes.")
-    }
-
-    /// Temporary native review control. Every option repaints this exact tree through the
-    /// production renderer, which is more honest than comparing synthetic palette swatches.
-    private var foldersSchemePicker: some View {
-        Menu {
-            ForEach(FoldersColorScheme.allCases) { scheme in
-                Button {
-                    appState.foldersColorScheme = scheme
-                } label: {
-                    if appState.foldersColorScheme == scheme {
-                        Label(scheme.reviewLabel, systemImage: "checkmark")
-                    } else {
-                        Text(scheme.reviewLabel)
-                    }
-                }
-                .help(scheme.explanation)
-            }
-        } label: {
-            Label(
-                "Colors \(appState.foldersColorScheme.rawValue)",
-                systemImage: "paintpalette"
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help(
-            "\(appState.foldersColorScheme.reviewLabel): "
-                + appState.foldersColorScheme.explanation
-        )
-        .accessibilityLabel("Folders color scheme")
-        .accessibilityValue(appState.foldersColorScheme.reviewLabel)
-    }
-
-    /// Surface is a separate review axis from colour. Changing it keeps the same tree and
-    /// Squarify layout, then rebuilds card nesting, labels, and hit geometry together.
-    private var foldersSurfacePicker: some View {
-        Menu {
-            ForEach(FoldersSurfaceStyle.allCases) { surface in
-                Button {
-                    appState.foldersSurfaceStyle = surface
-                } label: {
-                    if appState.foldersSurfaceStyle == surface {
-                        Label(surface.reviewLabel, systemImage: "checkmark")
-                    } else {
-                        Text(surface.reviewLabel)
-                    }
-                }
-                .help(surface.explanation)
-            }
-        } label: {
-            Label(
-                "Surface \(appState.foldersSurfaceStyle.rawValue)",
-                systemImage: "square.3.layers.3d"
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help(
-            "\(appState.foldersSurfaceStyle.reviewLabel): "
-                + appState.foldersSurfaceStyle.explanation
-        )
-        .accessibilityLabel("Folders surface style")
-        .accessibilityValue(appState.foldersSurfaceStyle.reviewLabel)
     }
 
     private func navButton(systemName: String, enabled: Bool, help: String, action: @escaping () -> Void) -> some View {
