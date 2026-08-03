@@ -27,10 +27,21 @@ public struct VolumePickerView: View {
 
             ScrollView {
                 LazyVStack(spacing: 6) {
+                    if let folder = appState.selectedFolderTarget {
+                        SelectedFolderRow(
+                            folder: folder,
+                            volumeName: appState.selectedVolumeName
+                        )
+
+                        Divider()
+                            .padding(.vertical, 2)
+                    }
+
                     ForEach(appState.availableVolumes) { volume in
                         VolumeRow(
                             volume: volume,
-                            isSelected: !appState.isCombinedVolumeSelection
+                            isSelected: appState.selectedFolderTarget == nil
+                                && !appState.isCombinedVolumeSelection
                                 && appState.selectedVolume == volume.url
                         )
                         .contentShape(Rectangle())
@@ -124,26 +135,41 @@ public struct VolumePickerView: View {
             .font(.callout)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+        } else if appState.selectedFolderTarget != nil,
+                  let gauge = appState.menuBarVolumeGauge {
+            capacityStats(
+                used: gauge.usedBytes,
+                available: gauge.availableBytes,
+                total: gauge.totalBytes
+            )
         } else if let url = appState.selectedVolume,
            let volume = appState.availableVolumes.first(where: { $0.url == url }) {
-            VStack(alignment: .leading, spacing: 6) {
-                LabeledContent("Used") {
-                    Text(SizeFormatter.shared.format(volume.usedCapacity))
-                        .font(.system(.body, design: .monospaced))
-                }
-                LabeledContent("Available") {
-                    Text(SizeFormatter.shared.format(volume.availableCapacity))
-                        .font(.system(.body, design: .monospaced))
-                }
-                LabeledContent("Total") {
-                    Text(SizeFormatter.shared.format(volume.totalCapacity))
-                        .font(.system(.body, design: .monospaced))
-                }
-            }
-            .font(.callout)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            capacityStats(
+                used: volume.usedCapacity,
+                available: volume.availableCapacity,
+                total: volume.totalCapacity
+            )
         }
+    }
+
+    private func capacityStats(used: UInt64, available: UInt64, total: UInt64) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LabeledContent("Used") {
+                Text(SizeFormatter.shared.format(used))
+                    .font(.system(.body, design: .monospaced))
+            }
+            LabeledContent("Available") {
+                Text(SizeFormatter.shared.format(available))
+                    .font(.system(.body, design: .monospaced))
+            }
+            LabeledContent("Total") {
+                Text(SizeFormatter.shared.format(total))
+                    .font(.system(.body, design: .monospaced))
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
     }
 
     /// One state-driven control: an undisplayed selected volume can be scanned, while a volume
@@ -223,6 +249,38 @@ public struct VolumePickerView: View {
     private func addingClamped(_ lhs: UInt64, _ rhs: UInt64) -> UInt64 {
         let result = lhs.addingReportingOverflow(rhs)
         return result.overflow ? .max : result.partialValue
+    }
+}
+
+private struct SelectedFolderRow: View {
+    let folder: URL
+    let volumeName: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 24))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(folder.lastPathComponent.isEmpty ? folder.path : folder.lastPathComponent)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("Selected folder on \(volumeName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color.accentColor)
+        }
+        .padding(6)
+        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .help(folder.path)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Selected folder \(folder.path) on \(volumeName)")
     }
 }
 

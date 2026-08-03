@@ -45,10 +45,11 @@ extension AppState {
     public var selectedVolumeName: String {
         guard let selectedVolume else { return "No Volume"
         }
-        if let match = availableVolumes.first(where: { $0.url.path == selectedVolume.path }) {
+        let volumePath = selectedFolderVolumePath ?? selectedVolume.path
+        if let match = availableVolumes.first(where: { $0.url.path == volumePath }) {
             return match.name
         }
-        return selectedVolume.path == "/" ? "Macintosh HD" : selectedVolume.lastPathComponent
+        return volumePath == "/" ? "Macintosh HD" : URL(fileURLWithPath: volumePath).lastPathComponent
     }
 
     public var menuBarIconState: MenuBarIconState {
@@ -85,13 +86,13 @@ extension AppState {
             return nil
         }
         guard selectedMountTraversalScope == .selectedVolume,
-              let gauge = VolumeByteStatsReader.read(path: path) else {
+              let sample = VolumeByteStatsReader.readSample(path: path) else {
             menuBarVolumeGauge = nil
             isLowSpace = false
             return nil
         }
-        evaluateMenuBarVolumeGauge(gauge, volumePath: path, now: now)
-        return gauge
+        evaluateMenuBarVolumeGauge(sample.gauge, volumePath: sample.mountPath, now: now)
+        return sample.gauge
     }
 
     /// Pure-input shell used after the one statfs and by deterministic policy tests.

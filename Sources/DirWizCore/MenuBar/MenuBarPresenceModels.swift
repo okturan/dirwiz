@@ -20,15 +20,32 @@ public struct MenuBarVolumeGauge: Equatable, Sendable {
     }
 }
 
+/// A gauge plus the filesystem identity returned by the same `statfs(2)` call. Folder
+/// scans use `mountPath` so notification hysteresis remains per volume rather than per
+/// selected folder.
+public struct VolumeByteStatsSample: Equatable, Sendable {
+    public let gauge: MenuBarVolumeGauge
+    public let mountPath: String
+
+    public init(gauge: MenuBarVolumeGauge, mountPath: String) {
+        self.gauge = gauge
+        self.mountPath = mountPath
+    }
+}
+
 /// Exactly one `statfs(2)` call. The menu panel uses this instead of URL resource-value
 /// helpers whose implementation may issue several metadata reads.
 public enum VolumeByteStatsReader {
     public static func read(path: String) -> MenuBarVolumeGauge? {
+        readSample(path: path)?.gauge
+    }
+
+    public static func readSample(path: String) -> VolumeByteStatsSample? {
         readVolumeByteStats(path: path)
     }
 }
 
-private func readVolumeByteStats(path: String) -> MenuBarVolumeGauge? {
+private func readVolumeByteStats(path: String) -> VolumeByteStatsSample? {
     var statistics = statfs()
     guard statfs(path, &statistics) == 0 else { return nil }
     let blockSize = UInt64(max(statistics.f_bsize, 0))
@@ -37,9 +54,17 @@ private func readVolumeByteStats(path: String) -> MenuBarVolumeGauge? {
     let total = totalBlocks.multipliedReportingOverflow(by: blockSize)
     let available = availableBlocks.multipliedReportingOverflow(by: blockSize)
     guard !total.overflow, !available.overflow else { return nil }
-    return MenuBarVolumeGauge(
-        availableBytes: min(available.partialValue, total.partialValue),
-        totalBytes: total.partialValue
+    let mountPath = withUnsafePointer(to: &statistics.f_mntonname) { pointer in
+        pointer.withMemoryRebound(to: CChar.self, capacity: Int(MNAMELEN)) {
+            String(cString: $0)
+        }
+    }
+    return VolumeByteStatsSample(
+        gauge: MenuBarVolumeGauge(
+            availableBytes: min(available.partialValue, total.partialValue),
+            totalBytes: total.partialValue
+        ),
+        mountPath: mountPath
     )
 }
 

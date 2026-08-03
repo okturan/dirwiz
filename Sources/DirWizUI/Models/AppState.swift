@@ -101,6 +101,15 @@ public final class AppState {
     /// Available volumes.
     public var availableVolumes: [VolumeInfo] = []
 
+    /// A folder explicitly supplied by Finder Services or App Intents. `selectedVolume`
+    /// remains the scan root so every existing scan verb keeps one pipeline; this marker
+    /// prevents mount-list refreshes from mistaking the folder for an unplugged volume.
+    public internal(set) var selectedFolderTarget: URL?
+
+    /// Filesystem identity captured with the target. If a mounted folder disappears,
+    /// `statfs` either fails or resolves to a different mount and normal recovery resumes.
+    @ObservationIgnored var selectedFolderVolumePath: String?
+
     /// Invalidates a deferred availability recovery when a newer mount-list fact arrives. Recovery
     /// waits only for an already-committing living-view splice, which cannot safely be cancelled.
     @ObservationIgnored var volumeAvailabilityGeneration: UInt64 = 0
@@ -118,6 +127,16 @@ public final class AppState {
 
     /// Select one concrete volume and restore the default same-device boundary.
     public func selectVolume(_ url: URL) {
+        selectedFolderTarget = nil
+        selectedFolderVolumePath = nil
+        selectedVolume = url
+        selectedMountTraversalScope = .selectedVolume
+    }
+
+    /// Select a Finder/Shortcuts folder without inventing a second scan mode.
+    func selectFolderTarget(_ url: URL, containingVolumePath: String) {
+        selectedFolderTarget = url
+        selectedFolderVolumePath = containingVolumePath
         selectedVolume = url
         selectedMountTraversalScope = .selectedVolume
     }
@@ -125,6 +144,8 @@ public final class AppState {
     /// Select the explicit one-map overview. The scan root is `/`; scope, not path alone,
     /// distinguishes this from an individual boot-volume scan.
     public func selectCombinedVolumes() {
+        selectedFolderTarget = nil
+        selectedFolderVolumePath = nil
         selectedVolume = URL(fileURLWithPath: "/", isDirectory: true)
         selectedMountTraversalScope = .combinedVolumes
     }

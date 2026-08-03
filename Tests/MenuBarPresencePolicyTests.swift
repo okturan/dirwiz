@@ -354,6 +354,49 @@ struct MenuBarPresencePolicyTests {
 extension AppSupportEnvSuites {
     @Suite("Menu Bar Post-Scan Integration Tests")
     struct MenuBarPostScanIntegrationTests {
+        @Test("A Finder folder remains the selected scan target across volume discovery")
+        func finderFolderSurvivesVolumeReconciliation() async throws {
+            try await withTemporaryAppSupportDir {
+                try await self.finderFolderSurvivesVolumeReconciliationBody()
+            }
+        }
+
+        @MainActor
+        private func finderFolderSurvivesVolumeReconciliationBody() async throws {
+            let fixture = try createTempTree(["payload.bin": 1])
+            defer { fixture.cleanup() }
+            let sample = try #require(VolumeByteStatsReader.readSample(path: fixture.path))
+
+            let suite = "dirwiz.test.menu-bar-finder-folder.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let state = AppState(defaults: defaults)
+
+            state.startScan(path: fixture.path)
+            #expect(state.selectedFolderTarget?.path == URL(
+                fileURLWithPath: fixture.path,
+                isDirectory: true
+            ).standardizedFileURL.path)
+            #expect(state.selectedFolderVolumePath == sample.mountPath)
+
+            // This is the ordering that exposed the native bug: VolumePickerView's
+            // onAppear refresh arrives after the Finder service starts its scan.
+            state.reconcileAvailableVolumes([
+                VolumeInfo(url: URL(fileURLWithPath: sample.mountPath, isDirectory: true))
+            ])
+
+            #expect(state.selectedVolume?.path == state.selectedFolderTarget?.path)
+            #expect(state.selectedFolderVolumePath == sample.mountPath)
+            for _ in 0..<1_000 {
+                if state.scanProgress.scanComplete && !state.scanProgress.isScanning { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(!state.scanProgress.isScanning)
+            #expect(state.fileTree?.rootPath == state.selectedFolderTarget?.path)
+            #expect(defaults.string(forKey: AppState.lastScannedVolumePathKey) == nil)
+        }
+
         @Test("The real post-scan publish point refreshes the selected volume gauge")
         func postScanRefreshesGauge() async throws {
             try await withTemporaryAppSupportDir {
@@ -389,7 +432,8 @@ extension AppSupportEnvSuites {
             let gauge = try #require(state.menuBarVolumeGauge)
             #expect(gauge.totalBytes > 0)
             #expect(gauge.availableBytes <= gauge.totalBytes)
-            #expect(state.lowSpacePolicyStates[fixture.path] != nil)
+            let sample = try #require(VolumeByteStatsReader.readSample(path: fixture.path))
+            #expect(state.lowSpacePolicyStates[sample.mountPath] != nil)
             #expect(state.storageTrendHistory.count == 1)
         }
     }

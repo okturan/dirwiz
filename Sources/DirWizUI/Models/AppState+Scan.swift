@@ -89,14 +89,37 @@ extension AppState {
     public func reconcileAvailableVolumes(_ volumes: [VolumeInfo]) {
         volumeAvailabilityGeneration &+= 1
         let availabilityGeneration = volumeAvailabilityGeneration
+        availableVolumes = volumes
+
+        if let folderTarget = selectedFolderTarget,
+           let originalVolumePath = selectedFolderVolumePath,
+           let currentSample = VolumeByteStatsReader.readSample(path: folderTarget.path),
+           normalizedScanTargetPath(currentSample.mountPath)
+                == normalizedScanTargetPath(originalVolumePath) {
+            // Promote a volume-root selection to the ordinary row once discovery sees it.
+            // A real subfolder remains a distinct, visible folder target.
+            if normalizedScanTargetPath(folderTarget.path)
+                    == normalizedScanTargetPath(currentSample.mountPath),
+               let mountedVolume = volumes.first(where: {
+                   normalizedScanTargetPath($0.url.path)
+                        == normalizedScanTargetPath(folderTarget.path)
+               }) {
+                selectVolume(mountedVolume.url)
+            }
+            return
+        }
+
+        // The folder vanished or now resolves to another filesystem (the mount was
+        // detached but its mount-point directory remained). Let the existing unavailable-
+        // target recovery choose a truthful volume and tree owner.
+        selectedFolderTarget = nil
+        selectedFolderVolumePath = nil
         let decision = VolumeAvailabilityPolicy.resolve(
             availableVolumeURLs: volumes.map(\.url),
             selectedVolume: selectedVolume,
             selectedScope: selectedMountTraversalScope,
             rememberedVolumePath: defaults.string(forKey: Self.lastScannedVolumePathKey)
         )
-
-        availableVolumes = volumes
 
         if decision.recoveryReason != nil, isApplyingChanges {
             // Living apply owns an unregistered scanner and may already be committing into its tree;
@@ -159,8 +182,16 @@ extension AppState {
     /// action. A folder is a concrete selected target, never the combined-volumes mode.
     public func startScan(path: String) {
         guard !path.isEmpty else { return }
-        let url = URL(fileURLWithPath: path, isDirectory: true)
-        selectVolume(url)
+        let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        guard let sample = VolumeByteStatsReader.readSample(path: url.path) else { return }
+        let isDiscoveredVolume = availableVolumes.contains {
+            normalizedScanTargetPath($0.url.path) == normalizedScanTargetPath(url.path)
+        }
+        if isDiscoveredVolume || normalizedScanTargetPath(url.path) == "/" {
+            selectVolume(url)
+        } else {
+            selectFolderTarget(url, containingVolumePath: sample.mountPath)
+        }
         startScan(
             volumeURL: url,
             mountTraversalScope: .selectedVolume,
@@ -575,8 +606,16 @@ extension AppState {
     ) {
         // Combined is an explicit session choice, never the next launch's default.
         guard mountTraversalScope == .selectedVolume else { return }
+        // Finder/Shortcuts folders are session targets, not volumes. Persisting one as
+        // `lastScannedVolumePath` makes launch restoration and the Dock's recent-volume
+        // menu claim that an arbitrary directory is a disk.
+        guard selectedFolderTarget?.path != path else { return }
         defaults.set(path, forKey: Self.lastScannedVolumePathKey)
         rememberRecentVolume(path: path)
+    }
+
+    private func normalizedScanTargetPath(_ path: String) -> String {
+        URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
     }
 
     // MARK: - Session State (plan 038)
