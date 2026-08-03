@@ -24,6 +24,11 @@ let package = Package(
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
+            ],
+            linkerSettings: [
+                .linkedFramework("AppIntents"),
+                .linkedFramework("ServiceManagement"),
+                .linkedFramework("UserNotifications"),
             ]
         ),
         .executableTarget(
@@ -56,6 +61,7 @@ let package = Package(
                 .linkedFramework("MetalKit"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Quartz"),
+                .linkedFramework("ServiceManagement"),
             ]
         ),
         .testTarget(

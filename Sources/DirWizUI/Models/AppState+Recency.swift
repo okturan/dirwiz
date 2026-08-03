@@ -50,18 +50,26 @@ extension AppState {
         let storageIdentity = tree.persistenceIdentity
         snapshotBuildTask = Task {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
-            let saveError: String? = {
+            let saveOutcome: (
+                error: String?,
+                checkpoint: SnapshotCheckpoint?,
+                listed: [SnapshotCheckpoint]
+            ) = {
                 do {
                     let store = SnapshotStore(
                         rootPath: snapshot.meta.rootPath,
                         storageIdentity: storageIdentity
                     )
-                    _ = try store.createCheckpoint(from: snapshot, name: name, pinned: name != nil)
-                    return nil
+                    let checkpoint = try store.createCheckpoint(
+                        from: snapshot,
+                        name: name,
+                        pinned: name != nil
+                    )
+                    return (nil, checkpoint, store.list())
                 } catch {
                     let msg = "Failed to save snapshot: \(error.localizedDescription)"
                     log.error("TemporalSnapshot save failed: \(msg)")
-                    return msg
+                    return (msg, nil, [])
                 }
             }()
             await MainActor.run {
@@ -72,8 +80,13 @@ extension AppState {
                 }
                 self.temporalDiff.temporalSnapshot = snapshot
                 self.temporalDiff.isSnapshotBuilding = false
-                if let msg = saveError {
+                if let msg = saveOutcome.error {
                     self.scanProgress.error = msg
+                } else {
+                    self.temporalDiff.availableCheckpoints = saveOutcome.listed
+                    if let checkpoint = saveOutcome.checkpoint {
+                        self.emitGrowthNotificationIfNeeded(for: checkpoint)
+                    }
                 }
             }
         }
@@ -99,8 +112,9 @@ extension AppState {
             let snapshot = await TemporalDiffService.buildSnapshot(tree: tree)
             // A new scan started while this was building: its tree, not ours, is current.
             guard await MainActor.run(body: { self.scanToken == token }) else { return }
+            let checkpoint: SnapshotCheckpoint
             do {
-                _ = try store.createCheckpoint(from: snapshot)
+                checkpoint = try store.createCheckpoint(from: snapshot)
             } catch {
                 // An auto-checkpoint is best-effort; failing it must never disturb a scan.
                 log.error("Auto-checkpoint failed: \(error.localizedDescription)")
@@ -110,6 +124,7 @@ extension AppState {
             await MainActor.run {
                 guard self.scanToken == token else { return }
                 self.temporalDiff.availableCheckpoints = listed
+                self.emitGrowthNotificationIfNeeded(for: checkpoint)
             }
         }
     }

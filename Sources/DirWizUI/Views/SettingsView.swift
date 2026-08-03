@@ -8,6 +8,7 @@ import DirWizCore
 /// the visual comparison itself stays open until a final choice is made on real trees.
 public struct SettingsView: View {
     @Bindable var appState: AppState
+    @State private var loginItem = LoginItemController()
 
     public init(appState: AppState) {
         self.appState = appState
@@ -46,9 +47,64 @@ public struct SettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Menu Bar") {
+                Toggle("Show DirWiz in the menu bar", isOn: $appState.showsMenuBarItem)
+                Toggle("Show free space beside the icon", isOn: $appState.showsFreeSpaceInMenuBar)
+                    .disabled(!appState.showsMenuBarItem)
+                Toggle("Keep DirWiz running after its last window closes", isOn: $appState.keepsRunningInMenuBar)
+                Text("Keeps the living view and its filesystem monitor active without a Dock icon.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Open at login", isOn: Binding(
+                    get: { loginItem.isEnabled },
+                    set: { loginItem.setEnabled($0) }
+                ))
+                HStack {
+                    Text(loginItem.statusText)
+                        .font(.caption)
+                        .foregroundStyle(loginItem.status == .requiresApproval ? .orange : .secondary)
+                    Spacer()
+                    if loginItem.status == .requiresApproval {
+                        Button("Open Login Items") { loginItem.openApprovalSettings() }
+                            .controlSize(.small)
+                    }
+                }
+
+                Toggle("Notify me when space is low", isOn: $appState.lowSpaceNotificationsEnabled)
+                HStack {
+                    Text("Low-space threshold")
+                    Spacer()
+                    Stepper(
+                        "\(Int(appState.lowSpaceThresholdPercent))%",
+                        value: $appState.lowSpaceThresholdPercent,
+                        in: 1...25,
+                        step: 1
+                    )
+                    .labelsHidden()
+                    Text("\(Int(appState.lowSpaceThresholdPercent))% or 25 GB, whichever is lower")
+                        .foregroundStyle(.secondary)
+                }
+                .disabled(!appState.lowSpaceNotificationsEnabled)
+
+                Toggle("Notify me about exceptional folder growth", isOn: $appState.growthNotificationsEnabled)
+                HStack {
+                    Text("Growth threshold")
+                    Spacer()
+                    Stepper(
+                        "\(Int(appState.growthNotificationThresholdGiB)) GB",
+                        value: $appState.growthNotificationThresholdGiB,
+                        in: 1...500,
+                        step: 1
+                    )
+                }
+                .disabled(!appState.growthNotificationsEnabled)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 430)
+        .frame(width: 520, height: 720)
+        .onAppear { loginItem.refresh() }
     }
 
     private func depthKey(for scheme: FoldersColorScheme) -> some View {

@@ -78,7 +78,7 @@ public enum SkippedDirsPresentation: Equatable {
 }
 
 extension AppState {
-    private static let lastScannedVolumePathKey = "lastScannedVolumePath"
+    static let lastScannedVolumePathKey = "lastScannedVolumePath"
 
     /// Reconciles the OS volume list with selection and displayed-tree ownership.
     ///
@@ -150,6 +150,20 @@ extension AppState {
         startScan(
             volumeURL: volumeURL,
             mountTraversalScope: selectedMountTraversalScope,
+            runPostScanAnalyses: true,
+            forceCold: false
+        )
+    }
+
+    /// Finder Services and App Intents enter the same scan supervisor as every window
+    /// action. A folder is a concrete selected target, never the combined-volumes mode.
+    public func startScan(path: String) {
+        guard !path.isEmpty else { return }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        selectVolume(url)
+        startScan(
+            volumeURL: url,
+            mountTraversalScope: .selectedVolume,
             runPostScanAnalyses: true,
             forceCold: false
         )
@@ -562,6 +576,7 @@ extension AppState {
         // Combined is an explicit session choice, never the next launch's default.
         guard mountTraversalScope == .selectedVolume else { return }
         defaults.set(path, forKey: Self.lastScannedVolumePathKey)
+        rememberRecentVolume(path: path)
     }
 
     // MARK: - Session State (plan 038)

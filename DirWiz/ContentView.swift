@@ -546,7 +546,7 @@ struct ContentView: View {
             Image(systemName: liveIcon)
                 .font(.caption)
                 .foregroundStyle(liveTint)
-            Text(liveLabel)
+            Text(appState.livingViewStatus())
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -596,36 +596,6 @@ struct ContentView: View {
         case .storm:    return .orange
         case .deferred: return .secondary
         default:        return .green
-        }
-    }
-
-    private var liveLabel: String {
-        let pending = appState.fsChanges.count
-        if appState.liveRefreshPaused {
-            return pending > 0
-                ? "Paused · \(pending) folders pending"
-                : "Paused"
-        }
-        switch appState.liveRefreshDecision {
-        case .storm(let count):
-            return "\(SizeFormatter.shared.formatCount(count)) folders changed - too many to patch"
-        case .deferred(let reason):
-            switch reason {
-            case .temporalDiffActive: return "\(pending) pending · waiting for the diff overlay"
-            case .scanning:           return "\(pending) pending · scanning"
-            case .heavyTaskRunning:   return "\(pending) pending · waiting for analysis"
-            case .paused:             return "Paused"
-            }
-        case .waitingForQuiescence, .waitingForInterval:
-            return "\(pending) folders changed · updating shortly"
-        case .apply:
-            return "\(pending) folders changed · updating"
-        case .idle:
-            if let last = appState.lastLiveApplyAt {
-                let ago = Int(CFAbsoluteTimeGetCurrent() - last)
-                return ago < 5 ? "Live · just updated" : "Live · updated \(ago)s ago"
-            }
-            return "Live"
         }
     }
 

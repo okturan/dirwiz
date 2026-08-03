@@ -30,6 +30,7 @@ echo "Universal binary verified: $ARCHS"
 
 cp "$PLIST" "$APP/Contents/Info.plist"
 cp "$ICON" "$APP/Contents/Resources/DirWiz.icns"
+cp "$ROOT/DirWiz/Resources/DirWizMenuBarTemplate.svg" "$APP/Contents/Resources/DirWizMenuBarTemplate.svg"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 chmod +x "$APP/Contents/MacOS/$APP_NAME"
 xattr -cr "$APP" 2>/dev/null || true

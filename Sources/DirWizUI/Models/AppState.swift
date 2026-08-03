@@ -84,7 +84,15 @@ public final class AppState {
     public var analysisCoordinator = AnalysisCoordinator()
 
     /// Selected volume URL to scan.
-    public var selectedVolume: URL?
+    public var selectedVolume: URL? {
+        didSet {
+            guard selectedVolume?.path != oldValue?.path else { return }
+            // Never carry one disk's free-space sample or latched warning into another
+            // disk while its first statfs is still pending.
+            menuBarVolumeGauge = nil
+            isLowSpace = false
+        }
+    }
 
     /// Mount scope for the next scan selection. This is deliberately session-only:
     /// relaunch and ordinary volume selection return to one-volume-at-a-time semantics.
@@ -179,6 +187,95 @@ public final class AppState {
     static let foldersColorSchemeKey = "DirWizFoldersColorScheme"
     static let foldersSurfaceStyleKey = "DirWizFoldersSurfaceStyle"
 
+    // MARK: - Menu Bar Presence
+
+    /// The item can be removed independently once background residency is disabled.
+    public var showsMenuBarItem: Bool = true {
+        didSet {
+            guard !isLoadingMenuBarPreferences, showsMenuBarItem != oldValue else { return }
+            defaults.set(showsMenuBarItem, forKey: AppState.showsMenuBarItemKey)
+            if !showsMenuBarItem, keepsRunningInMenuBar {
+                keepsRunningInMenuBar = false
+            }
+        }
+    }
+
+    /// Default-on residency: closing the last window keeps the existing living view alive.
+    public var keepsRunningInMenuBar: Bool = true {
+        didSet {
+            guard !isLoadingMenuBarPreferences, keepsRunningInMenuBar != oldValue else { return }
+            defaults.set(keepsRunningInMenuBar, forKey: AppState.keepsRunningInMenuBarKey)
+            if keepsRunningInMenuBar, !showsMenuBarItem {
+                showsMenuBarItem = true
+            }
+        }
+    }
+
+    public var showsFreeSpaceInMenuBar: Bool = false {
+        didSet {
+            guard !isLoadingMenuBarPreferences, showsFreeSpaceInMenuBar != oldValue else { return }
+            defaults.set(showsFreeSpaceInMenuBar, forKey: AppState.showsFreeSpaceInMenuBarKey)
+        }
+    }
+
+    public var lowSpaceNotificationsEnabled: Bool = false {
+        didSet {
+            guard !isLoadingMenuBarPreferences, lowSpaceNotificationsEnabled != oldValue else { return }
+            defaults.set(lowSpaceNotificationsEnabled, forKey: AppState.lowSpaceNotificationsEnabledKey)
+            if lowSpaceNotificationsEnabled {
+                requestNotificationAuthorization?()
+                rearmLowSpacePolicyForNotificationEnable()
+                refreshMenuBarVolumeStats()
+            }
+        }
+    }
+
+    /// Percentage arm of min(configured percent, 25 GiB). Stored as a whole-number percent.
+    public var lowSpaceThresholdPercent: Double = 10 {
+        didSet {
+            guard !isLoadingMenuBarPreferences, lowSpaceThresholdPercent != oldValue else { return }
+            defaults.set(lowSpaceThresholdPercent, forKey: AppState.lowSpaceThresholdPercentKey)
+        }
+    }
+
+    public var growthNotificationsEnabled: Bool = false {
+        didSet {
+            guard !isLoadingMenuBarPreferences, growthNotificationsEnabled != oldValue else { return }
+            defaults.set(growthNotificationsEnabled, forKey: AppState.growthNotificationsEnabledKey)
+            if growthNotificationsEnabled { requestNotificationAuthorization?() }
+        }
+    }
+
+    public var growthNotificationThresholdGiB: Double = 10 {
+        didSet {
+            guard !isLoadingMenuBarPreferences, growthNotificationThresholdGiB != oldValue else { return }
+            defaults.set(growthNotificationThresholdGiB, forKey: AppState.growthNotificationThresholdGiBKey)
+        }
+    }
+
+    /// Latest single-statfs sample, shared by the panel label and notification policy.
+    public internal(set) var menuBarVolumeGauge: MenuBarVolumeGauge?
+    public internal(set) var isLowSpace = false
+
+    /// The executable shell installs these hooks. Tests and DirWizUI never import
+    /// UserNotifications, keeping policy and persistence independent from OS prompts.
+    @ObservationIgnored public var requestNotificationAuthorization: (() -> Void)?
+    @ObservationIgnored public var postMenuBarNotification: ((MenuBarNotificationEvent) -> Void)?
+
+    @ObservationIgnored var lowSpacePolicyStates: [String: LowSpacePolicy.State] = [:]
+    @ObservationIgnored var isLoadingMenuBarPreferences = true
+    public internal(set) var recentVolumePaths: [String] = []
+
+    static let showsMenuBarItemKey = "DirWizShowsMenuBarItem"
+    static let keepsRunningInMenuBarKey = "DirWizKeepsRunningInMenuBar"
+    static let showsFreeSpaceInMenuBarKey = "DirWizShowsFreeSpaceInMenuBar"
+    static let lowSpaceNotificationsEnabledKey = "DirWizLowSpaceNotificationsEnabled"
+    static let lowSpaceThresholdPercentKey = "DirWizLowSpaceThresholdPercent"
+    static let growthNotificationsEnabledKey = "DirWizGrowthNotificationsEnabled"
+    static let growthNotificationThresholdGiBKey = "DirWizGrowthNotificationThresholdGiB"
+    static let lowSpacePolicyStatesKey = "DirWizLowSpacePolicyStates"
+    static let recentVolumePathsKey = "DirWizRecentVolumePaths"
+
     /// Whether the bottom treemap pane is collapsed to give the detail pane full height.
     /// A layout preference like `treemapRenderStyle`: persisted, and NOT reset by
     /// `resetForNewScan()` - a new scan must not spring the map back open.
@@ -203,6 +300,17 @@ public final class AppState {
 
     static func loadFoldersSurfaceStyle(_ defaults: UserDefaults) -> FoldersSurfaceStyle {
         FoldersSurfaceStyle(rawValue: defaults.integer(forKey: foldersSurfaceStyleKey)) ?? .fineLines
+    }
+
+    static func loadLowSpacePolicyStates(
+        _ defaults: UserDefaults
+    ) -> [String: LowSpacePolicy.State] {
+        guard let data = defaults.data(forKey: lowSpacePolicyStatesKey),
+              let decoded = try? JSONDecoder().decode(
+                  [String: LowSpacePolicy.State].self,
+                  from: data
+              ) else { return [:] }
+        return decoded
     }
 
     // MARK: - Space Analysis
@@ -450,6 +558,23 @@ public final class AppState {
         self.foldersSurfaceStyle = AppState.loadFoldersSurfaceStyle(defaults)
         self.isTreemapPaneCollapsed = defaults.bool(forKey: AppState.treemapCollapsedKey)
         self.liveRefreshPaused = defaults.bool(forKey: AppState.livePausedKey)
+        self.showsMenuBarItem = defaults.object(forKey: AppState.showsMenuBarItemKey) == nil
+            ? true : defaults.bool(forKey: AppState.showsMenuBarItemKey)
+        self.keepsRunningInMenuBar = defaults.object(forKey: AppState.keepsRunningInMenuBarKey) == nil
+            ? true : defaults.bool(forKey: AppState.keepsRunningInMenuBarKey)
+        self.showsFreeSpaceInMenuBar = defaults.bool(forKey: AppState.showsFreeSpaceInMenuBarKey)
+        self.lowSpaceNotificationsEnabled = defaults.bool(forKey: AppState.lowSpaceNotificationsEnabledKey)
+        let threshold = defaults.double(forKey: AppState.lowSpaceThresholdPercentKey)
+        self.lowSpaceThresholdPercent = threshold > 0 ? threshold : 10
+        self.growthNotificationsEnabled = defaults.bool(forKey: AppState.growthNotificationsEnabledKey)
+        let growthThreshold = defaults.double(forKey: AppState.growthNotificationThresholdGiBKey)
+        self.growthNotificationThresholdGiB = growthThreshold > 0 ? growthThreshold : 10
+        self.recentVolumePaths = defaults.stringArray(forKey: AppState.recentVolumePathsKey) ?? []
+        self.lowSpacePolicyStates = AppState.loadLowSpacePolicyStates(defaults)
+        self.isLoadingMenuBarPreferences = false
+        if self.keepsRunningInMenuBar, !self.showsMenuBarItem {
+            self.showsMenuBarItem = true
+        }
     }
 
     public enum HeavyTaskKind: String, Sendable, CaseIterable {

@@ -4,26 +4,32 @@ import DirWizUI
 
 @main
 struct DirWizApp: App {
-    @State private var appState = AppState()
+    @NSApplicationDelegateAdaptor(DirWizAppDelegate.self) private var appDelegate
+    @State private var appState: AppState
     @State private var showFullDiskAccessAlert = false
 
     init() {
+        let state = AppState()
+        _appState = State(initialValue: state)
+        appDelegate.connect(state)
         // When launched via `swift run`, the process starts as a background agent.
         // This promotes it to a regular app with Dock icon and Cmd+Tab presence.
         NSApplication.shared.setActivationPolicy(.regular)
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("DirWiz", id: "main") {
             ContentView(appState: appState)
                 .frame(minWidth: 1000, minHeight: 700)
                 .onAppear {
+                    appDelegate.connect(appState)
                     appState.hasFullDiskAccess = checkFullDiskAccess()
                     if !appState.hasFullDiskAccess {
                         showFullDiskAccessAlert = true
                     }
                     appState.restoreOnLaunch()
                 }
+                .background(WindowActionRegistrar(appDelegate: appDelegate))
                 .alert(
                     "Full Disk Access Required",
                     isPresented: $showFullDiskAccessAlert
@@ -81,11 +87,62 @@ struct DirWizApp: App {
         Settings {
             SettingsView(appState: appState)
         }
+
+        MenuBarExtra(isInserted: $appState.showsMenuBarItem) {
+            MenuBarSceneContent(appState: appState, appDelegate: appDelegate)
+        } label: {
+            DirWizMenuBarLabel(
+                state: appState.menuBarIconState,
+                freeSpaceText: appState.showsFreeSpaceInMenuBar
+                    ? appState.menuBarVolumeGauge.map { SizeFormatter.shared.format($0.availableBytes) }
+                    : nil
+            )
+        }
+        .menuBarExtraStyle(.window)
     }
 
     private func openFullDiskAccessSettings() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
         NSWorkspace.shared.open(url)
+    }
+}
+
+private struct MenuBarSceneContent: View {
+    @Environment(\.openWindow) private var openWindow
+    let appState: AppState
+    let appDelegate: DirWizAppDelegate
+
+    var body: some View {
+        MenuBarPanel(
+            appState: appState,
+            openDirWiz: {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "main")
+            },
+            quit: { appDelegate.quitDirWiz() }
+        )
+        .onAppear {
+            appDelegate.connect(appState)
+            appDelegate.openWindowAction = {
+                openWindow(id: "main")
+            }
+        }
+    }
+}
+
+private struct WindowActionRegistrar: View {
+    @Environment(\.openWindow) private var openWindow
+    let appDelegate: DirWizAppDelegate
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                appDelegate.openWindowAction = {
+                    openWindow(id: "main")
+                }
+            }
     }
 }
 

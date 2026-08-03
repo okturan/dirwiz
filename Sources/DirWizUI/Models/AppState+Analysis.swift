@@ -325,6 +325,7 @@ extension AppState {
         lastLiveChangeAt = nil
         liveRefreshGeneration &+= 1
         liveRefreshDecision = LiveRefreshPolicy.decide(currentLiveRefreshInput())
+        refreshMenuBarVolumeStats()
     }
 
     // MARK: - Storage Trends
@@ -353,6 +354,7 @@ extension AppState {
             return (try? await trends.loadHistory(rootPath: rootPath)) ?? []
         }.value
         storageTrendHistory = history
+        refreshMenuBarVolumeStats()
     }
 
     /// Recompute hardlink groups from the current tree's scan-time link-count flags.

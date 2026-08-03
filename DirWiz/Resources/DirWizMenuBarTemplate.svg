@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 36">
+  <!-- Monochrome gauge-folder mark derived from docs/assets/dirwiz-logo.svg. -->
+  <path fill="#000" d="M3 7c0-2.2 1.8-4 4-4h9.2c1.5 0 2.4.8 3.2 2l1.3 2H37c2.2 0 4 1.8 4 4v18c0 2.2-1.8 4-4 4H7c-2.2 0-4-1.8-4-4V7zm5 7v13h6V14H8zm8 5v8h6v-8h-6zm8-3v11h5V16h-5zm7-5v16h5V11h-5z"/>
+</svg>

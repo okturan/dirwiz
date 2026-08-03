@@ -15,7 +15,7 @@ public struct FSChange: Sendable {
 }
 
 /// Accumulated change summary for a directory.
-public struct DirectoryChangeSummary: Identifiable, Sendable {
+public struct DirectoryChangeSummary: Identifiable, Sendable, Equatable {
     public let id: String
     public let path: String
     public var changeCount: Int
@@ -27,6 +27,26 @@ public struct DirectoryChangeSummary: Identifiable, Sendable {
     /// False means the path exists only through file→parent reduction and is shallow-
     /// eligible for the next apply (see `JournalReplay.fileOnlyTargets` for why).
     public var hasDirectoryEvent: Bool = false
+
+    public init(
+        id: String,
+        path: String,
+        changeCount: Int,
+        lastChangeDate: Date,
+        hasCreations: Bool,
+        hasDeletions: Bool,
+        hasModifications: Bool,
+        hasDirectoryEvent: Bool = false
+    ) {
+        self.id = id
+        self.path = path
+        self.changeCount = changeCount
+        self.lastChangeDate = lastChangeDate
+        self.hasCreations = hasCreations
+        self.hasDeletions = hasDeletions
+        self.hasModifications = hasModifications
+        self.hasDirectoryEvent = hasDirectoryEvent
+    }
 }
 
 /// Monitors filesystem changes using FSEvents after initial scan.

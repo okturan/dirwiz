@@ -35,6 +35,22 @@
 	</array>
 	<key>NSFullDiskAccessUsageDescription</key>
 	<string>DirWiz needs Full Disk Access to scan and analyze all files on your volumes, including system and user library directories.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Scan in DirWiz</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>scanInDirWiz</string>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.file-url</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSUpdateSecurityPolicy</key>
 	<dict>
 		<key>AllowProcesses</key>
