@@ -23,6 +23,10 @@ public struct DirectoryChangeSummary: Identifiable, Sendable {
     public var hasCreations: Bool
     public var hasDeletions: Bool
     public var hasModifications: Bool
+    /// True once ANY event in the accumulation window reported this directory itself.
+    /// False means the path exists only through file→parent reduction and is shallow-
+    /// eligible for the next apply (see `JournalReplay.fileOnlyTargets` for why).
+    public var hasDirectoryEvent: Bool = false
 }
 
 /// Monitors filesystem changes using FSEvents after initial scan.
@@ -167,6 +171,7 @@ public final class FSEventsMonitor: @unchecked Sendable {
                 if change.isCreated { summary.hasCreations = true }
                 if change.isRemoved { summary.hasDeletions = true }
                 if change.isModified { summary.hasModifications = true }
+                if change.isDirectory { summary.hasDirectoryEvent = true }
                 changes[dirPath] = summary
             } else {
                 changes[dirPath] = DirectoryChangeSummary(
@@ -176,7 +181,8 @@ public final class FSEventsMonitor: @unchecked Sendable {
                     lastChangeDate: change.timestamp,
                     hasCreations: change.isCreated,
                     hasDeletions: change.isRemoved,
-                    hasModifications: change.isModified
+                    hasModifications: change.isModified,
+                    hasDirectoryEvent: change.isDirectory
                 )
             }
         }

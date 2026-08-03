@@ -249,6 +249,10 @@ extension AppState {
         )
         let rootPath = tree.path(at: 0)
         let targets = fsChanges.map(\.path)
+        // Same shallow scoping as warm start: a directory accumulated only through
+        // file→parent reduction needs one level reconciled, not its whole subtree -
+        // without this, every `~/.DS_Store` write re-staged the entire home folder.
+        let shallowTargets = Set(fsChanges.filter { !$0.hasDirectoryEvent }.map(\.path))
 
         // Captured BEFORE the splice - same discipline as the cold-scan cache write-back
         // (AppState+Scan.swift): any change landing during the splice below is covered by
@@ -258,7 +262,9 @@ extension AppState {
 
         let scanner = FileScanner()
         let progress = ScanProgress()
-        let report = await scanner.rescanSubtrees(targets, tree: tree, progress: progress)
+        let report = await scanner.rescanSubtrees(
+            targets, tree: tree, progress: progress, shallowTargets: shallowTargets
+        )
 
         // A new scan (warm or cold) superseded this apply while the splice was running.
         // In practice this can no longer happen - `AppState+Scan.swift`'s `startScan`
@@ -278,7 +284,11 @@ extension AppState {
         // unresolved path, or every target collapsing to the tree root because nothing
         // narrower survived resolution, means the patch can't be trusted - prefer a full
         // refresh over publishing a half-applied tree. `startFullRescan()` is 036-safe.
-        guard report.unresolvedPaths.isEmpty, !report.rescannedRoots.contains(rootPath) else {
+        // A root-level SHALLOW reconcile is a successful in-place patch, not the
+        // "nothing narrower resolved" failure this guard exists for.
+        let rootLevelFailure = report.rescannedRoots.contains(rootPath)
+            && !report.shallowRoots.contains(rootPath)
+        guard report.unresolvedPaths.isEmpty, !rootLevelFailure else {
             isApplyingChanges = false
             startFullRescan()
             return

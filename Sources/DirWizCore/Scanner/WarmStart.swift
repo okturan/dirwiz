@@ -9,10 +9,19 @@ public struct JournalReplay: Sendable {
     }
     public let outcome: Outcome
     public let newEventId: UInt64   // FSEventsGetCurrentEventId() captured BEFORE the stream started
+    /// Changed-directory targets whose ONLY evidence is file-level events reduced to
+    /// their parent - FSEvents never reported the directory itself. Such a target is
+    /// SHALLOW: only its own entry level is stale, because changes inside its child
+    /// subtrees produce their own events with their own targets. Without this
+    /// distinction, background noise like Finder touching `~/.DS_Store` made the whole
+    /// home folder a full-subtree rescan target, which is what kept the warm-start
+    /// estimate at ~90% and every launch cold.
+    public let fileOnlyTargets: Set<String>
 
-    public init(outcome: Outcome, newEventId: UInt64) {
+    public init(outcome: Outcome, newEventId: UInt64, fileOnlyTargets: Set<String> = []) {
         self.outcome = outcome
         self.newEventId = newEventId
+        self.fileOnlyTargets = fileOnlyTargets
     }
 }
 
@@ -61,17 +70,17 @@ public enum FSEventsJournal {
         }
         let collector = JournalCollector()
 
-        let outcome = await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<JournalReplay.Outcome, Never>) in
-                collector.start(root: root, since: eventId, timeout: timeout) { outcome in
-                    continuation.resume(returning: outcome)
+        let (outcome, fileOnly) = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<(JournalReplay.Outcome, Set<String>), Never>) in
+                collector.start(root: root, since: eventId, timeout: timeout) { outcome, fileOnly in
+                    continuation.resume(returning: (outcome, fileOnly))
                 }
             }
         } onCancel: {
             collector.cancel()
         }
 
-        return JournalReplay(outcome: outcome, newEventId: newEventId)
+        return JournalReplay(outcome: outcome, newEventId: newEventId, fileOnlyTargets: fileOnly)
     }
 }
 
@@ -87,12 +96,15 @@ private final class JournalCollector: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private var collectedPaths: [String] = []
     private var seenPaths = Set<String>()
+    /// Targets FSEvents reported as directories themselves. Anything in `seenPaths` but
+    /// not here exists only through file→parent reduction and is shallow-eligible.
+    private var dirEventTargets = Set<String>()
     private var finished = false
-    private var completion: ((JournalReplay.Outcome) -> Void)?
+    private var completion: ((JournalReplay.Outcome, Set<String>) -> Void)?
     private var timeoutWorkItem: DispatchWorkItem?
     private var selfRetain: Unmanaged<JournalCollector>?
 
-    func start(root: String, since eventId: UInt64, timeout: TimeInterval, completion: @escaping (JournalReplay.Outcome) -> Void) {
+    func start(root: String, since eventId: UInt64, timeout: TimeInterval, completion: @escaping (JournalReplay.Outcome, Set<String>) -> Void) {
         lock.lock()
         self.completion = completion
         lock.unlock()
@@ -131,7 +143,7 @@ private final class JournalCollector: @unchecked Sendable {
             flags
         ) else {
             retained.release()
-            completion(.poisoned("failed to create FSEventStream"))
+            completion(.poisoned("failed to create FSEventStream"), [])
             return
         }
 
@@ -177,6 +189,7 @@ private final class JournalCollector: @unchecked Sendable {
             // way a directory-level event's path already, correctly, would be.
             let isDir = flag & UInt32(kFSEventStreamEventFlagItemIsDir) != 0
             let target = isDir ? path : (path as NSString).deletingLastPathComponent
+            if isDir { dirEventTargets.insert(path) }
             if seenPaths.insert(target).inserted {
                 collectedPaths.append(target)
             }
@@ -203,6 +216,7 @@ private final class JournalCollector: @unchecked Sendable {
         selfRetain = nil
         timeoutWorkItem?.cancel()
         timeoutWorkItem = nil
+        let fileOnly = seenPaths.subtracting(dirEventTargets)
         lock.unlock()
 
         if let s {
@@ -210,7 +224,7 @@ private final class JournalCollector: @unchecked Sendable {
             FSEventStreamInvalidate(s)
             FSEventStreamRelease(s)
         }
-        cb?(outcome)
+        cb?(outcome, fileOnly)
         retained?.release()
     }
 
@@ -262,6 +276,16 @@ private let journalCollectorCallback: FSEventStreamCallback = {
 /// claim discipline as `SpaceAnalyzer.isDescendantOfClaimed`.
 enum PathCollapse {
     static func outermostRoots(_ paths: [String]) -> [String] {
+        outermostRoots(paths, shallow: [])
+    }
+
+    /// Kind-aware variant: only DEEP roots claim their descendants. A shallow root's
+    /// work is one entry level, disjoint from any nested target's work, so it must not
+    /// swallow the precise deeper targets beneath it - that swallowing is exactly how a
+    /// file-derived `/Users/okan` target used to absorb every real change location and
+    /// then get charged the whole home folder. Exact duplicate paths still dedupe;
+    /// callers ensure a path with directory-level evidence is not in `shallow`.
+    static func outermostRoots(_ paths: [String], shallow: Set<String>) -> [String] {
         var uniqueInOrder: [String] = []
         var seen = Set<String>()
         for path in paths where seen.insert(path).inserted {
@@ -276,17 +300,19 @@ enum PathCollapse {
         }
 
         var claimed: [String] = []
+        var survivors = Set<String>()
         for (_, path) in shallowestFirst {
             let nested = claimed.contains { ancestor in
                 path.hasPrefix(ancestor.hasSuffix("/") ? ancestor : ancestor + "/")
             }
-            if !nested {
+            if nested { continue }
+            survivors.insert(path)
+            if !shallow.contains(path) {
                 claimed.append(path)
             }
         }
 
-        let claimedSet = Set(claimed)
-        return uniqueInOrder.filter { claimedSet.contains($0) }
+        return uniqueInOrder.filter { survivors.contains($0) }
     }
 }
 
@@ -343,6 +369,7 @@ public enum WarmStartPlanner {
         cachedDirectoryCount: Int?,
         cachedTotalItemCount: Int? = nil,
         estimatedPatchItems: Int? = nil,
+        shallowTargets: Set<String> = [],
         maxChangedFraction: Double = 0.20,
         maxChangedItemFraction: Double = defaultMaxChangedItemFraction,
         maxPatchRoots: Int = 512
@@ -357,7 +384,7 @@ public enum WarmStartPlanner {
         case .poisoned(let reason):
             return .coldFallback(reason: userFacingPoisonReason(reason))
         case .changes(let targets):
-            let roots = PathCollapse.outermostRoots(targets)
+            let roots = PathCollapse.outermostRoots(targets, shallow: shallowTargets)
 
             if let estimatedPatchItems,
                let cachedTotalItemCount,
@@ -437,10 +464,15 @@ public enum WarmStartPlanner {
     /// zero - the estimate only needs to bound a decision, not be exact, and treating an
     /// unresolvable root as "free" would silently undercount exactly the case (new
     /// content) most likely to be large.
-    public static func estimatedPatchItemCount(forChangedPaths targets: [String], cachedTree: FileTree) -> Int {
+    public static func estimatedPatchItemCount(
+        forChangedPaths targets: [String],
+        cachedTree: FileTree,
+        shallowTargets: Set<String> = []
+    ) -> Int {
         estimatedPatchItemCounts(
             forChangedPaths: targets,
-            cachedTree: cachedTree
+            cachedTree: cachedTree,
+            shallowTargets: shallowTargets
         ).values.reduce(into: 0) { total, itemCount in
             let sum = total.addingReportingOverflow(itemCount)
             total = sum.overflow ? Int.max : sum.partialValue
@@ -450,11 +482,17 @@ public enum WarmStartPlanner {
     /// Per-collapsed-root form used for production observability. It shares one cached
     /// snapshot across every root so recording estimates does not repeat the aggregate
     /// estimator's whole-tree snapshot/traversal setup immediately before a patch.
+    ///
+    /// A SHALLOW root (file-derived; see `JournalReplay.fileOnlyTargets`) is charged its
+    /// direct child count, because its reconcile reads exactly one entry level. Charging
+    /// it the cached subtree is what made `.DS_Store` noise in the home folder read as
+    /// "~92% of files changed" and kept every launch cold.
     public static func estimatedPatchItemCounts(
         forChangedPaths targets: [String],
-        cachedTree: FileTree
+        cachedTree: FileTree,
+        shallowTargets: Set<String> = []
     ) -> [String: Int] {
-        let roots = PathCollapse.outermostRoots(targets)
+        let roots = PathCollapse.outermostRoots(targets, shallow: shallowTargets)
         guard !roots.isEmpty else { return [:] }
 
         let snapshot = cachedTree.pathBuildingSnapshot()
@@ -466,7 +504,11 @@ public enum WarmStartPlanner {
                 estimates[root] = unresolvedRootItemEstimate
                 continue
             }
-            estimates[root] = cachedTree.subtreeItemCount(at: index)
+            if shallowTargets.contains(root) {
+                estimates[root] = max(1, Int(snapshot.nodes[Int(index)].childCount))
+            } else {
+                estimates[root] = cachedTree.subtreeItemCount(at: index)
+            }
         }
         return estimates
     }

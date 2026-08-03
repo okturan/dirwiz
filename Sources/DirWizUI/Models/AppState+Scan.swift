@@ -488,7 +488,8 @@ extension AppState {
                 guard case .changes(let targets) = replay.outcome else { return nil }
                 return WarmStartPlanner.estimatedPatchItemCounts(
                     forChangedPaths: targets,
-                    cachedTree: cached.tree
+                    cachedTree: cached.tree,
+                    shallowTargets: replay.fileOnlyTargets
                 )
             }()
             let estimatedPatchItems: Int? = estimatedItemsByRoot.map { estimates in
@@ -502,7 +503,8 @@ extension AppState {
                 replay: replay.outcome,
                 cachedDirectoryCount: cachedDirectoryCount,
                 cachedTotalItemCount: cached.tree.count,
-                estimatedPatchItems: estimatedPatchItems
+                estimatedPatchItems: estimatedPatchItems,
+                shallowTargets: replay.fileOnlyTargets
             )
 
             guard self.scanSession.token == attemptToken else { return }
@@ -527,6 +529,7 @@ extension AppState {
                     cached: cached,
                     path: path,
                     targets: targets,
+                    shallowTargets: replay.fileOnlyTargets,
                     newEventId: replay.newEventId,
                     runPostScanAnalyses: shouldRunPostScanAnalyses,
                     estimatedItemsByRequestedPath: estimatedItemsByRoot ?? [:]
@@ -610,6 +613,7 @@ extension AppState {
         cached: TreeCache.Payload,
         path: String,
         targets: [String],
+        shallowTargets: Set<String>,
         newEventId: UInt64,
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
         estimatedItemsByRequestedPath: [String: Int]
@@ -676,6 +680,7 @@ extension AppState {
                 tiers.interactive,
                 tree: tree,
                 progress: scanProgress,
+                shallowTargets: shallowTargets,
                 options: SubtreeRescanOptions(
                     priority: .interactive,
                     resetsCancellation: true,
@@ -797,6 +802,7 @@ extension AppState {
             tiers.ephemeral,
             tree: tree,
             progress: scanProgress,
+            shallowTargets: shallowTargets,
             options: SubtreeRescanOptions(
                 priority: .utility,
                 resetsCancellation: false,
@@ -899,7 +905,11 @@ extension AppState {
             let count = report.unresolvedPaths.count
             return "couldn't resolve \(count) changed path\(count == 1 ? "" : "s") against the cached tree"
         }
-        if report.rescannedRoots.contains(scanRoot) {
+        // A root-level SHALLOW reconcile is a successful in-place patch of the root's
+        // own entry level, not the "nothing narrower resolved" failure this rule exists
+        // for - exempt it, or root-level file churn keeps every patch abandoning.
+        if report.rescannedRoots.contains(scanRoot),
+           !report.shallowRoots.contains(scanRoot) {
             return "a changed path resolved to the scan root - nothing narrower to patch"
         }
         if report.stagedItemBudgetExceeded != nil {

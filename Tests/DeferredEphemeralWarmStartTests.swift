@@ -26,6 +26,7 @@ struct DeferredEphemeralWarmStartTests {
         private let releaseGate = DispatchSemaphore(value: 0)
         private let lock = NSLock()
         private var reachedGate = false
+        private var released = false
 
         init(gatedPath: String) {
             self.gatedPath = gatedPath
@@ -37,8 +38,18 @@ struct DeferredEphemeralWarmStartTests {
             return reachedGate
         }
 
+        /// A LATCH, not a one-shot token: the gate stays open once released. Shallow
+        /// splicing legitimately enumerates a gated path twice per patch - the one-level
+        /// A0 read, then the promoted full staging - and a one-shot semaphore would
+        /// strand the second enumeration forever. The observation window this gate
+        /// exists for ("trailing tier paused before any mutation") ends at the first
+        /// release either way.
         func release() {
-            releaseGate.signal()
+            lock.lock()
+            let firstRelease = !released
+            released = true
+            lock.unlock()
+            if firstRelease { releaseGate.signal() }
         }
 
         func listDirectory(path: String) -> [DirectoryEntry]? {
@@ -52,8 +63,14 @@ struct DeferredEphemeralWarmStartTests {
             if path == gatedPath {
                 lock.lock()
                 reachedGate = true
+                let mustWait = !released
                 lock.unlock()
-                releaseGate.wait()
+                if mustWait {
+                    releaseGate.wait()
+                    // Recycle the token: a raced second waiter that also saw
+                    // `mustWait` before the release must be freed too.
+                    releaseGate.signal()
+                }
             }
             return inner.forEachDirectoryEntry(path: path, body)
         }
