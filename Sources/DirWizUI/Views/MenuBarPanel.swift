@@ -233,7 +233,7 @@ public struct DirWizMenuBarLabel: View {
                     // Sized to sit with the system items: siblings like Wi-Fi carry
                     // internal padding, so a solid glyph filling a 19pt box read
                     // oversized next to them (verified against a real menu bar capture).
-                    .frame(width: 19, height: 15.5)
+                    .frame(width: 21.85, height: 17.83)
                 if state == .scanning {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 7, weight: .bold))
@@ -267,7 +267,7 @@ public struct DirWizMenuBarLabel: View {
             // menu bar captures; the .frame alone changed nothing).
             let _ = {
                 image.isTemplate = true
-                image.size = NSSize(width: 19, height: 15.5)
+                image.size = NSSize(width: 21.85, height: 17.83)
             }()
             Image(nsImage: image)
                 .renderingMode(.template)
