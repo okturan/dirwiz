@@ -47,7 +47,7 @@
 ## 6. Delivery
 
 - [x] 6.1 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
-- [ ] 6.2 Commit, install, relaunch, and exercise natively: panel contents against the real
+- [x] 6.2 Commit, install, relaunch, and exercise natively: panel contents against the real
   living view, accessory-mode residency across a window close, a real low-space simulation,
   and at least one intent from Shortcuts.
 - [x] 6.3 Update CLAUDE.md with the residency/notification landmines learned during
