@@ -406,6 +406,7 @@ extension AppState {
         guard tree.mountTraversalScope == .selectedVolume else {
             guard scanToken == token else { return }
             storageTrendHistory = []
+            refreshMenuBarVolumeStats()
             return
         }
         let rootPath = tree.path(at: 0)
@@ -416,6 +417,9 @@ extension AppState {
         }.value
         guard scanToken == token else { return }
         storageTrendHistory = history
+        // This is the post-scan publish point used by the real scan supervisor. Keep the
+        // ambient gauge and low-space latch on the same volume as the newly displayed tree.
+        refreshMenuBarVolumeStats()
     }
 
     // MARK: - Tree Actions

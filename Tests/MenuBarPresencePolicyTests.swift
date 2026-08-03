@@ -350,3 +350,47 @@ struct MenuBarPresencePolicyTests {
         )
     }
 }
+
+extension AppSupportEnvSuites {
+    @Suite("Menu Bar Post-Scan Integration Tests")
+    struct MenuBarPostScanIntegrationTests {
+        @Test("The real post-scan publish point refreshes the selected volume gauge")
+        func postScanRefreshesGauge() async throws {
+            try await withTemporaryAppSupportDir {
+                try await self.postScanRefreshesGaugeBody()
+            }
+        }
+
+        @MainActor
+        private func postScanRefreshesGaugeBody() async throws {
+            let fixture = try createTempTree(["payload.bin": 1])
+            defer { fixture.cleanup() }
+
+            let tree = FileTree()
+            tree.setRootPath(fixture.path)
+            tree.setMountTraversalScope(.selectedVolume)
+            var root = FileNode()
+            root.isDirectory = true
+            _ = tree.addNode(root, name: URL(fileURLWithPath: fixture.path).lastPathComponent)
+
+            let suite = "dirwiz.test.menu-bar-post-scan.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let state = AppState(defaults: defaults)
+            state.selectVolume(URL(fileURLWithPath: fixture.path, isDirectory: true))
+
+            await state.refreshStorageTrends(
+                tree: tree,
+                volumePath: fixture.path,
+                token: state.scanToken
+            )
+
+            let gauge = try #require(state.menuBarVolumeGauge)
+            #expect(gauge.totalBytes > 0)
+            #expect(gauge.availableBytes <= gauge.totalBytes)
+            #expect(state.lowSpacePolicyStates[fixture.path] != nil)
+            #expect(state.storageTrendHistory.count == 1)
+        }
+    }
+}
