@@ -79,11 +79,20 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     private var cachedColorsGeneration: UInt64 = .max
     private var cachedColorsLayoutIdentity: UInt64 = .max
 
-    /// Bumped every time `cachedLayout` is replaced or rescaled. The colour cache is keyed
-    /// on it as well as on `colorGeneration`: rect COUNT is not identity, and a relayout
-    /// that happens to produce the same number of rects would otherwise repaint the new
-    /// rects with the old rects' colours - which is exactly the grey wash that shipped.
+    /// Bumped every time `cachedLayout` is REPLACED. The colour cache is keyed on it as
+    /// well as on `colorGeneration`: rect COUNT is not identity, and a relayout that
+    /// happens to produce the same number of rects would otherwise repaint the new rects
+    /// with the old rects' colours - which is exactly the grey wash that shipped. A pure
+    /// proportional RESCALE deliberately does not bump it: scaling preserves count,
+    /// order, and the rect→node mapping exactly, so the resolved colours stay valid.
+    /// Bumping it per resize frame re-resolved every colour (~70ms on a volume scan) at
+    /// animation rate, which froze pane collapse animations for seconds on a busy CPU.
     private var layoutIdentity: UInt64 = 0
+
+    /// Debounces the exact background relayout during live size changes: the scale
+    /// preview repaints correctly every frame, and one squarify runs once the size
+    /// settles instead of one per animation frame.
+    private var layoutDebounceTask: Task<Void, Never>?
 
     /// Nodes inside a collapsed folder in Folders style: drawn as part of their ancestor,
     /// so a hit on them resolves upward to the block the user can actually see.
@@ -226,7 +235,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         // Fix 3: Immediately scale existing rects to fill the new viewport.
         // Coefs remain valid - they're computed in normalized [0,1] space per rect,
         // so uniform proportional scaling leaves them unchanged.
-        if !cachedLayout.isEmpty && !freshStart && sizeChanged {
+        let scalePreviewed = !cachedLayout.isEmpty && !freshStart && sizeChanged
+        if scalePreviewed {
             let sx = Float(viewportSize.width / currentViewportSize.width)
             let sy = Float(viewportSize.height / currentViewportSize.height)
             for i in cachedLayout.indices {
@@ -240,11 +250,35 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             cardHitGrid = nil // Same, and rebuilt from displayRects on the next instance build.
             cardHitRects = []
             instanceBufferDirty = true
-            layoutIdentity &+= 1
+            // Deliberately NOT bumping layoutIdentity: scaling preserves the rect→node
+            // mapping, so cached colours remain exactly right (see the property doc).
         }
 
         currentViewportSize = viewportSize
         pendingLayoutSize = viewportSize
+
+        // With a correct scale preview on screen, a live pane animation should cost ONE
+        // exact relayout when the size settles - not a snapshot copy plus a squarify per
+        // frame. Anything without a preview (first layout, tree/root/revision change via
+        // invalidateLayout) still launches immediately.
+        layoutDebounceTask?.cancel()
+        layoutDebounceTask = nil
+        if scalePreviewed {
+            layoutDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                self?.launchBackgroundLayout()
+            }
+            return
+        }
+        launchBackgroundLayout()
+    }
+
+    /// The exact layout pass: one snapshot, one detached squarify, one commit.
+    private func launchBackgroundLayout() {
+        guard let tree = currentFileTree, !tree.isEmpty else { return }
+        let viewportSize = currentViewportSize
+        guard viewportSize != .zero else { return }
 
         // Snapshot nodes ONCE - single lock acquisition, then layout runs lock-free.
         let snapshot = tree.nodesSnapshot()
@@ -318,6 +352,8 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     func invalidateLayout() {
         pendingLayoutTask?.cancel()
         pendingLayoutTask = nil
+        layoutDebounceTask?.cancel()
+        layoutDebounceTask = nil
         currentViewportSize = .zero
         lastScanTimeLayoutCompletedAt = nil
         lastScanTimeLayoutDuration = 0
