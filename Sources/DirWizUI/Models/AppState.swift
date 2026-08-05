@@ -129,12 +129,33 @@ public final class AppState {
         return selectedMountTraversalScope.persistenceIdentity(for: selectedVolume.path)
     }
 
+    /// The displayed tree belongs to whichever scan target produced it. Selecting a
+    /// different volume must not leave the previous one's table and treemap on screen:
+    /// the sidebar would offer "Scan Volume" and show a 2 TB drive's free space while the
+    /// content area still listed the boot volume's Users/System/Applications, which reads
+    /// as "this drive contains those folders". Scope is part of the identity, so an
+    /// individual "/" and All Volumes "/" are correctly treated as different owners.
+    ///
+    /// Deliberately does NOT cancel an in-flight scan: that scan owns the display it is
+    /// building, and its own token/session guards decide what it may publish.
+    private func releaseDisplayedTreeIfForeign() {
+        guard !scanProgress.isScanning else { return }
+        guard let tree = fileTree else { return }
+        guard let identity = selectedScanPersistenceIdentity,
+              tree.persistenceIdentity != identity else { return }
+        fileTree = nil
+        staleViewAsOf = nil
+        lastScanSummary = nil
+        resetForNewScan()
+    }
+
     /// Select one concrete volume and restore the default same-device boundary.
     public func selectVolume(_ url: URL) {
         selectedFolderTarget = nil
         selectedFolderVolumePath = nil
         selectedVolume = url
         selectedMountTraversalScope = .selectedVolume
+        releaseDisplayedTreeIfForeign()
     }
 
     /// Select a Finder/Shortcuts folder without inventing a second scan mode.
@@ -143,6 +164,7 @@ public final class AppState {
         selectedFolderVolumePath = containingVolumePath
         selectedVolume = url
         selectedMountTraversalScope = .selectedVolume
+        releaseDisplayedTreeIfForeign()
     }
 
     /// Select the explicit one-map overview. The scan root is `/`; scope, not path alone,
@@ -152,6 +174,7 @@ public final class AppState {
         selectedFolderVolumePath = nil
         selectedVolume = URL(fileURLWithPath: "/", isDirectory: true)
         selectedMountTraversalScope = .combinedVolumes
+        releaseDisplayedTreeIfForeign()
     }
 
     /// Active tab in detail area.

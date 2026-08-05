@@ -199,3 +199,47 @@ struct UnattendedScanConcurrencyTests {
         #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 1).workers == 1)
     }
 }
+
+/// Selecting a volume that has no scan of its own must not leave another volume's tree
+/// on screen: the sidebar offered "Scan Volume" for a 2 TB drive while the table and
+/// treemap still showed the boot volume's 4.8M items, reading as that drive's contents.
+@Suite("Displayed Tree Ownership Tests")
+struct DisplayedTreeOwnershipTests {
+
+    @Test("Selecting another volume releases the previous volume's tree")
+    @MainActor
+    func foreignTreeIsReleased() async throws {
+        let (root, cleanup) = try createTempTree(["a.txt": 10])
+        defer { cleanup() }
+        let tree = FileTree()
+        await FileScanner().scan(path: root, progress: ScanProgress(), tree: tree)
+
+        let suiteName = "dirwiz.test.ownership"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let state = AppState(defaults: defaults)
+
+        state.selectVolume(URL(fileURLWithPath: root))
+        state.fileTree = tree
+        state.lastScanSummary = "Scanned 1 items in 0.1s"
+        #expect(state.fileTree != nil)
+
+        // A different, never-scanned volume.
+        state.selectVolume(URL(fileURLWithPath: "/Volumes/SomeOtherDrive"))
+        #expect(state.fileTree == nil,
+                "the other volume's tree must not stay on screen as this one's contents")
+        #expect(state.lastScanSummary == nil,
+                "nor its completed-scan summary")
+
+        // Re-selecting the owner is free to publish its tree again.
+        state.selectVolume(URL(fileURLWithPath: root))
+        state.fileTree = tree
+        #expect(state.fileTree != nil)
+
+        // Scope is part of ownership: All Volumes is a different owner than individual "/".
+        state.selectCombinedVolumes()
+        #expect(state.fileTree == nil,
+                "an individual tree must not masquerade as the combined map")
+    }
+}
