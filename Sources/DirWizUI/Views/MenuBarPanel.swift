@@ -180,40 +180,76 @@ public struct MenuBarPanel: View {
                 Text(snapshot.livingViewStatus)
                     .lineLimit(1)
                 Spacer()
-                Text("Live")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(.quaternary, in: Capsule())
+                // The badge names the mode; the line beside it names the current reason.
+                // When the reason IS "Live" (idle and watching), the badge would just
+                // repeat it, so the dot and text carry it alone.
+                if snapshot.livingViewStatus != "Live" {
+                    Text("Live")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
     }
 
+    /// Three tiers instead of four buttons pushed to opposite edges: the one thing most
+    /// people want (open the app) is a full-width primary, the two things they might do
+    /// from here share an equal-width row, and the two housekeeping toggles sit quietly
+    /// in a footer. Equal widths and a single left edge remove the ragged gaps the
+    /// Spacer-separated version produced.
     private var actions: some View {
         VStack(spacing: 8) {
-            HStack {
-                Button("Open DirWiz", action: openDirWiz)
-                    .keyboardShortcut(.defaultAction)
-                Spacer()
-                Button(appState.scanProgress.isScanning ? "Scanning…" : "Scan Now") {
+            Button(action: openDirWiz) {
+                Label("Open DirWiz", systemImage: "macwindow")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+
+            HStack(spacing: 8) {
+                Button {
                     appState.startFullRescan()
+                } label: {
+                    Label(
+                        appState.scanProgress.isScanning ? "Scanning…" : "Scan Now",
+                        systemImage: "arrow.clockwise"
+                    )
+                    .frame(maxWidth: .infinity)
                 }
                 .disabled(appState.selectedVolume == nil || appState.scanProgress.isScanning)
-                Button("Take Checkpoint") { appState.takeSnapshot() }
-                    .disabled(appState.fileTree == nil || appState.temporalDiff.isSnapshotBuilding)
+
+                Button {
+                    appState.takeSnapshot()
+                } label: {
+                    Label("Checkpoint", systemImage: "camera")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(appState.fileTree == nil || appState.temporalDiff.isSnapshotBuilding)
             }
-            HStack {
-                Button(appState.liveRefreshPaused ? "Resume Watching" : "Pause Watching") {
+            .controlSize(.regular)
+
+            HStack(spacing: 0) {
+                Button {
                     appState.toggleLiveRefreshPaused()
+                } label: {
+                    Label(
+                        appState.liveRefreshPaused ? "Resume Watching" : "Pause Watching",
+                        systemImage: appState.liveRefreshPaused ? "play.fill" : "pause.fill"
+                    )
                 }
                 .disabled(appState.fileTree == nil)
-                Spacer()
-                Button("Quit DirWiz", role: .destructive, action: quit)
+                Spacer(minLength: 8)
+                Button("Quit", action: quit)
             }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .padding(.top, 2)
         }
-        .controlSize(.small)
     }
 }
 
