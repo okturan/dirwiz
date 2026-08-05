@@ -394,8 +394,8 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
       <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 5 14h6l-1 8 8-12h-6l1-8z"/></svg></div>
       <h3>Warm start</h3>
       <p>DirWiz saves the tree after every scan, then replays the FSEvents journal
-      and re-reads only folders that changed. On any doubt it quietly falls back
-      to a full cold scan.</p>
+      and re-reads only folders that changed - a 4.6M-file boot volume refreshes in
+      about a second. On any doubt it quietly falls back to a full cold scan.</p>
     </div>
     <div class="card rv" style="--d:.12s">
       <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="12" height="12" rx="2"/><rect x="8" y="8" width="12" height="12" rx="2"/></svg></div>
@@ -439,8 +439,11 @@ footer{border-top:1px solid var(--line);padding:32px 0 44px;background:var(--pap
     <div class="card rv" style="--d:.38s">
       <div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 4v5M16 4v5"/></svg></div>
       <h3>Mac-native controls</h3>
-      <p>The macOS menu bar has Find plus Back, Forward, Enclosing Folder, and Root. The window toolbar
-      puts recency heatmap, snapshot pinning, temporal diff, CSV/JSON export, and the legend one click away.</p>
+      <p>DirWiz lives in the menu bar now: disk gauge, free-space trend, and what's changing
+      right now, still watching after you close the window. The macOS menu bar has Find plus
+      Back, Forward, Enclosing Folder, and Root; the window toolbar
+      puts recency heatmap, snapshot pinning, temporal diff, CSV/JSON export, and the legend
+      one click away.</p>
     </div>
   </div>
 </section>
@@ -754,6 +757,10 @@ function dirColor(n, extMap){
 function folderLeafColor(rgb, containerDepth=0){
   return FOLDERS_DEPTH[containerDepth & 7];
 }
+/* black-or-white per depth, from relative luminance - the app measures contrast */
+const FOLDERS_LABEL_DARK = FOLDERS_DEPTH.map(
+  c => (0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]) > 150
+);
 
 /* ----- squarified treemap (Bruls et al.) ----- */
 function squarify(items, x, y, w, h, out){
@@ -798,7 +805,8 @@ function worstRatio(row,rowArea,side){
    - computeCoefs/addRidge: ported line-for-line from CushionTypes.swift
      (H = 0.40, F = 0.90 - the app's exact cushion constants).
    - The fragment shader is the app's CushionShaderSource.swift translated
-     Metal -> GLSL ES 3.0, both branches: cushion lighting AND card SDF,
+     Metal -> GLSL ES 3.0, both branches: cushion lighting AND the shipped
+     Folders card path (Fine Lines profile with the adaptive edge backbone),
      plus the same hover glow, selection brighten and sRGB curve.
    Nothing here imitates the app; it runs the app's math.
    ===================================================================== */
@@ -853,19 +861,29 @@ function makeCushionGL(){
     vec3 baseLinear = srgbToLinear(vColor.rgb);
     vec3 litColor; float edgeDist;
     if (uStyle > 0.5) {
-      float grad = clamp((px+py)*0.5, 0.0, 1.0);
-      litColor = baseLinear * mix(1.06, 0.88, grad);
+      litColor = baseLinear;
       vec2 halfSize = vRectSize*0.5;
       float minSide = min(vRectSize.x, vRectSize.y);
       float decorate = step(6.0, minSide);
-      float radius = decorate*min(6.0, minSide*0.12);
-      float inset  = decorate*min(2.0, minSide*0.06);
+      float radius = decorate*min(6.0, minSide*0.12)*0.35;
+      float inset  = decorate*min(2.0, minSide*0.06)*0.35;
+      inset = max(inset, 0.45*smoothstep(5.0, 8.0, minSide));
       vec2 p = (vRectPos-0.5)*vRectSize;
       vec2 b = max(halfSize-inset-radius, vec2(0.0));
       vec2 d = abs(p)-b;
       float sdf = length(max(d, vec2(0.0))) + min(max(d.x,d.y), 0.0) - radius;
       if (sdf > 0.0) discard;
       edgeDist = -sdf;
+      float lineRegime = smoothstep(7.0, 11.0, minSide);
+      float structuralBlend = smoothstep(16.0, 48.0, minSide);
+      float outlineWidth = mix(0.85, 0.65, structuralBlend);
+      float outlineOpacity = mix(0.50, 0.62, structuralBlend)*lineRegime;
+      vec3 outlineColor = mix(baseLinear*0.45, baseLinear*0.10, structuralBlend);
+      float oa = 1.0 - smoothstep(max(0.0, outlineWidth-0.45), outlineWidth+0.45, edgeDist);
+      litColor = mix(litColor, outlineColor, oa*outlineOpacity);
+      float microExtent = clamp(minSide*0.25, 0.75, 1.25);
+      float micro = step(3.0, minSide)*(1.0-lineRegime)*(1.0-smoothstep(0.0, microExtent, edgeDist));
+      litColor *= (1.0 - 0.30*micro);
     } else {
       float nx = -(2.0*vCoefs.x*px + vCoefs.y);
       float ny = -(2.0*vCoefs.z*py + vCoefs.w);
@@ -937,7 +955,8 @@ function makeCushionGL(){
       gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, count*13), gl.DYNAMIC_DRAW);
       gl.uniform1f(uHov, hoveredIdx); gl.uniform1f(uSel, -1);
       gl.uniform1f(uStyle, style);
-      gl.clearColor(0.12, 0.12, 0.14, 1);
+      if (style > 0.5) gl.clearColor(0, 0, 0, 0);
+      else gl.clearColor(0.12, 0.12, 0.14, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
     }
@@ -1001,12 +1020,24 @@ function makeTreemap(cfg){
       const rx = r.x+g, ry = r.y+g, rw = r.w-g*2, rh = r.h-g*2;
       if (rw<2 || rh<2) continue;
       if (n.children && rw>34 && rh>26 && depth<4){
-        const labelH = (!glr.ok && depth<1 && rw>100 && rh>68) ? 18 : 0;
-        entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:false,
-          col:dirColor(n,extMap), label: labelH?n.name:null, labelH, anc});
-        const inner = glr.ok ? 0 : 2;
-        place(n, rx+inner, ry+inner+labelH, rw-inner*2, rh-inner*2-labelH, depth+1,
-              anc.concat(n.id));
+        if (mapStyle===1){
+          /* the app's Folders geometry: the folder owns a depth-coloured panel, a
+             title row when legible, and a small Fine-Lines pad; children live in
+             its interior (CardNesting, in miniature) */
+          const titleH = (rw>=76 && rh>=56) ? 16 : 0;
+          const pad = 2;
+          entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:false, depth,
+            col:FOLDERS_DEPTH[depth&7], label:n.name, labelH:titleH, anc});
+          place(n, rx+pad, ry+pad+titleH, rw-pad*2, rh-pad*2-titleH, depth+1,
+                anc.concat(n.id));
+        } else {
+          const labelH = (!glr.ok && depth<1 && rw>100 && rh>68) ? 18 : 0;
+          entries.push({id:n.id, node:n, x:rx, y:ry, w:rw, h:rh, leaf:false, depth,
+            col:dirColor(n,extMap), label: labelH?n.name:null, labelH, anc});
+          const inner = glr.ok ? 0 : 2;
+          place(n, rx+inner, ry+inner+labelH, rw-inner*2, rh-inner*2-labelH, depth+1,
+                anc.concat(n.id));
+        }
       } else {
         const col = n.children ? dirColor(n,extMap) : hexRgb(extMap.get(n.ext)||FALLBACK);
         const v = ((n.id*2654435761)>>>16 & 255)/255*.14-.07;
@@ -1062,18 +1093,55 @@ function makeTreemap(cfg){
     }
     glr.render(glData, n, hoveredIdx, mapStyle);
     ctx.clearRect(0,0,W,H);
+    if (mapStyle===1){
+      /* folder panels beneath the GL leaves: card gaps and pads reveal the parent's
+         depth colour, exactly how the app's shader gap exposes the panel behind it */
+      for (const e of entries){
+        if (e.leaf) continue;
+        const d = disp.get(e.id);
+        if (!d || d.w<2 || d.h<2) continue;
+        ctx.fillStyle = rgbCss(e.col[0], e.col[1], e.col[2], 1);
+        ctx.fillRect(d.x, d.y, d.w, d.h);
+        ctx.strokeStyle = rgbCss(e.col[0]*.10|0, e.col[1]*.10|0, e.col[2]*.10|0, .62);
+        ctx.lineWidth = 0.65;
+        ctx.strokeRect(d.x+0.5, d.y+0.5, d.w-1, d.h-1);
+      }
+    }
     ctx.drawImage(glr.canvas, 0, 0, W, H);
-    /* app-style labels on tiles big enough to carry them */
+    if (mapStyle===1){
+      /* width-owning title rows, like the app: the name gets first claim, size only
+         when it cannot squeeze the name */
+      for (const e of entries){
+        if (e.leaf || !e.labelH) continue;
+        const d = disp.get(e.id);
+        if (!d || d.w<44) continue;
+        ctx.fillStyle = "rgba(12,16,26,.46)";
+        ctx.fillRect(d.x+1, d.y+1, d.w-2, 15);
+        ctx.font = "600 10px -apple-system, BlinkMacSystemFont, sans-serif";
+        const size = fmtGB(nodeSize(e.node));
+        const sizeW = d.w>=170 ? ctx.measureText(size).width : 0;
+        ctx.fillStyle = "rgba(255,255,255,.96)";
+        ctx.fillText(truncate(ctx, e.node.name, d.w-14-(sizeW?sizeW+8:0)), d.x+6, d.y+12);
+        if (sizeW){
+          ctx.fillStyle = "rgba(255,255,255,.72)";
+          ctx.fillText(size, d.x+d.w-6-sizeW, d.y+12);
+        }
+      }
+    }
+    /* app-style labels on tiles big enough to carry them; Folders picks black or
+       white from the depth colour the way the app measures contrast */
     for (const e of entries){
       if (!e.leaf) continue;
       const d = disp.get(e.id);
       if (d.w<96 || d.h<44) continue;
+      const dark = mapStyle===1 && FOLDERS_LABEL_DARK[(e.depth||0)&7];
       ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,.95)";
-      ctx.shadowColor="rgba(0,0,0,.55)"; ctx.shadowBlur=3;
+      ctx.fillStyle = dark ? "rgba(15,20,30,.92)" : "rgba(255,255,255,.95)";
+      ctx.shadowColor = dark ? "rgba(255,255,255,.45)" : "rgba(0,0,0,.55)";
+      ctx.shadowBlur = 3;
       ctx.fillText(truncate(ctx, e.node.name, d.w-14), d.x+7, d.y+15);
       ctx.font = "500 10px -apple-system, BlinkMacSystemFont, sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,.78)";
+      ctx.fillStyle = dark ? "rgba(15,20,30,.72)" : "rgba(255,255,255,.78)";
       ctx.fillText(fmtGB(nodeSize(e.node)), d.x+7, d.y+28);
       ctx.shadowBlur=0;
     }
@@ -1114,6 +1182,19 @@ function makeTreemap(cfg){
       if (!e.leaf){
         ctx.globalAlpha = alpha;
         ctx.beginPath(); rr(ctx,x,y,w,h,4);
+        if (mapStyle===1){
+          ctx.fillStyle = rgbCss(e.col[0],e.col[1],e.col[2],1); ctx.fill();
+          ctx.strokeStyle = rgbCss(e.col[0]*.1|0,e.col[1]*.1|0,e.col[2]*.1|0,.62);
+          ctx.lineWidth=0.75; ctx.stroke();
+          if (e.labelH && w>44){
+            ctx.fillStyle="rgba(12,16,26,.46)"; ctx.fillRect(x+1,y+1,w-2,15);
+            ctx.font="600 10px -apple-system, BlinkMacSystemFont, sans-serif";
+            ctx.fillStyle="rgba(255,255,255,.96)";
+            ctx.fillText(truncate(ctx, e.node.name, w-14), x+6, y+12);
+          }
+          ctx.globalAlpha = 1;
+          continue;
+        }
         ctx.fillStyle = rgbCss(e.col[0],e.col[1],e.col[2],.10); ctx.fill();
         ctx.strokeStyle = "rgba(90,110,150,.28)"; ctx.lineWidth=1; ctx.stroke();
         if (e.label && w>60){
@@ -1125,16 +1206,21 @@ function makeTreemap(cfg){
         ctx.globalAlpha = 1;
         continue;
       }
-      const c = e.col;
+      const c = mapStyle===1 ? folderLeafColor(e.col, e.depth||0) : e.col;
       ctx.globalAlpha = alpha;
       ctx.beginPath(); rr(ctx,x,y,w,h,Math.min(3,w/3,h/3));
       ctx.fillStyle = rgbCss(c[0],c[1],c[2],1); ctx.fill();
-      const g = ctx.createLinearGradient(x,y,x+w,y+h);   // cushion shading
-      g.addColorStop(0,"rgba(255,255,255,.34)");
-      g.addColorStop(.5,"rgba(255,255,255,.04)");
-      g.addColorStop(1,"rgba(0,0,0,.22)");
-      ctx.fillStyle = g; ctx.fill();
-      ctx.strokeStyle = "rgba(30,42,66,.25)"; ctx.lineWidth = 1; ctx.stroke();
+      if (mapStyle!==1){
+        const g = ctx.createLinearGradient(x,y,x+w,y+h);   // cushion shading
+        g.addColorStop(0,"rgba(255,255,255,.34)");
+        g.addColorStop(.5,"rgba(255,255,255,.04)");
+        g.addColorStop(1,"rgba(0,0,0,.22)");
+        ctx.fillStyle = g; ctx.fill();
+      }
+      ctx.strokeStyle = mapStyle===1
+        ? rgbCss(c[0]*.1|0,c[1]*.1|0,c[2]*.1|0,.62)
+        : "rgba(30,42,66,.25)";
+      ctx.lineWidth = mapStyle===1 ? 0.75 : 1; ctx.stroke();
       if (hovered === e.id){
         ctx.fillStyle = "rgba(255,255,255,.16)"; ctx.fill();
         ctx.strokeStyle = "rgba(22,48,94,.95)"; ctx.lineWidth = 1.6; ctx.stroke();
@@ -1192,7 +1278,7 @@ function makeTreemap(cfg){
       const b = document.createElement("button");
       b.textContent = label;
       b.style.cssText = "border:0;padding:4px 10px;border-radius:6px;cursor:pointer;background:transparent;color:#3d4557";
-      b.onclick = () => { mapStyle = val; paint(); renderMeta(); needsDraw = true; };
+      b.onclick = () => { mapStyle = val; layout(true); paint(); renderMeta(); needsDraw = true; };
       return b;
     };
     const b0 = mk("Cushions",0), b1 = mk("Folders",1);
@@ -1267,23 +1353,39 @@ function makeTreemap(cfg){
   function renderMeta(){
     if (!cfg.legend) return;
     cfg.legend.textContent="";
+    if (mapStyle===1){
+      /* Folders colours mean depth, not file type - show the app's outer-to-inner key */
+      const outer=document.createElement("span"); outer.className="chip";
+      outer.appendChild(document.createTextNode("outer"));
+      cfg.legend.appendChild(outer);
+      FOLDERS_DEPTH.forEach((c,i)=>{
+        const chip=document.createElement("span"); chip.className="chip";
+        chip.title = "depth " + i;
+        const dot=document.createElement("i");
+        dot.style.background=rgbCss(c[0],c[1],c[2],1);
+        chip.appendChild(dot);
+        cfg.legend.appendChild(chip);
+      });
+      const inner=document.createElement("span"); inner.className="chip";
+      inner.appendChild(document.createTextNode("inner · colors show folder depth"));
+      cfg.legend.appendChild(inner);
+    } else {
     ranked.slice(0,7).forEach(([ext,sz])=>{
       const chip=document.createElement("span"); chip.className="chip";
       chip.title = fmtGB(sz);
       const dot=document.createElement("i");
       const raw=hexRgb(extMap.get(ext));
-      const shown=mapStyle===1 ? folderLeafColor(raw,0) : raw;
-      dot.style.background=rgbCss(shown[0],shown[1],shown[2],1);
+      dot.style.background=rgbCss(raw[0],raw[1],raw[2],1);
       chip.appendChild(dot); chip.appendChild(document.createTextNode(ext));
       cfg.legend.appendChild(chip);
     });
     const o=document.createElement("span"); o.className="chip";
     const od=document.createElement("i");
     const otherRaw=hexRgb(FALLBACK);
-    const otherShown=mapStyle===1 ? folderLeafColor(otherRaw,0) : otherRaw;
-    od.style.background=rgbCss(otherShown[0],otherShown[1],otherShown[2],1);
+    od.style.background=rgbCss(otherRaw[0],otherRaw[1],otherRaw[2],1);
     o.appendChild(od); o.appendChild(document.createTextNode("other"));
     cfg.legend.appendChild(o);
+    }
     const live=document.createElement("span"); live.className="live";
     const dot=document.createElement("i");
     live.appendChild(dot); live.appendChild(document.createTextNode("real scan data, drifting live"));
