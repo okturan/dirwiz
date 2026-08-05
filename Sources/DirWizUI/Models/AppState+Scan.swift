@@ -1345,9 +1345,11 @@ extension AppState {
         bundleSizingTask?.cancel()
         isBundleSizingRunning = true
         let saveCache = coldCacheSave
+        let unattended = currentScanIsUnattended
 
         bundleSizingTask = Task.detached(priority: .utility) {
-            let report = await scanner.resolveDeferredBundleSizes(in: tree)
+            let report = await scanner.resolveDeferredBundleSizes(
+                in: tree, unattended: unattended)
             let shouldSaveCache = await MainActor.run { () -> Bool in
                 guard self.scanToken == token else { return false }
                 self.isBundleSizingRunning = false

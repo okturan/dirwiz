@@ -704,7 +704,13 @@ public final class FileScanner: @unchecked Sendable {
     /// The initial scanner pass can treat bundles as zero-sized opaque leaves to make the
     /// tree usable sooner. This method walks only those bundle leaves, computes their
     /// recursive sizes, then applies exact deltas to the tree's ancestor totals.
-    public func resolveDeferredBundleSizes(in tree: FileTree) async -> BundleSizeResolutionReport {
+    /// - Parameter unattended: matches the owning scan. Bundle sizing has its own worker
+    ///   pool, so an unattended refresh must cap it too or the pass reintroduces the
+    ///   multi-core spike the scan cap just removed.
+    public func resolveDeferredBundleSizes(
+        in tree: FileTree,
+        unattended: Bool = false
+    ) async -> BundleSizeResolutionReport {
         let workItems = tree.bundleSizeCandidates()
 
         guard !workItems.isEmpty else {
@@ -726,10 +732,12 @@ public final class FileScanner: @unchecked Sendable {
         let nextWorkIndex = Mutex(0)
         let totals = Mutex(ResolutionTotals())
         let defaultWorkerCount = min(4, max(2, ProcessInfo.processInfo.activeProcessorCount / 2))
-        let workerCount = ProcessInfo.processInfo.environment["DIRWIZ_BUNDLE_WORKERS"]
+        let configuredWorkerCount = ProcessInfo.processInfo.environment["DIRWIZ_BUNDLE_WORKERS"]
             .flatMap(Int.init)
             .map { max(1, $0) }
             ?? defaultWorkerCount
+        let workerCount = Self.scanConcurrency(
+            unattended: unattended, attendedWorkerCount: configuredWorkerCount).workers
 
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<min(workerCount, workItems.count) {
