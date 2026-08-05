@@ -202,13 +202,15 @@ public struct MenuBarPanel: View {
     /// in a footer. Equal widths and a single left edge remove the ragged gaps the
     /// Spacer-separated version produced.
     private var actions: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
+            // Prominence comes from the tint, not from bulk. At `.large` these actions
+            // shouted over a panel whose content is deliberately quiet captions.
             Button(action: openDirWiz) {
                 Label("Open DirWiz", systemImage: "macwindow")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .controlSize(.small)
             .keyboardShortcut(.defaultAction)
 
             HStack(spacing: 8) {
@@ -231,7 +233,7 @@ public struct MenuBarPanel: View {
                 }
                 .disabled(appState.fileTree == nil || appState.temporalDiff.isSnapshotBuilding)
             }
-            .controlSize(.regular)
+            .controlSize(.small)
 
             HStack(spacing: 0) {
                 Button {
