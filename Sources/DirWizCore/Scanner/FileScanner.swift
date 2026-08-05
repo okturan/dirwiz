@@ -587,6 +587,16 @@ public struct SubtreeRescanOptions: Equatable, Sendable {
         priority: .utility,
         resetsCancellation: false
     )
+
+    /// The living view's automatic apply. Nobody is waiting on it - the displayed tree
+    /// stays usable throughout - so it must not contend with the user's own work the way
+    /// `.interactive` does. Running background applies at `.interactive` made DirWiz take
+    /// ~226% CPU while a build churned the disk (sampled live); the same splice at
+    /// utility QoS yields to the build instead of racing it.
+    public static let background = SubtreeRescanOptions(
+        priority: .utility,
+        resetsCancellation: true
+    )
 }
 
 // MARK: - FileScanner
@@ -1456,7 +1466,12 @@ public final class FileScanner: @unchecked Sendable {
             Task { await MainActor.run { progress.publishCounters() } }
         }
 
-        let workerCount = min(Self.defaultRescanWorkerCount(), max(1, directoryPlans.count))
+        // Background tiers deliberately take half the pool: they are unattended, and
+        // leaving cores free matters more than finishing a live splice a second sooner.
+        let workerBudget = priority == .utility
+            ? max(1, Self.defaultRescanWorkerCount() / 2)
+            : Self.defaultRescanWorkerCount()
+        let workerCount = min(workerBudget, max(1, directoryPlans.count))
         let dispatchQoS: DispatchQoS.QoSClass = priority == .utility
             ? .utility
             : .userInitiated

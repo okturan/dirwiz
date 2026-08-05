@@ -24,6 +24,18 @@ struct BackgroundEfficiencyTests {
         #expect(FSEventsMonitor.parentDirectory(of: "/top.txt") == "/")
     }
 
+    /// The living view's automatic apply is unattended work and must not contend with
+    /// the user at interactive priority - that is what made a background DirWiz take
+    /// ~226% CPU beside a build.
+    @Test("The living view's automatic apply is unattended work")
+    func backgroundApplyIsUnattended() {
+        #expect(SubtreeRescanOptions.background.priority == .utility)
+        #expect(SubtreeRescanOptions.background.resetsCancellation,
+                "an automatic apply starts a new logical rescan, unlike a trailing tier")
+        #expect(SubtreeRescanOptions.interactive.priority == .interactive,
+                "an explicit warm-start patch keeps interactive priority")
+    }
+
     /// Derived work behind the living view is throttled, but never at the cost of
     /// showing the user stale data they are actually looking at.
     @Test("Derived live work is throttled unless it is needed now")

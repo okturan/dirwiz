@@ -263,7 +263,10 @@ extension AppState {
         let scanner = FileScanner()
         let progress = ScanProgress()
         let report = await scanner.rescanSubtrees(
-            targets, tree: tree, progress: progress, shallowTargets: shallowTargets
+            targets, tree: tree, progress: progress, shallowTargets: shallowTargets,
+            // Unattended work: utility QoS and half the worker pool, so a live apply
+            // yields to whatever the user is actually doing (see `.background`).
+            options: .background
         )
 
         // A new scan (warm or cold) superseded this apply while the splice was running.
