@@ -163,6 +163,11 @@ public final class AppState {
             if activeTab == .hardlinks && hardlinkGroupsNeedRefresh {
                 refreshHardlinkGroups()
             }
+            if activeTab == .insights && pendingSpeculativeAnalyses {
+                pendingSpeculativeAnalyses = false
+                startSpaceAnalysis()
+                queryAPFSInfo()
+            }
         }
     }
 
@@ -179,6 +184,10 @@ public final class AppState {
     /// whole attempt so a warm patch that abandons into a cold scan keeps the same
     /// character, and read by `beginColdScan` to pick the scanner's QoS and worker count.
     @ObservationIgnored var currentScanIsUnattended = false
+
+    /// A self-started scan skipped the speculative Insights analyses. Opening the tab
+    /// runs them, exactly like the deferred hardlink walk.
+    @ObservationIgnored var pendingSpeculativeAnalyses = false
 
     /// Per-extension-name stats for the Extensions tab (individual file types).
     public var fileTypeStats: [FileTypeStat] = []

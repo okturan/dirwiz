@@ -189,12 +189,13 @@ struct UnattendedScanConcurrencyTests {
         #expect(attended.workers == 8, "the user is watching an explicit scan")
         #expect(attended.qos == .userInitiated)
 
+        // A HARD cap, not a fraction: QoS sets priority, not core count, so on an idle
+        // machine a fractional pool still saturated every core.
         let unattended = FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 8)
-        #expect(unattended.workers == 4, "a self-started refresh takes half the pool")
+        #expect(unattended.workers == 2, "a self-started refresh stays near one core")
         #expect(unattended.qos == .utility)
-
-        // Never starves itself down to a single worker on small pools.
-        #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 2).workers == 2)
-        #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 1).workers == 2)
+        #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 16).workers == 2,
+                "the cap must not scale with the machine")
+        #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 1).workers == 1)
     }
 }

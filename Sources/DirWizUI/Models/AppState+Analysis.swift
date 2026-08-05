@@ -433,6 +433,16 @@ extension AppState {
         await refreshStorageTrends(tree: tree, volumePath: volumePath, token: token)
         guard scanToken == token else { return }
 
+        // After a SELF-STARTED scan these are speculative: nothing is on screen that
+        // needs them unless the user opens Insights. Running two parallel full-tree
+        // analyzers plus the APFS query on every launch refresh is what kept a
+        // backgrounded DirWiz above one core even after the scan itself was capped.
+        // `startSpaceAnalysis()`/`queryAPFSInfo()` still run them on demand.
+        guard !currentScanIsUnattended else {
+            pendingSpeculativeAnalyses = true
+            return
+        }
+
         beginSpaceAnalysis(tree: tree, token: token)
         await spaceAnalysisTask?.value
         guard scanToken == token else { return }

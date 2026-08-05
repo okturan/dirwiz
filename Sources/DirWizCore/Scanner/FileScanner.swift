@@ -1844,7 +1844,12 @@ public final class FileScanner: @unchecked Sendable {
         attendedWorkerCount: Int
     ) -> (workers: Int, qos: DispatchQoS.QoSClass) {
         guard unattended else { return (max(1, attendedWorkerCount), .userInitiated) }
-        return (max(2, attendedWorkerCount / 2), .utility)
+        // A HARD cap, not a fraction. QoS sets priority, not core count: on an otherwise
+        // idle machine `.utility` work still happily saturates every core, which is how a
+        // self-started refresh kept showing 300%+. Two workers keeps an unattended scan
+        // near one core while `getattrlistbulk` latency (not core count) remains the
+        // limiting factor, so the scan still finishes in reasonable time.
+        return (min(2, max(1, attendedWorkerCount)), .utility)
     }
 
     private static func defaultRescanWorkerCount() -> Int {
