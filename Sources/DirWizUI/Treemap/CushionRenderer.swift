@@ -657,8 +657,41 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     // MARK: - MTKViewDelegate
 
+    /// Presents inside the current CATransaction when the view asks for it.
+    ///
+    /// With `presentsWithTransaction`, the drawable must NOT be presented by the command
+    /// buffer: it is presented by hand after the GPU work is scheduled, which is what
+    /// puts the Metal content in the same transaction as the AppKit/SwiftUI layout
+    /// around it. Without this the map and its labels visibly move at different paces
+    /// while a pane animates, because the two are committed independently.
+    private static func present(
+        _ drawable: CAMetalDrawable,
+        with commandBuffer: MTLCommandBuffer,
+        view: MTKView
+    ) {
+        if view.presentsWithTransaction {
+            commandBuffer.commit()
+            commandBuffer.waitUntilScheduled()
+            drawable.present()
+        } else {
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+        }
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // Will recompute layout on next draw.
+        // A size change is NOT a "handle it on the next draw" event. This view is
+        // on-demand (`isPaused` + `enableSetNeedsDisplay`), so deferring meant the map
+        // kept painting at its old size until some later frame happened to run - which
+        // is exactly the pane-collapse lag where the treemap stays large for seconds
+        // while the rest of the window has already moved. Rescale and draw NOW, in the
+        // same beat as the surrounding view tree.
+        let scale = view.window?.backingScaleFactor ?? 2.0
+        guard scale > 0, size.width > 0, size.height > 0 else { return }
+        recomputeLayoutIfNeeded(
+            viewportSize: CGSize(width: size.width / scale, height: size.height / scale)
+        )
+        view.draw()
     }
 
     func draw(in view: MTKView) {
@@ -670,7 +703,15 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         }
 
         let result = frameSemaphore.wait(timeout: .now() + .milliseconds(16))
-        if result == .timedOut { return }
+        if result == .timedOut {
+            // A dropped frame must not become a PERMANENTLY stale one. This view only
+            // draws on demand, so returning without re-arming left the previous (often
+            // wrong-sized) content on screen until an unrelated event happened to
+            // request a draw - the "graph takes a while getting smaller" symptom under
+            // a busy CPU. Ask for another pass instead.
+            view.needsDisplay = true
+            return
+        }
 
         let viewportSize = view.drawableSize
         let backingScaleFactor = view.window?.backingScaleFactor ?? 2.0
@@ -698,8 +739,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 return
             }
             encoder.endEncoding()
-            commandBuffer.present(drawable)
-            commandBuffer.commit()
+            Self.present(drawable, with: commandBuffer, view: view)
             currentBufferIndex = (currentBufferIndex + 1) % maxFramesInFlight
             return
         }
@@ -768,8 +808,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: instanceCount)
 
         encoder.endEncoding()
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+        Self.present(drawable, with: commandBuffer, view: view)
         currentBufferIndex = (currentBufferIndex + 1) % maxFramesInFlight
     }
 
