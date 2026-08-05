@@ -155,7 +155,24 @@ public final class AppState {
     }
 
     /// Active tab in detail area.
-    public var activeTab: DetailTab = .treeView
+    public var activeTab: DetailTab = .treeView {
+        didSet {
+            guard activeTab != oldValue else { return }
+            // Living-view splices defer the whole-tree hardlink walk (see
+            // `LiveDerivedWorkPolicy`); opening the tab is what makes it needed now.
+            if activeTab == .hardlinks && hardlinkGroupsNeedRefresh {
+                refreshHardlinkGroups()
+            }
+        }
+    }
+
+    /// A live splice mutated the tree while the deferred hardlink walk was throttled,
+    /// so the displayed groups are older than the tree. They remain path-keyed and
+    /// therefore still meaningful - deliberately NOT cleared, which would read as a
+    /// definitive "no hardlinks on this volume" (the bug_002 shape).
+    @ObservationIgnored var hardlinkGroupsNeedRefresh = false
+    @ObservationIgnored var lastHardlinkRefreshAt: CFAbsoluteTime?
+    @ObservationIgnored var lastLiveCacheSaveAt: CFAbsoluteTime?
 
     /// Per-extension-name stats for the Extensions tab (individual file types).
     public var fileTypeStats: [FileTypeStat] = []

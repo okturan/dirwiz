@@ -23,6 +23,69 @@ struct BackgroundEfficiencyTests {
         #expect(FSEventsMonitor.parentDirectory(of: "/a/b/c.txt") == "/a/b")
         #expect(FSEventsMonitor.parentDirectory(of: "/top.txt") == "/")
     }
+
+    /// Derived work behind the living view is throttled, but never at the cost of
+    /// showing the user stale data they are actually looking at.
+    @Test("Derived live work is throttled unless it is needed now")
+    func derivedWorkThrottle() {
+        let now: CFAbsoluteTime = 1_000_000
+
+        // First run always proceeds - nothing has been computed yet.
+        #expect(LiveDerivedWorkPolicy.shouldRun(
+            lastRunAt: nil, now: now,
+            minimumInterval: LiveDerivedWorkPolicy.cacheSaveMinimumInterval))
+
+        // A splice seconds later must not redo it.
+        #expect(!LiveDerivedWorkPolicy.shouldRun(
+            lastRunAt: now - 10, now: now,
+            minimumInterval: LiveDerivedWorkPolicy.cacheSaveMinimumInterval))
+
+        // Being on screen always wins over the interval.
+        #expect(LiveDerivedWorkPolicy.shouldRun(
+            lastRunAt: now - 10, now: now,
+            minimumInterval: LiveDerivedWorkPolicy.hardlinkRefreshMinimumInterval,
+            isNeededNow: true))
+
+        // The interval does elapse.
+        #expect(LiveDerivedWorkPolicy.shouldRun(
+            lastRunAt: now - LiveDerivedWorkPolicy.cacheSaveMinimumInterval, now: now,
+            minimumInterval: LiveDerivedWorkPolicy.cacheSaveMinimumInterval))
+    }
+
+    /// The throttle must not resurrect bug_002: deferring the walk keeps the existing
+    /// path-keyed groups on screen rather than clearing them into a false "none".
+    @Test("A throttled hardlink refresh keeps groups and reruns when the tab opens")
+    @MainActor
+    func throttledHardlinkRefreshKeepsGroups() async throws {
+        let (root, cleanup) = try createTempTree(["a.txt": 10, "b.txt": 20])
+        defer { cleanup() }
+        let scanner = FileScanner()
+        let tree = FileTree()
+        await scanner.scan(path: root, progress: ScanProgress(), tree: tree)
+
+        let suiteName = "dirwiz.test.hlthrottle"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let state = AppState(defaults: defaults)
+        state.fileTree = tree
+
+        let existing = [HardlinkGroup(inode: 7, device: 1, fileSize: 10, paths: [root + "/a.txt"])]
+        state.hardlink.hardlinkGroups = existing
+        state.lastHardlinkRefreshAt = CFAbsoluteTimeGetCurrent()
+        state.activeTab = .treeView
+
+        state.refreshHardlinkGroups(throttled: true)
+        #expect(state.hardlink.hardlinkGroups.count == 1,
+                "a throttled refresh must not clear the visible groups")
+        #expect(state.hardlinkGroupsNeedRefresh,
+                "the deferral must be recorded so opening the tab recomputes")
+
+        // Opening the tab is 'needed now' and must recompute.
+        state.activeTab = .hardlinks
+        #expect(!state.hardlinkGroupsNeedRefresh,
+                "opening the Hardlinks tab must clear the deferral and rerun the walk")
+    }
 }
 
 extension AppSupportEnvSuites {

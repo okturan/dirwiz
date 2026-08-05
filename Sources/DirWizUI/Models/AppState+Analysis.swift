@@ -311,10 +311,23 @@ extension AppState {
         fsChanges = []
         fsEventsMonitor?.clearChanges()
 
-        do {
-            try TreeCache.save(tree: tree, lastEventId: eventIdBeforeSplice)
-        } catch {
-            log.error("TreeCache save failed after applying accumulated changes: \(error.localizedDescription, privacy: .public)")
+        // Re-serializing and checksumming the whole tree after every ~10 second splice
+        // was the single largest background cost measured (~650 ms of CPU per apply on
+        // a 4.6M-item volume). Skipping a save leaves the previous atomic cache and its
+        // OLDER event id in place, so the next launch simply replays a wider window -
+        // idempotent by design, and never advances the horizon past real work.
+        let now = CFAbsoluteTimeGetCurrent()
+        if LiveDerivedWorkPolicy.shouldRun(
+            lastRunAt: lastLiveCacheSaveAt,
+            now: now,
+            minimumInterval: LiveDerivedWorkPolicy.cacheSaveMinimumInterval
+        ) {
+            do {
+                try TreeCache.save(tree: tree, lastEventId: eventIdBeforeSplice)
+                lastLiveCacheSaveAt = now
+            } catch {
+                log.error("TreeCache save failed after applying accumulated changes: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         // A living-view splice is not a scan. Keep `lastScanSummary` and `scanProgress`
@@ -362,8 +375,27 @@ extension AppState {
     /// it runs automatically after every scan completion and tree mutation
     /// (always-on-hardlinks) instead of behind a button. Token-guarded like every other
     /// analysis so a stale run can't clobber a newer tree's results.
-    public func refreshHardlinkGroups() {
+    /// - Parameter throttled: called from the post-mutation path, where a living-view
+    ///   splice happens every few seconds. The whole-tree walk then runs only when the
+    ///   Hardlinks tab is actually being viewed, or once the interval has elapsed;
+    ///   otherwise the existing (path-keyed, still meaningful) groups stay on screen and
+    ///   `hardlinkGroupsNeedRefresh` makes opening the tab recompute them.
+    public func refreshHardlinkGroups(throttled: Bool = false) {
         guard let tree = fileTree, !tree.isEmpty else { return }
+        if throttled {
+            let isVisible = activeTab == .hardlinks
+            guard LiveDerivedWorkPolicy.shouldRun(
+                lastRunAt: lastHardlinkRefreshAt,
+                now: CFAbsoluteTimeGetCurrent(),
+                minimumInterval: LiveDerivedWorkPolicy.hardlinkRefreshMinimumInterval,
+                isNeededNow: isVisible
+            ) else {
+                hardlinkGroupsNeedRefresh = true
+                return
+            }
+        }
+        hardlinkGroupsNeedRefresh = false
+        lastHardlinkRefreshAt = CFAbsoluteTimeGetCurrent()
         hardlinkTask?.cancel()
         hardlinkToken &+= 1
         let token = hardlinkToken
@@ -494,7 +526,10 @@ extension AppState {
 
         scanProgress.publishCounters(forceLayoutRevision: true)
         if scheduleDerivedAnalyses {
-            refreshHardlinkGroups()
+            // Throttled here specifically: this is the every-few-seconds living-view
+            // mutation path. Scan completion (AppState+Scan.swift) still refreshes
+            // unthrottled, so a finished scan always shows current hardlink groups.
+            refreshHardlinkGroups(throttled: true)
         }
 
         // Candidate paths may have just been trashed. A stale candidate offering to verify
