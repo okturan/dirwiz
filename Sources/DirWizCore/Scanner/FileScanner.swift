@@ -1835,6 +1835,18 @@ public final class FileScanner: @unchecked Sendable {
     /// (`DIRWIZ_SCAN_WORKERS`, defaulting to 4–6 based on core count) - reused here so
     /// Phase A's across-roots concurrency is governed by the one existing tunable knob
     /// rather than a second, uncoordinated one.
+    /// Worker pool and QoS for one cold scan. Unattended scans (launch refresh, volume
+    /// reconciliation, availability recovery) take half the pool at utility QoS so a
+    /// self-started refresh cannot saturate the machine; an explicit Scan Volume / Full
+    /// Rescan keeps the full pool because the user is watching the progress bar.
+    static func scanConcurrency(
+        unattended: Bool,
+        attendedWorkerCount: Int
+    ) -> (workers: Int, qos: DispatchQoS.QoSClass) {
+        guard unattended else { return (max(1, attendedWorkerCount), .userInitiated) }
+        return (max(2, attendedWorkerCount / 2), .utility)
+    }
+
     private static func defaultRescanWorkerCount() -> Int {
         let defaultWorkerCount = min(6, max(4, ProcessInfo.processInfo.activeProcessorCount))
         return ProcessInfo.processInfo.environment["DIRWIZ_SCAN_WORKERS"]
@@ -1919,12 +1931,18 @@ public final class FileScanner: @unchecked Sendable {
     /// `publishesTerminalProgress` defaults to the standalone scanner contract. AppState passes
     /// `false` so its durable ownership and displayed-tree handoff can finish before the shared UI
     /// exposes completion; final counters, elapsed time, and cancellation still publish normally.
+    /// - Parameter unattended: nobody is waiting on this scan (an automatic launch
+    ///   refresh, not a button press). It then takes half the worker pool at utility
+    ///   QoS. A launch refresh at full tilt is what made a backgrounded DirWiz sit at
+    ///   130-450% CPU for tens of seconds; an explicit Scan Volume / Full Rescan still
+    ///   runs at full speed because the user is watching it.
     public func scan(
         path: String,
         progress: ScanProgress,
         tree: FileTree,
         estimatedItemsHint: Int = 0,
-        publishesTerminalProgress: Bool = true
+        publishesTerminalProgress: Bool = true,
+        unattended: Bool = false
     ) async {
         // Reset cancellation so a scanner instance can be reused after cancel().
         cancelState.withLock { $0 = false }
@@ -2046,10 +2064,15 @@ public final class FileScanner: @unchecked Sendable {
         let defaultWorkerCount = isNetworkFS
             ? 4
             : min(8, max(4, ProcessInfo.processInfo.activeProcessorCount))
-        let workerCount = ProcessInfo.processInfo.environment["DIRWIZ_SCAN_WORKERS"]
+        let attendedWorkerCount = ProcessInfo.processInfo.environment["DIRWIZ_SCAN_WORKERS"]
             .flatMap(Int.init)
             .map { max(1, $0) }
             ?? defaultWorkerCount
+        // Unattended refreshes leave cores for whoever is actually using the machine.
+        let concurrency = Self.scanConcurrency(
+            unattended: unattended, attendedWorkerCount: attendedWorkerCount)
+        let workerCount = concurrency.workers
+        let scanQoS = concurrency.qos
         let rawFilesystemForScan = filesystem as? RealFilesystemProvider
         let deferredBuilder = rawFilesystemForScan != nil && deferTreeMaterialization
             ? DeferredTreeBuilder()
@@ -2091,7 +2114,7 @@ public final class FileScanner: @unchecked Sendable {
             let group = DispatchGroup()
             for _ in 0..<workerCount {
                 group.enter()
-                DispatchQueue.global(qos: .userInitiated).async {
+                DispatchQueue.global(qos: scanQoS).async {
                     let rawFilesystem = rawFilesystemForScan
                     let rawBuffer = rawFilesystem.map { _ in
                         UnsafeMutableRawPointer.allocate(
@@ -2131,7 +2154,7 @@ public final class FileScanner: @unchecked Sendable {
                     group.leave()
                 }
             }
-            group.notify(queue: .global(qos: .userInitiated)) {
+            group.notify(queue: .global(qos: scanQoS)) {
                 continuation.resume()
             }
         }

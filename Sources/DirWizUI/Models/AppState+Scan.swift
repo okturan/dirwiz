@@ -305,7 +305,8 @@ extension AppState {
             mountTraversalScope: .selectedVolume,
             runPostScanAnalyses: true,
             forceCold: false,
-            preloadedCache: cached
+            preloadedCache: cached,
+            unattended: true
         )
     }
 
@@ -354,7 +355,8 @@ extension AppState {
                 mountTraversalScope: .selectedVolume,
                 runPostScanAnalyses: true,
                 forceCold: true,
-                forceColdReason: "\(reason.logDescription); warm start disabled"
+                forceColdReason: "\(reason.logDescription); warm start disabled",
+                unattended: true
             )
             return
         }
@@ -366,7 +368,8 @@ extension AppState {
                 mountTraversalScope: .selectedVolume,
                 runPostScanAnalyses: true,
                 forceCold: false,
-                preloadedCache: cached
+                preloadedCache: cached,
+                unattended: true
             )
             publishCachedTree(cached, for: volumeURL)
 
@@ -376,7 +379,8 @@ extension AppState {
                 mountTraversalScope: .selectedVolume,
                 runPostScanAnalyses: true,
                 forceCold: true,
-                forceColdReason: "\(reason.logDescription); fallback had no cached scan"
+                forceColdReason: "\(reason.logDescription); fallback had no cached scan",
+                unattended: true
             )
 
         case .rejected(let cacheReason):
@@ -385,7 +389,8 @@ extension AppState {
                 mountTraversalScope: .selectedVolume,
                 runPostScanAnalyses: true,
                 forceCold: true,
-                forceColdReason: "\(reason.logDescription); \(cacheReason)"
+                forceColdReason: "\(reason.logDescription); \(cacheReason)",
+                unattended: true
             )
         }
     }
@@ -411,13 +416,18 @@ extension AppState {
     /// `scanProgress` with its own fresh instance first. New scan-adjacent flows must
     /// preserve this pairing (never bump `scanSession.invalidate()` without republishing
     /// `scanProgress` in the same synchronous step) and add a `ScanSupervisionTests` case.
+    /// - Parameter unattended: this scan started by itself (launch refresh, volume
+    ///   reconciliation, availability recovery) rather than from a button. It then runs
+    ///   at utility QoS on half the worker pool - a launch refresh at full tilt is what
+    ///   put a backgrounded DirWiz at 130-450% CPU for tens of seconds.
     private func startScan(
         volumeURL: URL,
         mountTraversalScope requestedMountTraversalScope: MountTraversalScope,
         runPostScanAnalyses shouldRunPostScanAnalyses: Bool,
         forceCold: Bool,
         forceColdReason: String? = nil,
-        preloadedCache: TreeCache.Payload? = nil
+        preloadedCache: TreeCache.Payload? = nil,
+        unattended: Bool = false
     ) {
         // Symmetric with `canStartHeavyTask(.applyChanges)` requiring `!isScanning`:
         // `applyAccumulatedChanges` splices the live tree with its own untracked scratch
@@ -426,6 +436,10 @@ extension AppState {
         // user-initiated, bounded window. The user's click is simply a no-op; nothing to
         // repair since nothing here gets published.
         guard !isApplyingChanges else { return }
+
+        // Held for the whole attempt so a warm patch that later abandons into a cold
+        // scan inherits the same attended/unattended character it started with.
+        currentScanIsUnattended = unattended
 
         let mountTraversalScope = MountTraversalScope.resolved(
             requested: requestedMountTraversalScope,
@@ -1195,6 +1209,7 @@ extension AppState {
         coldFallbackReason: String? = nil,
         preservedExploration: ExplorationCapture? = nil
     ) {
+        let unattended = currentScanIsUnattended
         scanSupervisionTrace.coldFallbackReason = coldFallbackReason
         // Captured before the scan starts: any filesystem activity on this volume from
         // here on is exactly what the *next* warm start needs to replay.
@@ -1233,7 +1248,8 @@ extension AppState {
                 progress: scanProgress,
                 tree: tree,
                 estimatedItemsHint: staleItemCountHint,
-                publishesTerminalProgress: false
+                publishesTerminalProgress: false,
+                unattended: unattended
             )
             let handoff = await MainActor.run { () -> (scanCompleted: Bool, sizingTask: Task<Void, Never>?) in
                 guard self.scanToken == token else { return (false, nil) }

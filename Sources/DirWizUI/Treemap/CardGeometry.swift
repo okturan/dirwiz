@@ -552,7 +552,11 @@ public enum TreemapLabelBudget {
     static let minimumContainers = 24
     static let maximumContainers = 400
     static let minimumLeaves = 70
-    static let maximumLeaves = 600
+    /// Deliberately far below the container ceiling. Folder titles are the structural
+    /// naming the map needs (and only exist in Folders style), while leaf labels are a
+    /// long tail of small files - and every label is a SwiftUI view rebuilt while a pane
+    /// animates, which is exactly the per-frame cost the resize work just removed.
+    static let maximumLeaves = 250
 
     public static func budgets(
         viewportWidth: Float,

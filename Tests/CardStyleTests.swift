@@ -226,6 +226,8 @@ struct CardStyleTests {
                     .containers == TreemapLabelBudget.maximumContainers)
         #expect(TreemapLabelBudget.budgets(viewportWidth: 20000, viewportHeight: 20000)
                     .leaves == TreemapLabelBudget.maximumLeaves)
+        #expect(TreemapLabelBudget.maximumLeaves < TreemapLabelBudget.maximumContainers,
+                "leaf labels are a long tail; folder titles are the structural naming")
 
         // Degenerate sizes must not produce a negative or zero budget.
         let empty = TreemapLabelBudget.budgets(viewportWidth: 0, viewportHeight: 0)

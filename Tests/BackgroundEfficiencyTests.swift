@@ -177,3 +177,24 @@ extension AppSupportEnvSuites {
         }
     }
 }
+
+/// Cold scans that start by themselves must not saturate the machine. A launch refresh
+/// at full parallelism is what put a backgrounded DirWiz at 130-450% CPU.
+@Suite("Unattended Scan Concurrency Tests")
+struct UnattendedScanConcurrencyTests {
+
+    @Test("An unattended scan yields; an explicit one does not")
+    func unattendedScansYield() {
+        let attended = FileScanner.scanConcurrency(unattended: false, attendedWorkerCount: 8)
+        #expect(attended.workers == 8, "the user is watching an explicit scan")
+        #expect(attended.qos == .userInitiated)
+
+        let unattended = FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 8)
+        #expect(unattended.workers == 4, "a self-started refresh takes half the pool")
+        #expect(unattended.qos == .utility)
+
+        // Never starves itself down to a single worker on small pools.
+        #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 2).workers == 2)
+        #expect(FileScanner.scanConcurrency(unattended: true, attendedWorkerCount: 1).workers == 2)
+    }
+}

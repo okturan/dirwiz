@@ -174,6 +174,12 @@ public final class AppState {
     @ObservationIgnored var lastHardlinkRefreshAt: CFAbsoluteTime?
     @ObservationIgnored var lastLiveCacheSaveAt: CFAbsoluteTime?
 
+    /// Whether the in-flight scan attempt started by itself (launch refresh, volume
+    /// reconciliation, availability recovery) rather than from a button. Held for the
+    /// whole attempt so a warm patch that abandons into a cold scan keeps the same
+    /// character, and read by `beginColdScan` to pick the scanner's QoS and worker count.
+    @ObservationIgnored var currentScanIsUnattended = false
+
     /// Per-extension-name stats for the Extensions tab (individual file types).
     public var fileTypeStats: [FileTypeStat] = []
 
