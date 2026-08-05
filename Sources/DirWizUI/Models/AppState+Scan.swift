@@ -312,6 +312,17 @@ extension AppState {
 
     /// Makes an exact-scope cached individual tree the visible owner and restores its path-keyed
     /// exploration state. Shared by ordinary launch restore and unavailable-volume recovery.
+    /// Publishes a cached tree adopted by a volume SELECTION (not a launch or a scan).
+    /// Shares `publishCachedTree`, which restores the saved session position and marks
+    /// the view stale so the sidebar says how old it is - the same honesty a restored
+    /// launch gets. The caller holds the re-entrancy guard, since `publishCachedTree`
+    /// re-selects the volume it is publishing.
+    func restoreCachedTreeForSelection(_ cached: TreeCache.Payload, volumeURL: URL) {
+        publishCachedTree(cached, for: volumeURL)
+        staleViewAsOf = cached.savedAt
+        lastScanSummary = ScanSummaryComposer.stale(savedAt: cached.savedAt)
+    }
+
     private func publishCachedTree(_ cached: TreeCache.Payload, for volumeURL: URL) {
         let path = volumeURL.path
         selectVolume(volumeURL)

@@ -200,46 +200,58 @@ struct UnattendedScanConcurrencyTests {
     }
 }
 
-/// Selecting a volume that has no scan of its own must not leave another volume's tree
-/// on screen: the sidebar offered "Scan Volume" for a 2 TB drive while the table and
-/// treemap still showed the boot volume's 4.8M items, reading as that drive's contents.
+/// Selection must make the content area follow it BOTH ways: never show another
+/// volume's tree as this one's contents, and never show an empty pane for a volume
+/// whose own scan is cached (switching away and back regressed to empty once).
+extension AppSupportEnvSuites {
 @Suite("Displayed Tree Ownership Tests")
 struct DisplayedTreeOwnershipTests {
 
-    @Test("Selecting another volume releases the previous volume's tree")
-    @MainActor
-    func foreignTreeIsReleased() async throws {
-        let (root, cleanup) = try createTempTree(["a.txt": 10])
-        defer { cleanup() }
-        let tree = FileTree()
-        await FileScanner().scan(path: root, progress: ScanProgress(), tree: tree)
-
-        let suiteName = "dirwiz.test.ownership"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let state = AppState(defaults: defaults)
-
-        state.selectVolume(URL(fileURLWithPath: root))
-        state.fileTree = tree
-        state.lastScanSummary = "Scanned 1 items in 0.1s"
-        #expect(state.fileTree != nil)
-
-        // A different, never-scanned volume.
-        state.selectVolume(URL(fileURLWithPath: "/Volumes/SomeOtherDrive"))
-        #expect(state.fileTree == nil,
-                "the other volume's tree must not stay on screen as this one's contents")
-        #expect(state.lastScanSummary == nil,
-                "nor its completed-scan summary")
-
-        // Re-selecting the owner is free to publish its tree again.
-        state.selectVolume(URL(fileURLWithPath: root))
-        state.fileTree = tree
-        #expect(state.fileTree != nil)
-
-        // Scope is part of ownership: All Volumes is a different owner than individual "/".
-        state.selectCombinedVolumes()
-        #expect(state.fileTree == nil,
-                "an individual tree must not masquerade as the combined map")
+    @Test("Selection releases a foreign tree and restores the owner's cache")
+    func selectionFollowsOwnership() async throws {
+        try await withTemporaryAppSupportDir {
+            try await self.selectionFollowsOwnershipBody()
+        }
     }
+
+    @MainActor
+    private func selectionFollowsOwnershipBody() async throws {
+        do {
+            let (root, cleanup) = try createTempTree(["a.txt": 10, "b/c.txt": 20])
+            defer { cleanup() }
+            let tree = FileTree()
+            await FileScanner().scan(path: root, progress: ScanProgress(), tree: tree)
+            try TreeCache.save(tree: tree, lastEventId: 0)
+
+            let suiteName = "dirwiz.test.ownership"
+            let defaults = UserDefaults(suiteName: suiteName)!
+            defaults.removePersistentDomain(forName: suiteName)
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let state = AppState(defaults: defaults)
+
+            state.selectVolume(URL(fileURLWithPath: root))
+            state.fileTree = tree
+            state.lastScanSummary = "Scanned 3 items in 0.1s"
+
+            // Away: a never-scanned volume must not inherit this tree.
+            state.selectVolume(URL(fileURLWithPath: "/Volumes/SomeOtherDrive"))
+            #expect(state.fileTree == nil,
+                    "another volume's tree must not pose as this one's contents")
+
+            // Back: the owner has a cache, so it must come back rather than show empty.
+            state.selectVolume(URL(fileURLWithPath: root))
+            #expect(state.fileTree != nil,
+                    "returning to a scanned volume must restore its cached tree")
+            #expect(state.fileTree?.persistenceIdentity
+                    == state.selectedScanPersistenceIdentity)
+            #expect(state.staleViewAsOf != nil,
+                    "a restored cache must say it is showing an older scan")
+
+            // Scope is part of ownership: the individual tree is not the combined map.
+            state.selectCombinedVolumes()
+            #expect(state.fileTree == nil,
+                    "an individual tree must not masquerade as the combined map")
+        }
+    }
+}
 }

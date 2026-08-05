@@ -129,24 +129,45 @@ public final class AppState {
         return selectedMountTraversalScope.persistenceIdentity(for: selectedVolume.path)
     }
 
-    /// The displayed tree belongs to whichever scan target produced it. Selecting a
-    /// different volume must not leave the previous one's table and treemap on screen:
-    /// the sidebar would offer "Scan Volume" and show a 2 TB drive's free space while the
-    /// content area still listed the boot volume's Users/System/Applications, which reads
-    /// as "this drive contains those folders". Scope is part of the identity, so an
-    /// individual "/" and All Volumes "/" are correctly treated as different owners.
+    /// Makes the content area follow the selection.
     ///
-    /// Deliberately does NOT cancel an in-flight scan: that scan owns the display it is
-    /// building, and its own token/session guards decide what it may publish.
-    private func releaseDisplayedTreeIfForeign() {
-        guard !scanProgress.isScanning else { return }
-        guard let tree = fileTree else { return }
-        guard let identity = selectedScanPersistenceIdentity,
-              tree.persistenceIdentity != identity else { return }
-        fileTree = nil
-        staleViewAsOf = nil
-        lastScanSummary = nil
-        resetForNewScan()
+    /// The displayed tree belongs to whichever scan target produced it, so selecting a
+    /// different volume must not leave the previous one's table and treemap on screen
+    /// claiming to be this one's contents. But merely clearing is only half an answer:
+    /// switching to a volume and back showed an empty pane for a volume scanned minutes
+    /// earlier. So the foreign tree is released AND the newly selected target's own
+    /// cached scan is restored when it has one, exactly like a launch restore.
+    ///
+    /// Scope is part of the identity, so an individual "/" and All Volumes "/" are
+    /// correctly different owners. Deliberately does NOT cancel an in-flight scan: that
+    /// scan owns the display it is building, and its own token guards decide what it may
+    /// publish.
+    private func adoptDisplayedTreeForSelection() {
+        guard !isAdoptingDisplayedTree else { return }
+        guard !scanProgress.isScanning, !isApplyingChanges else { return }
+        guard let identity = selectedScanPersistenceIdentity else { return }
+        if let tree = fileTree, tree.persistenceIdentity == identity { return }
+
+        isAdoptingDisplayedTree = true
+        defer { isAdoptingDisplayedTree = false }
+
+        if fileTree != nil {
+            fileTree = nil
+            staleViewAsOf = nil
+            lastScanSummary = nil
+            resetForNewScan()
+        }
+
+        // Restore this target's own cache if it has one. `load` (not `loadResult`) is
+        // right here: a rejected cache during ordinary volume switching is simply "no
+        // tree to show", and `restoreOnLaunch` remains the place that reports WHY a
+        // cache was unusable - it is the first and often only code to see the evidence.
+        guard let volume = selectedVolume,
+              selectedMountTraversalScope == .selectedVolume,
+              selectedFolderTarget == nil,
+              let cached = TreeCache.load(for: volume.path, scope: .selectedVolume)
+        else { return }
+        restoreCachedTreeForSelection(cached, volumeURL: volume)
     }
 
     /// Select one concrete volume and restore the default same-device boundary.
@@ -155,7 +176,7 @@ public final class AppState {
         selectedFolderVolumePath = nil
         selectedVolume = url
         selectedMountTraversalScope = .selectedVolume
-        releaseDisplayedTreeIfForeign()
+        adoptDisplayedTreeForSelection()
     }
 
     /// Select a Finder/Shortcuts folder without inventing a second scan mode.
@@ -164,7 +185,7 @@ public final class AppState {
         selectedFolderVolumePath = containingVolumePath
         selectedVolume = url
         selectedMountTraversalScope = .selectedVolume
-        releaseDisplayedTreeIfForeign()
+        adoptDisplayedTreeForSelection()
     }
 
     /// Select the explicit one-map overview. The scan root is `/`; scope, not path alone,
@@ -174,7 +195,7 @@ public final class AppState {
         selectedFolderVolumePath = nil
         selectedVolume = URL(fileURLWithPath: "/", isDirectory: true)
         selectedMountTraversalScope = .combinedVolumes
-        releaseDisplayedTreeIfForeign()
+        adoptDisplayedTreeForSelection()
     }
 
     /// Active tab in detail area.
@@ -211,6 +232,9 @@ public final class AppState {
     /// A self-started scan skipped the speculative Insights analyses. Opening the tab
     /// runs them, exactly like the deferred hardlink walk.
     @ObservationIgnored var pendingSpeculativeAnalyses = false
+
+    /// Re-entrancy guard: restoring a cached tree re-selects its own volume.
+    @ObservationIgnored var isAdoptingDisplayedTree = false
 
     /// Per-extension-name stats for the Extensions tab (individual file types).
     public var fileTypeStats: [FileTypeStat] = []
