@@ -10,6 +10,14 @@ extension AppState {
         case fileStats(FileAgeResult, SizeDistributionResult)
     }
 
+    /// Priority for derived post-scan work. After an UNATTENDED scan (launch refresh,
+    /// volume reconciliation) nobody is waiting on these full-tree walks, and running
+    /// them at `.userInitiated` is why a self-launched DirWiz still spiked past 300% CPU
+    /// after the scan itself was throttled. An explicit scan keeps the responsive tier.
+    var derivedAnalysisPriority: TaskPriority {
+        currentScanIsUnattended ? .utility : .userInitiated
+    }
+
     // MARK: - Space Analysis
 
     /// Run space categorization, file age, and size distribution analysis in parallel.
@@ -25,7 +33,7 @@ extension AppState {
         isSizeDistRunning = true
         spaceAnalysisProgress = (0, 2)
 
-        spaceAnalysisTask = Task.detached(priority: .userInitiated) {
+        spaceAnalysisTask = Task.detached(priority: derivedAnalysisPriority) {
             await withTaskGroup(of: SpaceAnalysisStepResult.self) { group in
                 group.addTask { .space(await SpaceAnalyzer().analyze(tree: tree)) }
                 group.addTask {
@@ -74,7 +82,7 @@ extension AppState {
         iCloudAnalysisTask?.cancel()
         isICloudAnalysisRunning = true
 
-        iCloudAnalysisTask = Task.detached(priority: .userInitiated) {
+        iCloudAnalysisTask = Task.detached(priority: derivedAnalysisPriority) {
             let result = await iCloudAnalyzer().analyze(tree: tree)
             await MainActor.run {
                 guard self.scanToken == token else { return }
