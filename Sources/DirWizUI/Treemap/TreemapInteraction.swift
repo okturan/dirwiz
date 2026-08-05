@@ -5,8 +5,12 @@ extension TreemapRect {
     /// Anonymous density aggregates represent a group, so using their representative child's
     /// filename would assert a false spatial identity even when the rectangle is label-sized.
     var qualifiesForLeafLabel: Bool {
-        width * height > 60 * 20 && !isBackground && !isAggregate
+        width * height > TreemapRect.minimumLeafLabelArea && !isBackground && !isAggregate
     }
+
+    /// Shared with `TreemapLabelBudget`, so the budget is derived from the same threshold
+    /// that admits a leaf label rather than a second, drifting copy of it.
+    static let minimumLeafLabelArea: Float = 60 * 20
 }
 
 /// SwiftUI view that wraps the Metal treemap with interaction overlays.
@@ -306,10 +310,20 @@ public struct InteractiveTreemapView: View {
                     // layout but invisible on screen. Directory rects are now labelled
                     // too, and in Folders style they get the header strip the geometry
                     // already reserves for them.
+                    // Caps scale with the window. Fixed caps meant enlarging the window
+                    // qualified MORE rects for labels while the budget stayed put, so the
+                    // newly-roomy folders reserved their 18pt header strip and then never
+                    // got text - a visibly empty bar. The label count a viewport can hold
+                    // is inherently bounded by its own area, so deriving the cap from it
+                    // stays cheap while never being the reason a roomy folder goes unnamed.
+                    let labelBudget = TreemapLabelBudget.budgets(
+                        viewportWidth: Float(geo.size.width),
+                        viewportHeight: Float(geo.size.height)
+                    )
                     let leaves = rects
                         .filter(\.qualifiesForLeafLabel)
                         .sorted { $0.width * $0.height > $1.width * $1.height }
-                        .prefix(70)
+                        .prefix(labelBudget.leaves)
                     // Folders style reserves a header strip per container for exactly this.
                     // Cushions stays a pure file view: a chip there would sit on top of a
                     // child tile, since cushion children fill their parent edge to edge.
@@ -321,7 +335,7 @@ public struct InteractiveTreemapView: View {
                             .filter { $0.isBackground
                                 && CardGeometry.headerHeight(width: $0.width, height: $0.height) > 0 }
                             .sorted { $0.width * $0.height > $1.width * $1.height }
-                            .prefix(24)
+                            .prefix(labelBudget.containers)
                         : [].prefix(0)
                     // Leaves first, containers last: a ZStack draws later views on top,
                     // and the folder name is the one that must never be buried.

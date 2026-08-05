@@ -205,6 +205,42 @@ struct CardStyleTests {
         #expect(src.contains("1.0 - 0.30 * microShade"), "micro strength")
     }
 
+    /// A fixed label cap meant enlarging the window qualified more folders for a header
+    /// strip while the budget stayed put: the extra folders reserved 18pt of geometry and
+    /// then rendered as an empty bar. The budget must follow the viewport.
+    @Test("Label budgets grow with the viewport")
+    func labelBudgetsFollowTheViewport() {
+        let small = TreemapLabelBudget.budgets(viewportWidth: 600, viewportHeight: 400)
+        let large = TreemapLabelBudget.budgets(viewportWidth: 2400, viewportHeight: 1400)
+
+        #expect(large.containers > small.containers,
+                "a bigger window must be allowed to name more folders")
+        #expect(large.leaves > small.leaves)
+        #expect(large.containers > 24,
+                "the old fixed cap is exactly what left roomy folders unnamed")
+
+        // Never below the historical floors, never unbounded.
+        #expect(small.containers >= TreemapLabelBudget.minimumContainers)
+        #expect(small.leaves >= TreemapLabelBudget.minimumLeaves)
+        #expect(TreemapLabelBudget.budgets(viewportWidth: 20000, viewportHeight: 20000)
+                    .containers == TreemapLabelBudget.maximumContainers)
+        #expect(TreemapLabelBudget.budgets(viewportWidth: 20000, viewportHeight: 20000)
+                    .leaves == TreemapLabelBudget.maximumLeaves)
+
+        // Degenerate sizes must not produce a negative or zero budget.
+        let empty = TreemapLabelBudget.budgets(viewportWidth: 0, viewportHeight: 0)
+        #expect(empty.containers == TreemapLabelBudget.minimumContainers)
+        #expect(empty.leaves == TreemapLabelBudget.minimumLeaves)
+
+        // Monotonic: growing the window never takes a label away.
+        var previous = 0
+        for side in stride(from: Float(400), through: 3000, by: 200) {
+            let budget = TreemapLabelBudget.budgets(viewportWidth: side, viewportHeight: side)
+            #expect(budget.containers >= previous)
+            previous = budget.containers
+        }
+    }
+
     // MARK: - Density budget
 
     @Test("Card budget aggregates then falls back as density rises")

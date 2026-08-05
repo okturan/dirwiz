@@ -537,6 +537,41 @@ public enum CardGeometry {
     }
 }
 
+/// How many overlay labels a viewport is allowed to carry.
+///
+/// Labels are SwiftUI views, so the count needs a ceiling - but a FIXED ceiling is the
+/// wrong shape. Enlarging the window makes more rects clear the label minimums while a
+/// constant budget stays put, so folders that just became roomy reserve their header
+/// strip (`CardGeometry.headerHeight`) and then never receive text: an empty bar where a
+/// title obviously belongs. Deriving the budget from viewport area tracks the window,
+/// and is self-limiting because only so many minimum-sized rects fit on screen at once.
+public enum TreemapLabelBudget {
+    /// Nesting means a parent and its children can both be labelled while overlapping,
+    /// so the packing bound is scaled up rather than treated as exact.
+    static let containerOverlapAllowance: Float = 1.5
+    static let minimumContainers = 24
+    static let maximumContainers = 400
+    static let minimumLeaves = 70
+    static let maximumLeaves = 600
+
+    public static func budgets(
+        viewportWidth: Float,
+        viewportHeight: Float
+    ) -> (containers: Int, leaves: Int) {
+        let area = max(0, viewportWidth) * max(0, viewportHeight)
+
+        let containerCell = CardGeometry.minWidthForHeader * CardGeometry.minHeightForHeader
+        let containerFit = Int((area / containerCell * containerOverlapAllowance).rounded(.down))
+        let containers = min(maximumContainers, max(minimumContainers, containerFit))
+
+        // The leaf label test is an AREA threshold, so the same packing logic applies.
+        let leafFit = Int((area / TreemapRect.minimumLeafLabelArea).rounded(.down))
+        let leaves = min(maximumLeaves, max(minimumLeaves, leafFit))
+
+        return (containers, leaves)
+    }
+}
+
 /// Decides whether card style can honestly draw a given view.
 ///
 /// Card style spends pixels per nesting level, so past some node count it can only produce
