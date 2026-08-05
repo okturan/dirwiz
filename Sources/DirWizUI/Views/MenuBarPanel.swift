@@ -256,19 +256,23 @@ public struct DirWizMenuBarLabel: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    /// Loaded and sized ONCE. The label re-evaluates on every observed change, and
+    /// re-reading plus re-rasterizing the SVG per render is measurable waste under
+    /// background churn. The status item draws the NSImage at its INTRINSIC size, not
+    /// the SwiftUI frame - the SVG's 44×36pt viewBox rendered a glyph visibly larger
+    /// than its menu bar siblings until `size` was set here (verified against real menu
+    /// bar captures; the .frame alone changed nothing).
+    private static let templateNSImage: NSImage? = {
+        guard let url = Bundle.main.url(
+            forResource: "DirWizMenuBarTemplate", withExtension: "svg"
+        ), let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        image.size = NSSize(width: 21.85, height: 17.83)
+        return image
+    }()
+
     @ViewBuilder private var templateImage: some View {
-        if let url = Bundle.main.url(
-            forResource: "DirWizMenuBarTemplate",
-            withExtension: "svg"
-        ), let image = NSImage(contentsOf: url) {
-            // The status item draws the NSImage at its INTRINSIC size, not the SwiftUI
-            // frame - the SVG's 44×36pt viewBox rendered a glyph visibly larger than
-            // its menu bar siblings until `size` was set here (verified against real
-            // menu bar captures; the .frame alone changed nothing).
-            let _ = {
-                image.isTemplate = true
-                image.size = NSSize(width: 21.85, height: 17.83)
-            }()
+        if let image = Self.templateNSImage {
             Image(nsImage: image)
                 .renderingMode(.template)
         } else {

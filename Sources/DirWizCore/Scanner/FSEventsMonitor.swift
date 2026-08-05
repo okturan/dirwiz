@@ -59,6 +59,8 @@ public final class FSEventsMonitor: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private let watchPath: String
     private let ignoredRoots: [String]
+    private let ignoredExactPaths: [String]
+    private let ignoredPathPrefixes: [String]
     private let lock = NSLock()
     private var changes: [String: DirectoryChangeSummary] = [:]
     private var isRunning = false
@@ -67,15 +69,46 @@ public final class FSEventsMonitor: @unchecked Sendable {
     /// Maximum number of directory entries kept to prevent unbounded growth.
     private static let maxTrackedDirectories = 1000
 
-    public init(watchPath: String) {
-        self.watchPath = watchPath
-        self.ignoredRoots = [DirWizOwnedPaths.applicationSupportRoot()]
+    private func isIgnoredEventPath(_ path: String) -> Bool {
+        for candidate in ignoredExactPaths where path == candidate { return true }
+        for prefix in ignoredPathPrefixes where path.hasPrefix(prefix) { return true }
+        return false
+    }
+
+    /// Swift-native parent derivation: `(path as NSString).deletingLastPathComponent`
+    /// bridges to NSString per call, which is measurable at thousands of events per
+    /// batch. FSEvents file paths carry no trailing slash, so a plain split is exact.
+    static func parentDirectory(of path: String) -> String {
+        guard let slash = path.lastIndex(of: "/") else { return path }
+        if slash == path.startIndex { return "/" }
+        return String(path[path.startIndex..<slash])
+    }
+
+    public convenience init(watchPath: String) {
+        self.init(watchPath: watchPath, ignoredRoots: [DirWizOwnedPaths.applicationSupportRoot()])
     }
 
     /// Test seam for proving self-owned persistence cannot feed the living view.
     init(watchPath: String, ignoredRoots: [String]) {
         self.watchPath = watchPath
         self.ignoredRoots = ignoredRoots
+        // Pre-canonicalized forms for the per-event hot path. FSEvents emits
+        // `/private/var` spellings, so prefix checks against these are exact without
+        // per-event NSString canonicalization; the `/var` alias is kept for roots that
+        // live under `/private/var` anyway.
+        var exact: [String] = []
+        var prefixes: [String] = []
+        for root in ignoredRoots {
+            exact.append(root)
+            prefixes.append(root + "/")
+            if root.hasPrefix("/private/var/") || root == "/private/var" {
+                let alias = String(root.dropFirst("/private".count))
+                exact.append(alias)
+                prefixes.append(alias + "/")
+            }
+        }
+        self.ignoredExactPaths = exact
+        self.ignoredPathPrefixes = prefixes
     }
 
     deinit {
@@ -175,15 +208,17 @@ public final class FSEventsMonitor: @unchecked Sendable {
         var acceptedChange = false
 
         for change in newChanges {
-            guard !ignoredRoots.contains(where: {
-                DirWizOwnedPaths.contains(change.path, under: $0)
-            }) else {
-                continue
-            }
+            // Hot path: thousands of events arrive per 3-second batch under real churn.
+            // The general `DirWizOwnedPaths.contains` canonicalizes with NSString
+            // `standardizingPath` per call, which burned ~30% of a core continuously on
+            // this queue (sampled live). FSEvents already emits `/private/var` spellings,
+            // so a plain prefix check against the pre-canonicalized roots is exact here;
+            // `ignoredPathPrefixes` also carries the `/var` alias for belt and braces.
+            guard !isIgnoredEventPath(change.path) else { continue }
             acceptedChange = true
             let dirPath = change.isDirectory
                 ? change.path
-                : (change.path as NSString).deletingLastPathComponent
+                : Self.parentDirectory(of: change.path)
 
             if var summary = changes[dirPath] {
                 summary.changeCount += 1

@@ -114,6 +114,10 @@ public final class AppState {
     /// waits only for an already-committing living-view splice, which cannot safely be cancelled.
     @ObservationIgnored var volumeAvailabilityGeneration: UInt64 = 0
 
+    /// Diagnostic count of full temporal-baseline decodes, pinned by tests: living-view
+    /// splices must not re-decode a checkpoint that cannot have changed.
+    @ObservationIgnored var temporalSnapshotDecodeCount: UInt64 = 0
+
     public var isCombinedVolumeSelection: Bool {
         selectedMountTraversalScope == .combinedVolumes
     }

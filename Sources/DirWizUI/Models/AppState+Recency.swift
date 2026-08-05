@@ -181,6 +181,13 @@ extension AppState {
     }
 
     /// Try to load a persisted snapshot matching the current scan root.
+    ///
+    /// Decode is skipped when the latest checkpoint is the one already loaded. This is
+    /// not cosmetic: the call runs after every extension-stats refresh, which the living
+    /// view triggers on every splice - and decoding a boot-volume baseline is an LZFSE
+    /// decompress plus a 350k-entry dictionary build. Re-running that per apply burned
+    /// ~30% of a core continuously under background churn (sampled live), reloading a
+    /// checkpoint that applies can never change.
     public func loadSnapshotIfAvailable() {
         guard let tree = fileTree else {
             temporalDiff.temporalSnapshot = nil
@@ -189,18 +196,31 @@ extension AppState {
         let token = scanToken
         let rootPath = tree.path(at: 0)
         let storageIdentity = tree.persistenceIdentity
+        let loadedID = temporalDiff.temporalSnapshot?.meta.id
         Task.detached(priority: .background) {
             let store = SnapshotStore(rootPath: rootPath, storageIdentity: storageIdentity)
             // One-time adoption of the pre-store single-slot file, so an existing baseline
             // is not silently lost on upgrade. No-op once the store has content.
             _ = store.importLegacySnapshotIfPresent()
+            let listed = store.list()
+            let storeBytes = listed.reduce(0) { $0 + $1.storedBytes }
+            if let loadedID, listed.first?.id == loadedID {
+                // The baseline is unchanged - refresh the cheap index-derived state only.
+                await MainActor.run {
+                    guard self.scanToken == token else { return }
+                    self.temporalDiff.availableCheckpoints = listed
+                    self.temporalDiff.storeBytes = storeBytes
+                }
+                return
+            }
             let snapshot = store.loadLatest()
             await MainActor.run {
                 // Discard stale load if another scan started while I/O was running.
                 guard self.scanToken == token else { return }
+                self.temporalSnapshotDecodeCount &+= 1
                 self.temporalDiff.temporalSnapshot = snapshot
-                self.temporalDiff.availableCheckpoints = store.list()
-                self.temporalDiff.storeBytes = store.totalStoredBytes()
+                self.temporalDiff.availableCheckpoints = listed
+                self.temporalDiff.storeBytes = storeBytes
                 if snapshot == nil {
                     self.temporalDiff.isTemporalDiffEnabled = false
                 }
