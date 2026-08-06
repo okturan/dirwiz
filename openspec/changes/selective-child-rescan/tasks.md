@@ -17,13 +17,13 @@
 
 ## 3. Partial mutation primitive
 
-- [ ] 3.1 Extend `FileTree` with a transactional "within these targets, remove these child
+- [x] 3.1 Extend `FileTree` with a transactional "within these targets, remove these child
   subtrees, install these staged subtrees, keep the rest" primitive resolved against ONE
   pre-mutation snapshot.
-- [ ] 3.2 Express the existing whole-subtree replacement as its degenerate case (every cached
+- [x] 3.2 Express the existing whole-subtree replacement as its degenerate case (every cached
   child removed) so one code path stays under test.
-- [ ] 3.3 Prove cancellation before commit leaves the tree byte-for-byte unchanged.
-- [ ] 3.4 Keep aggregate repair after commit; never call `propagateSizes()` on an already
+- [x] 3.3 Prove cancellation before commit leaves the tree byte-for-byte unchanged.
+- [x] 3.4 Keep aggregate repair after commit; never call `propagateSizes()` on an already
   propagated tree.
 
 ## 4. Route every directory target through the diff

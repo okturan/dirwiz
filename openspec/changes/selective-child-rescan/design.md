@@ -77,8 +77,16 @@ This is one new primitive on `FileTree`, transactional exactly like the existing
 assemble the survivor set, the removal set, and the staged appendix off to the side, build
 the new node array and string pool, validate, then publish - so cancellation leaves the tree
 byte-for-byte untouched. The existing whole-subtree replacement becomes the degenerate case
-where every cached child is in the removal set, which keeps one code path under test rather
-than two.
+where every cached child is in the removal set (`removeChildIndices: nil`), which keeps one
+code path under test rather than two.
+
+**Contiguity without grafting.** Direct children must stay contiguous, and append-only
+staged additions would split a target's child slice if kept siblings stayed at their old
+indices. The rebuild therefore relocates kept children's subtrees into the same tail block
+as the staged additions when a target has anything to install: emit kept direct children,
+then the staged block, then descendants of those kept children. That is still one copy per
+survivor during compaction - not the rejected "graft kept subtrees into a staging FileTree
+first" approach, which would peak at a second full copy of those nodes before the rebuild.
 
 Non-negotiable: partial mutation still invalidates every index, so all targets and their
 child decisions must be resolved against ONE pre-mutation snapshot before anything mutates -
