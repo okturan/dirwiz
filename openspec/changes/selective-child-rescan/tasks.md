@@ -1,18 +1,18 @@
 ## 1. Characterize before changing anything
 
-- [ ] 1.1 Pin current behaviour: a directory-level event on a directory with a large subtree
+- [x] 1.1 Pin current behaviour: a directory-level event on a directory with a large subtree
   today stages the whole subtree, and the estimator charges `subtreeItemCount` for it.
-- [ ] 1.2 Record the measured incident this change targets: ~1,300 changed locations,
+- [x] 1.2 Record the measured incident this change targets: ~1,300 changed locations,
   "~84% of files changed since last scan", cold fallback of 30-45 s at multiple cores while
   genuine churn was a few percent.
 
 ## 2. Level diff as a pure function
 
-- [ ] 2.1 Add a pure `DirectoryLevelDiff` in DirWizCore taking cached children and freshly
+- [x] 2.1 Add a pure `DirectoryLevelDiff` in DirWizCore taking cached children and freshly
   read entries, returning unchanged / added / removed / type-changed sets.
-- [ ] 2.2 Match the tree's existing case discipline; a case-only rename counts as changed,
+- [x] 2.2 Match the tree's existing case discipline; a case-only rename counts as changed,
   never as unchanged-with-metadata.
-- [ ] 2.3 Unit tests for every combination including empty-both, empty-cached, empty-fresh,
+- [x] 2.3 Unit tests for every combination including empty-both, empty-cached, empty-fresh,
   type flips (file↔directory, plain↔bundle), and pure metadata changes.
 
 ## 3. Partial mutation primitive
