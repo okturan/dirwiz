@@ -138,11 +138,11 @@ struct WarmStartPlannerTests {
         #expect(reason == "too many changed directories (5001 > 5000)")
     }
 
-    @Test("1000+ raw events collapsing to 3 real folders still warms - the bug this fixes")
+    @Test("Many distinct directory levels with small work still warm")
     func manyRawEventsCollapsingToFewRootsWarms() {
-        // Deep churn under three real folders produces a raw FSEvents path per touched
-        // file, but they all nest under the same 3 outermost roots - the planner must
-        // judge the collapsed count against the threshold, not the raw one.
+        // Selective-child-rescan no longer collapses nested directory targets: each is
+        // one cheap level of work. A large raw count is therefore not by itself expensive
+        // - the item-fraction rule and the elevated maxPatchRoots backstop govern.
         var rawPaths: [String] = []
         for folder in ["/root/a", "/root/b", "/root/c"] {
             rawPaths.append(folder)
@@ -155,9 +155,11 @@ struct WarmStartPlannerTests {
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(rawPaths),
-            cachedDirectoryCount: 1_000
+            cachedDirectoryCount: 20_000,
+            cachedTotalItemCount: 4_000_000,
+            estimatedPatchItems: 5_000
         )
-        #expect(decision == .warm(targets: ["/root/a", "/root/b", "/root/c"]))
+        #expect(decision == .warm(targets: rawPaths))
     }
 
     // MARK: - Cost-based rule (plan 042: judge by estimated WORK, not root count alone)
@@ -280,7 +282,7 @@ struct WarmStartPlannerTests {
 
     @Test("Five hundred tiny roots stay warm below the sanity backstop")
     func manyTinyRootsBelowSanityBackstopWarm() {
-        // The item gate admits this 0.05% patch, 500 is below the 512-root pathological
+        // The item gate admits this 0.05% patch, 500 is below the 5_000-root pathological
         // backstop, and the large cached directory count keeps the independent
         // directory-fraction rule from being the deciding factor.
         let manyTinyRoots = (0..<500).map { "/root/dir\($0)" }
@@ -296,33 +298,37 @@ struct WarmStartPlannerTests {
 
     // MARK: - maxPatchRoots (post-batched-splice pathological sanity backstop)
 
-    @Test("Exactly maxPatchRoots (512) changed roots still warms - the backstop boundary")
+    @Test("Exactly maxPatchRoots (5000) changed roots still warms - the backstop boundary")
     func maxPatchRootsBoundaryStillWarms() {
         // cachedDirectoryCount/cachedTotalItemCount chosen so neither the percentage rule
         // nor the item-fraction rule is anywhere near its own threshold, isolating the
         // pathological root-count backstop specifically.
-        let paths = (0..<512).map { "/root/dir\($0)" }
+        let paths = (0..<5_000).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            cachedDirectoryCount: 5_000
+            cachedDirectoryCount: 100_000,
+            cachedTotalItemCount: 10_000_000,
+            estimatedPatchItems: 5_000
         )
         #expect(decision == .warm(targets: paths))
     }
 
     @Test("One root past maxPatchRoots falls back to cold, reason names the count")
     func maxPatchRootsJustOverBoundaryFallsBackToCold() {
-        let paths = (0..<513).map { "/root/dir\($0)" }
+        let paths = (0..<5_001).map { "/root/dir\($0)" }
         let decision = WarmStartPlanner.decide(
             cacheAvailable: true,
             replay: .changes(paths),
-            cachedDirectoryCount: 5_000
+            cachedDirectoryCount: 100_000,
+            cachedTotalItemCount: 10_000_000,
+            estimatedPatchItems: 5_001
         )
         guard case .coldFallback(let reason) = decision else {
             Issue.record("expected coldFallback, got \(decision)")
             return
         }
-        #expect(reason == "513 changed locations - full scan is faster")
+        #expect(reason == "5001 changed locations - full scan is faster")
     }
 
     @Test("A custom maxPatchRoots is honored")
@@ -376,7 +382,7 @@ struct WarmStartPlannerTests {
 @Suite("WarmStartPlanner estimatedPatchItemCount Tests")
 struct WarmStartPlannerEstimatedPatchItemCountTests {
 
-    @Test("Sums cached subtree sizes for resolvable roots and a small constant for unresolved ones")
+    @Test("Sums direct child counts for resolvable roots and a small constant for unresolved ones")
     func sumsSubtreesAndHandlesUnresolvedRoots() {
         let tree = FileTree()
         tree.setRootPath("/root")
@@ -396,12 +402,12 @@ struct WarmStartPlannerEstimatedPatchItemCountTests {
         let f3 = FileNode()
         tree.addChildren([(node: f1, name: "f1"), (node: f2, name: "f2"), (node: f3, name: "f3")], parentIndex: aIndex)
 
-        // "a": itself + 3 files = 4. "b": itself = 1. "doesnotexist": unresolved constant.
+        // "a": 3 direct children. "b": empty dir → floor of 1. "doesnotexist": unresolved constant.
         let count = WarmStartPlanner.estimatedPatchItemCount(
             forChangedPaths: ["/root/a", "/root/b", "/root/doesnotexist"],
             cachedTree: tree
         )
-        #expect(count == 4 + 1 + 32, "unresolved root should contribute the small fallback constant (32)")
+        #expect(count == 3 + 1 + 32, "unresolved root should contribute the small fallback constant (32)")
     }
 
     @Test("Per-root estimates preserve collapsed-path attribution")
@@ -436,13 +442,14 @@ struct WarmStartPlannerEstimatedPatchItemCountTests {
         )
 
         #expect(estimates == [
-            "/root/a": 3,
-            "/root/b": 1,
+            "/root/a/f1": 1, // file node: childCount 0 → floor 1
+            "/root/a": 2,    // f1, f2
+            "/root/b": 1,    // empty dir floor
             "/root/new": 32,
         ])
     }
 
-    @Test("Nested changed paths collapse to their outermost root before summing")
+    @Test("Nested changed paths each contribute their own level")
     func collapsesNestedPathsBeforeSumming() {
         let tree = FileTree()
         tree.setRootPath("/root")
@@ -456,12 +463,12 @@ struct WarmStartPlannerEstimatedPatchItemCountTests {
         let f1 = FileNode()
         tree.addChildren([(node: f1, name: "f1")], parentIndex: aIndex)
 
-        // "/root/a/f1" is nested inside "/root/a" - only the outer root should be counted.
+        // Selective-child-rescan keeps both levels: a (1 child) + f1 (floor 1).
         let count = WarmStartPlanner.estimatedPatchItemCount(
             forChangedPaths: ["/root/a", "/root/a/f1"],
             cachedTree: tree
         )
-        #expect(count == 2, "a + f1, counted once")
+        #expect(count == 1 + 1)
     }
 
     @Test("Empty changed-paths list contributes zero")
@@ -482,10 +489,10 @@ struct WarmStartPlannerEstimatedPatchItemCountTests {
 @Suite("PathCollapse Tests")
 struct PathCollapseTests {
 
-    @Test("A nested path collapses into its outermost ancestor")
+    @Test("Nested directory targets each survive as their own level")
     func nestedCollapsesToOutermost() {
         let result = PathCollapse.outermostRoots(["/root/a", "/root/a/b", "/root/a/b/c"])
-        #expect(result == ["/root/a"])
+        #expect(result == ["/root/a", "/root/a/b", "/root/a/b/c"])
     }
 
     @Test("Disjoint paths all survive")
@@ -504,7 +511,7 @@ struct PathCollapseTests {
     func orderIndependent() {
         let childBeforeParent = PathCollapse.outermostRoots(["/root/a/b", "/root/a", "/root/c"])
         let parentBeforeChild = PathCollapse.outermostRoots(["/root/a", "/root/a/b", "/root/c"])
-        #expect(Set(childBeforeParent) == Set(["/root/a", "/root/c"]))
+        #expect(Set(childBeforeParent) == Set(["/root/a", "/root/a/b", "/root/c"]))
         #expect(Set(childBeforeParent) == Set(parentBeforeChild))
     }
 }

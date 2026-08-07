@@ -24,7 +24,7 @@ struct WarmStartItemEstimateGrowthTests {
             forChangedPaths: [churnRoot],
             cachedTree: tree
         )
-        #expect(cachedEstimate == 2, "the cached root contains one directory and one file")
+        #expect(cachedEstimate == 1, "churn has one direct child; the estimator charges the level")
 
         let churnURL = URL(fileURLWithPath: churnRoot)
         for index in 0..<200 {
@@ -42,7 +42,8 @@ struct WarmStartItemEstimateGrowthTests {
             report.metrics.rootStaging.first?.actualStagedItemCount
         )
 
-        #expect(actualStagedItems == 202)
+        // Selective staging: placeholder + 200 additions (unchanged seed is not staged).
+        #expect(actualStagedItems == 201)
         #expect(
             actualStagedItems > cachedEstimate * 100,
             "growth can make the cached estimate materially low"
@@ -101,6 +102,7 @@ struct WarmStartItemEstimateGrowthTests {
             to: URL(fileURLWithPath: churnRoot).appendingPathComponent("new-b.dat")
         )
 
+        // Selective: placeholder + 2 additions = 3 staged items. Budget of 2 refuses.
         let report = await FileScanner().rescanSubtrees(
             [churnRoot],
             tree: tree,
@@ -108,20 +110,20 @@ struct WarmStartItemEstimateGrowthTests {
             options: SubtreeRescanOptions(
                 priority: .interactive,
                 resetsCancellation: true,
-                maximumStagedItemCount: 3
+                maximumStagedItemCount: 2
             )
         )
 
         #expect(
             report.stagedItemBudgetExceeded
                 == .init(
-                    actualStagedItemCount: 4,
-                    maximumStagedItemCount: 3
+                    actualStagedItemCount: 3,
+                    maximumStagedItemCount: 2
                 )
         )
         #expect(report.metrics.appliedRootCount == 0)
         #expect(report.metrics.rootStaging == [
-            .init(path: churnRoot, actualStagedItemCount: 4)
+            .init(path: churnRoot, actualStagedItemCount: 3)
         ])
         #expect(summarizeTree(tree) == treeBefore)
     }

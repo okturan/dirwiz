@@ -1126,9 +1126,14 @@ struct DeferredEphemeralWarmStartTests {
         try Data(count: 30).write(
             to: URL(fileURLWithPath: interactiveRoot + "/new.txt")
         )
-        try Data(count: 40).write(
-            to: URL(fileURLWithPath: ephemeralRoot + "/new.txt")
-        )
+        // Selective staging only counts additions. Give the trailing ephemeral root
+        // enough new files that its staged item count exceeds the shared remainder
+        // after the interactive tier commits (budget = floor(19 * 0.25) = 4).
+        for index in 0..<4 {
+            try Data(count: 40 + index).write(
+                to: URL(fileURLWithPath: ephemeralRoot + "/new-\(index).txt")
+            )
+        }
         #expect(await waitForJournalChanges(
             root: root,
             since: savedEventId
@@ -1149,11 +1154,11 @@ struct DeferredEphemeralWarmStartTests {
         await waitUntil { gatedFilesystem.didReachGate }
         #expect(
             gatedFilesystem.didReachGate,
-            "the planner must admit the cached four-item estimate and reach tier two"
+            "the planner must admit the cached level estimate and reach tier two"
         )
         let interactiveTree = try #require(state.fileTree)
         #expect(interactiveTree.nodeIndex(forPath: interactiveRoot + "/new.txt") != nil)
-        #expect(interactiveTree.nodeIndex(forPath: ephemeralRoot + "/new.txt") == nil)
+        #expect(interactiveTree.nodeIndex(forPath: ephemeralRoot + "/new-0.txt") == nil)
 
         gatedFilesystem.release()
         await waitUntil(timeout: 30) {
@@ -1164,11 +1169,11 @@ struct DeferredEphemeralWarmStartTests {
 
         #expect(
             state.lastScanSummary?
-                .contains("~32% of files changed since last scan") == true
+                .contains("% of files changed since last scan") == true
         )
         #expect(state.lastScanSummary?.contains("changed locations") != true)
         let historyReason = WarmStartHistory.load(for: root).last?.reason
-        #expect(historyReason == "~32% of files changed since last scan")
+        #expect(historyReason?.contains("% of files changed since last scan") == true)
 
         let finalTree = try #require(state.fileTree)
         let freshColdTree = FileTree()

@@ -984,9 +984,10 @@ extension AppState {
             let count = report.unresolvedPaths.count
             return "couldn't resolve \(count) changed path\(count == 1 ? "" : "s") against the cached tree"
         }
-        // A root-level SHALLOW reconcile is a successful in-place patch of the root's
-        // own entry level, not the "nothing narrower resolved" failure this rule exists
-        // for - exempt it, or root-level file churn keeps every patch abandoning.
+        // A root-level LEVEL reconcile (metadata-only or selective structural) is a
+        // successful patch of the root's own entry level, not the "nothing narrower
+        // resolved" failure this rule exists for - exempt it, or ordinary root churn
+        // keeps every patch abandoning into a cold scan.
         if report.rescannedRoots.contains(scanRoot),
            !report.shallowRoots.contains(scanRoot) {
             return "a changed path resolved to the scan root - nothing narrower to patch"

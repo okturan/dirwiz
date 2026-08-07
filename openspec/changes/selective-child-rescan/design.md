@@ -88,6 +88,17 @@ then the staged block, then descendants of those kept children. That is still on
 survivor during compaction - not the rejected "graft kept subtrees into a staging FileTree
 first" approach, which would peak at a second full copy of those nodes before the rebuild.
 
+**Nested targets in one compaction.** Selective-child-rescan makes a directory target mean
+"this directory's level is stale", so a parent and a child can both be legitimate targets
+in one batch (parent gains a sibling file; child gains a nested file under an entry the
+parent's own diff reports as unchanged). PathCollapse must not drop either one. The rebuild
+is driven by *slice ownership*: a node rebuilds its child slice when it has staged
+additions (or is itself relocating). Owners are processed in ascending old-index order;
+because the source tree already guarantees parent index < child index, that order is a
+valid topological order without deepest-first sorting or recursion. A target inside another
+target's *removed* subtree remains a programmer error - FileScanner drops those via the
+post-diff covered filter before Phase B.
+
 Non-negotiable: partial mutation still invalidates every index, so all targets and their
 child decisions must be resolved against ONE pre-mutation snapshot before anything mutates -
 the same resolve-once-then-single-mutation discipline `rescanSubtrees` already follows.

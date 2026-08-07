@@ -1163,12 +1163,17 @@ public final class FileTree: @unchecked Sendable {
     ///   NEW children and their descendants live beneath it. Kept children are never
     ///   copied into this tree.
     ///
-    /// Contiguity: appending staged additions while leaving kept children at their old
-    /// positions would split the target's child slice. When a target has staged
-    /// additions, its kept children's subtrees are therefore relocated into the same
-    /// tail block as the staged nodes (still a single copy during rebuild - not a
-    /// separate graft into a staging tree). Removal-only targets leave kept children
-    /// where survivors naturally compact.
+    /// Nested targets are legal. A directory target means its own level is stale, so a
+    /// parent and a child can both appear in one batch. The rebuild is driven by slice
+    /// ownership: a node re-emits its complete child list when it has staged additions
+    /// or when the node itself is relocating into an ancestor's append block. Owners are
+    /// processed in ascending old-index order; because the source tree already guarantees
+    /// parent index < child index, that order is a valid topological order without a
+    /// deepest-first sort. A target inside another target's removed subtree is still a
+    /// programmer error - `FileScanner` drops those before Phase B.
+    ///
+    /// Contiguity: each rebuilt slice is emitted as one uninterrupted run (kept old
+    /// children in their original relative order, then that target's staged additions).
     ///
     /// Aggregate directory sizes intentionally remain stale until the caller invokes
     /// `recomputeAggregates()`, matching `removeChildren` + `installSubtree`. Never
@@ -1181,9 +1186,6 @@ public final class FileTree: @unchecked Sendable {
     ) -> Bool {
         guard !replacements.isEmpty else { return !shouldCancel() }
 
-        // Capture detached staging trees before taking this tree's lock. Besides keeping
-        // lock ordering simple, this makes every staged input immutable for the duration
-        // of the transactional rebuild.
         let captured = replacements.map {
             (
                 target: $0.target,
@@ -1205,47 +1207,29 @@ public final class FileTree: @unchecked Sendable {
             let oldStringPool = stringPool
             let oldCount = oldNodes.count
 
-            // This is an internal structural primitive: invalid targets are programmer
-            // errors, not recoverable filesystem conditions. Validate the whole batch
-            // before allocating or mutating anything rather than trusting Phase B's
-            // outermost-path collapse.
-            var targets = [Bool](repeating: false, count: oldCount)
-            for replacement in captured {
-                let target = Int(replacement.target)
-                precondition(target >= 0 && target < oldCount,
-                             "staged replacement target is outside the tree")
-                precondition(!targets[target], "staged replacement target is duplicated")
-                targets[target] = true
-            }
-            for replacement in captured {
-                var ancestor = oldNodes[Int(replacement.target)].parentIndex
-                var hops = 0
-                while ancestor != FileNode.invalid {
-                    let ancestorIndex = Int(ancestor)
-                    precondition(ancestorIndex >= 0 && ancestorIndex < oldCount,
-                                 "staged replacement target has an invalid ancestor")
-                    precondition(!targets[ancestorIndex],
-                                 "staged replacement target is nested beneath another target")
-                    ancestor = oldNodes[ancestorIndex].parentIndex
-                    hops += 1
-                    precondition(hops <= oldCount, "cycle in FileTree parent links")
-                }
+            if let reason = Self.stagedReplacementViolation(
+                targets: captured.map { (target: $0.target, removeChildIndices: $0.removeChildIndices) },
+                nodes: oldNodes
+            ) {
+                preconditionFailure(reason)
             }
 
-            // Resolve each target's removal set and whether kept children must relocate
-            // into the staged append block (required whenever additions would otherwise
-            // land after survivors and break direct-child contiguity).
             struct ResolvedTarget {
                 let target: UInt32
                 let removeRoots: [UInt32]
-                let relocateKept: Bool
+                let hasAdditions: Bool
                 let stagedNodes: [FileNode]
                 let stagedStringPool: Data
             }
+            var isTarget = [Bool](repeating: false, count: oldCount)
+            var slotByTarget: [UInt32: Int] = [:]
+            slotByTarget.reserveCapacity(captured.count)
             var resolvedTargets: [ResolvedTarget] = []
             resolvedTargets.reserveCapacity(captured.count)
+
             for replacement in captured {
                 let target = Int(replacement.target)
+                isTarget[target] = true
                 let targetNode = oldNodes[target]
                 let childStart: Int
                 let childEnd: Int
@@ -1280,51 +1264,36 @@ public final class FileTree: @unchecked Sendable {
                         : []
                 }
 
-                let hasAdditions = replacement.nodes.count > 1
+                slotByTarget[replacement.target] = resolvedTargets.count
                 resolvedTargets.append(ResolvedTarget(
                     target: replacement.target,
                     removeRoots: removeRoots,
-                    relocateKept: hasAdditions,
+                    hasAdditions: replacement.nodes.count > 1,
                     stagedNodes: replacement.nodes,
                     stagedStringPool: replacement.stringPool
                 ))
             }
 
-            // Mark every node to remove, then every kept subtree that must relocate into
-            // a target's append block. Byte vectors stay cheap at multi-million-node scale.
-            // `deferredOwner` records which target claimed each deferred node so multi-
-            // target batches can emit each subtree into the correct append block.
             var removed = [Bool](repeating: false, count: oldCount)
-            var deferred = [Bool](repeating: false, count: oldCount)
-            var deferredOwner = Array(repeating: FileNode.invalid, count: oldCount)
+            var relocated = [Bool](repeating: false, count: oldCount)
             var removedCount = 0
-            var deferredCount = 0
+            var relocatedCount = 0
             var stack: [UInt32] = []
             stack.reserveCapacity(4096)
 
-            func markSubtree(
-                roots: [UInt32],
-                into flags: inout [Bool],
-                count: inout Int,
-                owner: UInt32? = nil
-            ) -> Bool {
+            func markRemoved(roots: [UInt32]) -> Bool {
                 stack.removeAll(keepingCapacity: true)
                 stack.append(contentsOf: roots)
                 var visited = 0
                 while let current = stack.popLast() {
                     if visited & 0xFFF == 0, shouldCancel() { return false }
                     visited &+= 1
-
                     let currentIndex = Int(current)
-                    guard currentIndex >= 0, currentIndex < oldCount, !flags[currentIndex] else {
+                    guard currentIndex >= 0, currentIndex < oldCount, !removed[currentIndex] else {
                         continue
                     }
-                    flags[currentIndex] = true
-                    count += 1
-                    if let owner {
-                        deferredOwner[currentIndex] = owner
-                    }
-
+                    removed[currentIndex] = true
+                    removedCount += 1
                     let node = oldNodes[currentIndex]
                     guard node.firstChildIndex != FileNode.invalid else { continue }
                     let start = Int(node.firstChildIndex)
@@ -1336,18 +1305,45 @@ public final class FileTree: @unchecked Sendable {
                 return true
             }
 
-            for resolved in resolvedTargets {
-                guard markSubtree(
-                    roots: resolved.removeRoots,
-                    into: &removed,
-                    count: &removedCount
-                ) else { return false }
+            func markRelocated(roots: [UInt32]) -> Bool {
+                stack.removeAll(keepingCapacity: true)
+                stack.append(contentsOf: roots)
+                var visited = 0
+                while let current = stack.popLast() {
+                    if visited & 0xFFF == 0, shouldCancel() { return false }
+                    visited &+= 1
+                    let currentIndex = Int(current)
+                    guard currentIndex >= 0, currentIndex < oldCount else { continue }
+                    // Nested targets may remove grandchildren inside an ancestor's
+                    // relocation region - never flag those as relocated.
+                    guard !removed[currentIndex], !relocated[currentIndex] else { continue }
+                    relocated[currentIndex] = true
+                    relocatedCount += 1
+                    let node = oldNodes[currentIndex]
+                    guard node.firstChildIndex != FileNode.invalid else { continue }
+                    let start = Int(node.firstChildIndex)
+                    let end = min(start + Int(node.childCount), oldCount)
+                    for child in start..<end where !removed[child] {
+                        stack.append(UInt32(child))
+                    }
+                }
+                return true
             }
 
-            // Relocate kept direct children (and their descendants) when the target will
-            // also append staged additions - otherwise the new children land at the
-            // array tail and the target's child slice splits.
-            for resolved in resolvedTargets where resolved.relocateKept {
+            for resolved in resolvedTargets {
+                guard markRemoved(roots: resolved.removeRoots) else { return false }
+            }
+            if let reason = Self.stagedReplacementViolation(
+                targets: resolvedTargets.map {
+                    (target: $0.target, removeChildIndices: $0.removeRoots as [UInt32]?)
+                },
+                nodes: oldNodes,
+                removed: removed
+            ) {
+                preconditionFailure(reason)
+            }
+
+            for resolved in resolvedTargets where resolved.hasAdditions {
                 let target = Int(resolved.target)
                 let targetNode = oldNodes[target]
                 guard targetNode.firstChildIndex != FileNode.invalid else { continue }
@@ -1355,17 +1351,10 @@ public final class FileTree: @unchecked Sendable {
                 let end = min(start + Int(targetNode.childCount), oldCount)
                 var keptRoots: [UInt32] = []
                 keptRoots.reserveCapacity(max(0, end - start - resolved.removeRoots.count))
-                for child in start..<end {
-                    if !removed[child] {
-                        keptRoots.append(UInt32(child))
-                    }
+                for child in start..<end where !removed[child] {
+                    keptRoots.append(UInt32(child))
                 }
-                guard markSubtree(
-                    roots: keptRoots,
-                    into: &deferred,
-                    count: &deferredCount,
-                    owner: resolved.target
-                ) else { return false }
+                guard markRelocated(roots: keptRoots) else { return false }
             }
 
             var stagedAppendedCount = 0
@@ -1375,20 +1364,16 @@ public final class FileTree: @unchecked Sendable {
                 precondition(!sum.overflow, "staged replacement node count overflow")
                 stagedAppendedCount = sum.partialValue
             }
-            // Deferred nodes leave the survivor walk and re-enter via the append block,
+            // Relocated nodes leave the survivor walk and re-enter via slice emission,
             // so they count toward the final size once - same as a plain survivor.
-            let survivorsStayInPlace = oldCount - removedCount - deferredCount
-            let finalWithoutStaged = survivorsStayInPlace.addingReportingOverflow(deferredCount)
-            precondition(!finalWithoutStaged.overflow, "staged replacement node count overflow")
-            let finalCountResult = finalWithoutStaged.partialValue
-                .addingReportingOverflow(stagedAppendedCount)
-            precondition(!finalCountResult.overflow
-                         && finalCountResult.partialValue <= Int(UInt32.max),
+            let plannedFinalCount = oldCount - removedCount + stagedAppendedCount
+            precondition(plannedFinalCount >= 0
+                         && plannedFinalCount <= Int(UInt32.max),
                          "staged replacement result exceeds FileTree's UInt32 index space")
 
             var oldToNew = Array(repeating: FileNode.invalid, count: oldCount)
             var newNodes: [FileNode] = []
-            newNodes.reserveCapacity(finalCountResult.partialValue)
+            newNodes.reserveCapacity(plannedFinalCount)
             var newStringPool = Data()
             var stagedNameBytes = 0
             for resolved in resolvedTargets {
@@ -1425,13 +1410,12 @@ public final class FileTree: @unchecked Sendable {
                 }
             }
 
-            // Copy non-removed, non-deferred survivors in original order. Parent and
-            // child links are cleared now and rebuilt after deferred + staged appends.
+            // Survivor walk: non-removed, non-relocated nodes stay in place.
             oldStringPool.withUnsafeBytes { rawPool in
                 let pool = rawPool.bindMemory(to: UInt8.self)
                 for oldIndex in oldNodes.indices {
                     if oldIndex & 0xFFF == 0, shouldCancel() { return }
-                    guard !removed[oldIndex], !deferred[oldIndex] else { continue }
+                    guard !removed[oldIndex], !relocated[oldIndex] else { continue }
 
                     var node = oldNodes[oldIndex]
                     node.parentIndex = FileNode.invalid
@@ -1449,11 +1433,9 @@ public final class FileTree: @unchecked Sendable {
             }
             guard !shouldCancel() else { return false }
 
-            // Restore parent links for in-place survivors only. Deferred nodes get their
-            // parents when they are emitted into the target's append block.
             for oldIndex in oldNodes.indices {
                 if oldIndex & 0xFFF == 0, shouldCancel() { return false }
-                guard !deferred[oldIndex] else { continue }
+                guard !relocated[oldIndex] else { continue }
                 let newIndex = oldToNew[oldIndex]
                 guard newIndex != FileNode.invalid else { continue }
                 let oldParent = oldNodes[oldIndex].parentIndex
@@ -1468,31 +1450,36 @@ public final class FileTree: @unchecked Sendable {
             }
             guard !shouldCancel() else { return false }
 
-            // Per target: kept direct children + staged additions must form one contiguous
-            // child slice. Descendants of kept children are emitted after that slice so
-            // they cannot land between siblings (the failure mode of a flat "all deferred
-            // ascending" pass). Ascending old-index order still preserves parent-before-
-            // child inside each relocated subtree.
-            var appendedVisited = 0
-            for resolved in resolvedTargets {
-                let targetNew = oldToNew[Int(resolved.target)]
-                precondition(targetNew != FileNode.invalid,
-                             "staged replacement target did not survive compaction")
+            // Ascending-owner slice emission. Parent index < child index means this
+            // order is a valid topological order for nested targets.
+            var cancelled = false
+            var stagedNewIndexScratch = [UInt32]()
+            oldStringPool.withUnsafeBytes { rawPool in
+                let pool = rawPool.bindMemory(to: UInt8.self)
+                for oldIndex in 0..<oldCount {
+                    if oldIndex & 0xFFF == 0, shouldCancel() {
+                        cancelled = true
+                        return
+                    }
+                    if removed[oldIndex] { continue }
 
-                if resolved.relocateKept {
-                    // 1. Kept direct children first - they must sit with staged
-                    //    additions as one contiguous child range of the target.
-                    oldStringPool.withUnsafeBytes { rawPool in
-                        let pool = rawPool.bindMemory(to: UInt8.self)
-                        for oldIndex in oldNodes.indices {
-                            guard deferred[oldIndex],
-                                  deferredOwner[oldIndex] == resolved.target,
-                                  oldNodes[oldIndex].parentIndex == resolved.target
-                            else { continue }
-                            if appendedVisited & 0xFFF == 0, shouldCancel() { return }
-                            appendedVisited &+= 1
-                            var node = oldNodes[oldIndex]
-                            node.parentIndex = targetNew
+                    let slot = isTarget[oldIndex] ? slotByTarget[UInt32(oldIndex)] : nil
+                    let hasAdditions = slot.map { resolvedTargets[$0].hasAdditions } ?? false
+                    guard relocated[oldIndex] || hasAdditions else { continue }
+
+                    let parentNew = oldToNew[oldIndex]
+                    precondition(parentNew != FileNode.invalid,
+                                 "slice owner was not emitted before its slice")
+
+                    let owner = oldNodes[oldIndex]
+                    if owner.firstChildIndex != FileNode.invalid {
+                        let start = Int(owner.firstChildIndex)
+                        let end = min(start + Int(owner.childCount), oldCount)
+                        for child in start..<end where !removed[child] {
+                            precondition(oldToNew[child] == FileNode.invalid,
+                                         "node emitted twice during staged replacement")
+                            var node = oldNodes[child]
+                            node.parentIndex = parentNew
                             node.firstChildIndex = FileNode.invalid
                             node.childCount = 0
                             appendNameBytes(
@@ -1501,115 +1488,76 @@ public final class FileTree: @unchecked Sendable {
                                 requestedLength: Int(node.nameLength),
                                 onto: &node
                             )
-                            oldToNew[oldIndex] = UInt32(newNodes.count)
+                            oldToNew[child] = UInt32(newNodes.count)
                             newNodes.append(node)
                         }
                     }
-                    guard !shouldCancel() else { return false }
 
-                    // 2. Staged additions (direct children + their descendants)
-                    //    immediately after the kept siblings. Names come from the
-                    //    staged pool - not the destination tree's old pool.
-                    if resolved.stagedNodes.count > 1 {
-                        let base = UInt32(newNodes.count)
-                        resolved.stagedStringPool.withUnsafeBytes { rawPool in
-                            let pool = rawPool.bindMemory(to: UInt8.self)
-                            for stagedIndex in 1..<resolved.stagedNodes.count {
-                                if appendedVisited & 0xFFF == 0, shouldCancel() { return }
-                                appendedVisited &+= 1
-
-                                var node = resolved.stagedNodes[stagedIndex]
-                                let stagedParent = node.parentIndex
-                                precondition(stagedParent != FileNode.invalid
-                                             && Int(stagedParent) < resolved.stagedNodes.count,
-                                             "staged node has an invalid parent")
-                                node.parentIndex = stagedParent == 0
-                                    ? targetNew
-                                    : base + (stagedParent - 1)
-                                node.firstChildIndex = FileNode.invalid
-                                node.childCount = 0
-                                appendNameBytes(
-                                    from: pool,
-                                    nameStart: Int(node.nameOffset),
-                                    requestedLength: Int(node.nameLength),
-                                    onto: &node
-                                )
-                                newNodes.append(node)
-                            }
-                        }
-                        guard !shouldCancel() else { return false }
-                    }
-
-                    // 3. Descendants of kept children - after the target's complete
-                    //    direct-child slice, so they never split it.
-                    oldStringPool.withUnsafeBytes { rawPool in
-                        let pool = rawPool.bindMemory(to: UInt8.self)
-                        for oldIndex in oldNodes.indices {
-                            guard deferred[oldIndex],
-                                  deferredOwner[oldIndex] == resolved.target,
-                                  oldToNew[oldIndex] == FileNode.invalid
-                            else { continue }
-                            if appendedVisited & 0xFFF == 0, shouldCancel() { return }
-                            appendedVisited &+= 1
-                            var node = oldNodes[oldIndex]
-                            let oldParent = oldNodes[oldIndex].parentIndex
-                            precondition(oldParent != FileNode.invalid,
-                                         "deferred node missing parent")
-                            let newParent = oldToNew[Int(oldParent)]
-                            precondition(newParent != FileNode.invalid,
-                                         "deferred node's parent was not relocated first")
-                            node.parentIndex = newParent
-                            node.firstChildIndex = FileNode.invalid
-                            node.childCount = 0
-                            appendNameBytes(
-                                from: pool,
-                                nameStart: Int(node.nameOffset),
-                                requestedLength: Int(node.nameLength),
-                                onto: &node
-                            )
-                            oldToNew[oldIndex] = UInt32(newNodes.count)
-                            newNodes.append(node)
-                        }
-                    }
-                    guard !shouldCancel() else { return false }
-                    continue
-                }
-
-                // Removal-only / empty-add path: kept children already compacted in the
-                // survivor walk. Append any staged block the same way full replacement does.
-                guard resolved.stagedNodes.count > 1 else { continue }
-                let base = UInt32(newNodes.count)
-                resolved.stagedStringPool.withUnsafeBytes { rawPool in
-                    let pool = rawPool.bindMemory(to: UInt8.self)
-                    for stagedIndex in 1..<resolved.stagedNodes.count {
-                        if appendedVisited & 0xFFF == 0, shouldCancel() { return }
-                        appendedVisited &+= 1
-
-                        var node = resolved.stagedNodes[stagedIndex]
-                        let stagedParent = node.parentIndex
-                        precondition(stagedParent != FileNode.invalid
-                                     && Int(stagedParent) < resolved.stagedNodes.count,
-                                     "staged node has an invalid parent")
-                        node.parentIndex = stagedParent == 0
-                            ? targetNew
-                            : base + (stagedParent - 1)
-                        node.firstChildIndex = FileNode.invalid
-                        node.childCount = 0
-                        appendNameBytes(
-                            from: pool,
-                            nameStart: Int(node.nameOffset),
-                            requestedLength: Int(node.nameLength),
-                            onto: &node
+                    guard hasAdditions, let slot else { continue }
+                    let resolved = resolvedTargets[slot]
+                    stagedNewIndexScratch.removeAll(keepingCapacity: true)
+                    if stagedNewIndexScratch.count < resolved.stagedNodes.count {
+                        stagedNewIndexScratch = Array(
+                            repeating: FileNode.invalid,
+                            count: resolved.stagedNodes.count
                         )
-                        newNodes.append(node)
+                    } else {
+                        for i in stagedNewIndexScratch.indices {
+                            stagedNewIndexScratch[i] = FileNode.invalid
+                        }
+                    }
+                    resolved.stagedStringPool.withUnsafeBytes { stagedRaw in
+                        let stagedPool = stagedRaw.bindMemory(to: UInt8.self)
+                        // Direct children of the placeholder complete this owner's slice.
+                        for stagedIndex in 1..<resolved.stagedNodes.count
+                        where resolved.stagedNodes[stagedIndex].parentIndex == 0 {
+                            if cancelled { return }
+                            var node = resolved.stagedNodes[stagedIndex]
+                            node.parentIndex = parentNew
+                            node.firstChildIndex = FileNode.invalid
+                            node.childCount = 0
+                            appendNameBytes(
+                                from: stagedPool,
+                                nameStart: Int(node.nameOffset),
+                                requestedLength: Int(node.nameLength),
+                                onto: &node
+                            )
+                            stagedNewIndexScratch[stagedIndex] = UInt32(newNodes.count)
+                            newNodes.append(node)
+                        }
+                        // Remaining staged descendants, parents already remapped.
+                        for stagedIndex in 1..<resolved.stagedNodes.count
+                        where resolved.stagedNodes[stagedIndex].parentIndex != 0 {
+                            if cancelled { return }
+                            var node = resolved.stagedNodes[stagedIndex]
+                            let stagedParent = Int(node.parentIndex)
+                            precondition(
+                                stagedParent >= 0 && stagedParent < stagedNewIndexScratch.count
+                                    && stagedNewIndexScratch[stagedParent] != FileNode.invalid,
+                                "staged node emitted before its parent"
+                            )
+                            node.parentIndex = stagedNewIndexScratch[stagedParent]
+                            node.firstChildIndex = FileNode.invalid
+                            node.childCount = 0
+                            appendNameBytes(
+                                from: stagedPool,
+                                nameStart: Int(node.nameOffset),
+                                requestedLength: Int(node.nameLength),
+                                onto: &node
+                            )
+                            stagedNewIndexScratch[stagedIndex] = UInt32(newNodes.count)
+                            newNodes.append(node)
+                        }
                     }
                 }
-                guard !shouldCancel() else { return false }
             }
+            guard !cancelled, !shouldCancel() else { return false }
 
-            // Derive every first-child link and count from parent links. The contiguity
-            // check is load-bearing: a structurally plausible but split child slice would
-            // make later traversal silently read unrelated siblings as children.
+            precondition(
+                newNodes.count == plannedFinalCount,
+                "staged replacement emitted a different node count than planned"
+            )
+
             for childIndex in newNodes.indices {
                 if childIndex & 0xFFF == 0, shouldCancel() { return false }
                 let parent = newNodes[childIndex].parentIndex
@@ -1630,7 +1578,6 @@ public final class FileTree: @unchecked Sendable {
             }
             guard !shouldCancel() else { return false }
 
-            // The only mutation: publish the fully-built, fully-linked arrays together.
             nodes = newNodes
             stringPool = newStringPool
             lowercaseNamePool.removeAll(keepingCapacity: true)
@@ -1638,6 +1585,50 @@ public final class FileTree: @unchecked Sendable {
             isSearchIndexBuilt = false
             return true
         }
+    }
+
+    /// Pure validation for ``applyStagedReplacements``. Returns a reason string when the
+    /// batch is illegal so tests can assert without crashing the runner.
+    static func stagedReplacementViolation(
+        targets: [(target: UInt32, removeChildIndices: [UInt32]?)],
+        nodes: [FileNode],
+        removed: [Bool]? = nil
+    ) -> String? {
+        let count = nodes.count
+        var seen = [Bool](repeating: false, count: count)
+        for entry in targets {
+            let target = Int(entry.target)
+            guard target >= 0, target < count else {
+                return "staged replacement target is outside the tree"
+            }
+            if seen[target] {
+                return "staged replacement target is duplicated"
+            }
+            seen[target] = true
+            if let removed, removed[target] {
+                return "staged replacement target lies inside another target's removed subtree"
+            }
+            if let explicit = entry.removeChildIndices {
+                let targetNode = nodes[target]
+                let childStart: Int
+                let childEnd: Int
+                if targetNode.firstChildIndex == FileNode.invalid {
+                    childStart = 0
+                    childEnd = 0
+                } else {
+                    childStart = Int(targetNode.firstChildIndex)
+                    childEnd = min(childStart + Int(targetNode.childCount), count)
+                }
+                for child in explicit {
+                    let childIndex = Int(child)
+                    guard childIndex >= childStart, childIndex < childEnd,
+                          nodes[childIndex].parentIndex == entry.target else {
+                        return "removeChildIndices must name direct children of target"
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     /// Count every node in the subtree rooted at `index` - the root itself plus every

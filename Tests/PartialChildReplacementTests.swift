@@ -401,4 +401,109 @@ struct PartialChildReplacementTests {
         tree.propagateSizes()
         #expect(tree.node(at: 0)?.fileSize != beforeDouble)
     }
+
+    // MARK: - Nested targets
+
+    @Test("A nested target under an unchanged entry applies in one compaction")
+    func nestedTargetUnderUnchangedEntry() throws {
+        let tree = FileTree(stagingCapacityHint: 64)
+        tree.setRootPath("/fixture")
+        tree.setCaseSensitivity(true)
+        tree.addNode(directory(seed: 1), name: "fixture")
+        tree.addChildren([(directory(seed: 2), "parent")], parentIndex: 0)
+        let parent = UInt32(1)
+        tree.addChildren([
+            (directory(seed: 3), "keepDir"),
+            (file(seed: 4), "other.txt"),
+        ], parentIndex: parent)
+        let keepDir = try #require(tree.nodeIndex(forPath: "/fixture/parent/keepDir"))
+        tree.addChildren([
+            (file(seed: 5), "x"),
+            (file(seed: 6), "y"),
+        ], parentIndex: keepDir)
+
+        let parentStaged = stagedAdditions(
+            targetName: "parent",
+            children: [(name: "new.txt", seed: 40, isDirectory: false)]
+        )
+        let keepStaged = stagedAdditions(
+            targetName: "keepDir",
+            children: [(name: "nested-new.txt", seed: 50, isDirectory: false)]
+        )
+
+        #expect(tree.applyStagedReplacements([
+            (target: parent, removeChildIndices: [], staged: parentStaged),
+            (target: keepDir, removeChildIndices: [], staged: keepStaged),
+        ]))
+        assertDirectChildrenAreContiguous(tree)
+
+        let namesAtParent = tree.children(of: try #require(tree.nodeIndex(forPath: "/fixture/parent")))
+            .map { tree.name(at: UInt32($0)) }
+        #expect(Set(namesAtParent) == Set(["keepDir", "other.txt", "new.txt"]))
+        let namesAtKeep = tree.children(of: try #require(tree.nodeIndex(forPath: "/fixture/parent/keepDir")))
+            .map { tree.name(at: UInt32($0)) }
+        #expect(Set(namesAtKeep) == Set(["x", "y", "nested-new.txt"]))
+        #expect(tree.node(at: try #require(tree.nodeIndex(forPath: "/fixture/parent/keepDir/x")))?.inode == 20_005)
+    }
+
+    @Test("Nested target batch output does not depend on caller order")
+    func nestedTargetBatchIsOrderIndependent() throws {
+        func build() -> (tree: FileTree, parent: UInt32, child: UInt32) {
+            let tree = FileTree(stagingCapacityHint: 64)
+            tree.setRootPath("/fixture")
+            tree.setCaseSensitivity(true)
+            tree.addNode(directory(seed: 1), name: "fixture")
+            tree.addChildren([(directory(seed: 2), "parent")], parentIndex: 0)
+            let parent = UInt32(1)
+            tree.addChildren([(directory(seed: 3), "child")], parentIndex: parent)
+            let child = tree.nodeIndex(forPath: "/fixture/parent/child")!
+            tree.addChildren([(file(seed: 4), "leaf.txt")], parentIndex: child)
+            return (tree, parent, child)
+        }
+        let parentStaged = stagedAdditions(
+            targetName: "parent",
+            children: [(name: "p-new.txt", seed: 40, isDirectory: false)]
+        )
+        let childStaged = stagedAdditions(
+            targetName: "child",
+            children: [(name: "c-new.txt", seed: 50, isDirectory: false)]
+        )
+
+        let parentFirst = build()
+        #expect(parentFirst.tree.applyStagedReplacements([
+            (target: parentFirst.parent, removeChildIndices: [], staged: parentStaged),
+            (target: parentFirst.child, removeChildIndices: [], staged: childStaged),
+        ]))
+        let childFirst = build()
+        #expect(childFirst.tree.applyStagedReplacements([
+            (target: childFirst.child, removeChildIndices: [], staged: childStaged),
+            (target: childFirst.parent, removeChildIndices: [], staged: parentStaged),
+        ]))
+
+        #expect(identitySnapshot(parentFirst.tree) == identitySnapshot(childFirst.tree))
+        assertDirectChildrenAreContiguous(parentFirst.tree)
+        assertDirectChildrenAreContiguous(childFirst.tree)
+    }
+
+    @Test("stagedReplacementViolation names illegal batches without crashing")
+    func stagedReplacementViolations() {
+        let tree = FileTree(stagingCapacityHint: 8)
+        tree.setRootPath("/fixture")
+        tree.addNode(directory(seed: 1), name: "fixture")
+        tree.addChildren([(directory(seed: 2), "a")], parentIndex: 0)
+        let nodes = tree.nodesSnapshot()
+
+        #expect(FileTree.stagedReplacementViolation(
+            targets: [(target: 99, removeChildIndices: nil)],
+            nodes: nodes
+        ) == "staged replacement target is outside the tree")
+        #expect(FileTree.stagedReplacementViolation(
+            targets: [(target: 1, removeChildIndices: nil), (target: 1, removeChildIndices: [])],
+            nodes: nodes
+        ) == "staged replacement target is duplicated")
+        #expect(FileTree.stagedReplacementViolation(
+            targets: [(target: 1, removeChildIndices: [0])],
+            nodes: nodes
+        ) == "removeChildIndices must name direct children of target")
+    }
 }

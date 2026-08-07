@@ -279,40 +279,22 @@ enum PathCollapse {
         outermostRoots(paths, shallow: [])
     }
 
-    /// Kind-aware variant: only DEEP roots claim their descendants. A shallow root's
-    /// work is one entry level, disjoint from any nested target's work, so it must not
-    /// swallow the precise deeper targets beneath it - that swallowing is exactly how a
-    /// file-derived `/Users/okan` target used to absorb every real change location and
-    /// then get charged the whole home folder. Exact duplicate paths still dedupe;
-    /// callers ensure a path with directory-level evidence is not in `shallow`.
+    /// Deduplicate changed-directory paths while preserving first-seen order.
+    ///
+    /// Every directory target is one level of work (`selective-child-rescan`): a parent
+    /// that FSEvents also reported does not re-enumerate its children, so it must not
+    /// swallow nested targets whose own levels still need reconciling. Exact duplicates
+    /// still collapse. The `shallow` parameter is retained for call-site compatibility
+    /// with warm-start / living-view evidence tagging; it no longer affects claiming,
+    /// because deep and shallow now share the same level-diff shape.
     static func outermostRoots(_ paths: [String], shallow: Set<String>) -> [String] {
+        _ = shallow
         var uniqueInOrder: [String] = []
         var seen = Set<String>()
         for path in paths where seen.insert(path).inserted {
             uniqueInOrder.append(path)
         }
-
-        let shallowestFirst = uniqueInOrder.enumerated().sorted { a, b in
-            let depthA = a.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
-            let depthB = b.element.utf8.reduce(0) { $1 == UInt8(ascii: "/") ? $0 + 1 : $0 }
-            if depthA != depthB { return depthA < depthB }
-            return a.offset < b.offset
-        }
-
-        var claimed: [String] = []
-        var survivors = Set<String>()
-        for (_, path) in shallowestFirst {
-            let nested = claimed.contains { ancestor in
-                path.hasPrefix(ancestor.hasSuffix("/") ? ancestor : ancestor + "/")
-            }
-            if nested { continue }
-            survivors.insert(path)
-            if !shallow.contains(path) {
-                claimed.append(path)
-            }
-        }
-
-        return uniqueInOrder.filter { survivors.contains($0) }
+        return uniqueInOrder
     }
 }
 
@@ -358,11 +340,14 @@ public enum WarmStartPlanner {
     /// estimated WORK instead catches that shape. The production AppState call supplies
     /// both values, so this is the primary live gate rather than an optional dormant one.
     ///
-    /// `maxPatchRoots` is only a sanity backstop and runs after the item rule. Batched
-    /// subtree splice changed 38 roots from 9.14s across 38 full-tree recompactions to one
-    /// 0.118-0.164s compaction, so per-root structural cost is no longer a reason to reject
-    /// ordinary many-root patches. The default 512 is well above the measured 84/99/131
-    /// accumulated-root workloads while still refusing pathological unbounded input.
+    /// `maxPatchRoots` is only a sanity backstop and runs after the item rule. Selective
+    /// child rescan made every reported directory its own level of work, so root counts
+    /// are no longer collapsed and routinely reach the low thousands on a busy launch
+    /// window (~1,300 measured). Per-root cost is one level read plus a slice emission,
+    /// both already governed by the item-fraction rule and the exact post-Phase-A guard;
+    /// 5,000 matches `unknownDirectoryCountBackstop` and `LiveRefreshPolicy`'s storm
+    /// threshold. Batched subtree splice already showed dozens of roots compact in
+    /// well under a second.
     public static func decide(
         cacheAvailable: Bool,
         replay: JournalReplay.Outcome?,
@@ -372,7 +357,7 @@ public enum WarmStartPlanner {
         shallowTargets: Set<String> = [],
         maxChangedFraction: Double = 0.20,
         maxChangedItemFraction: Double = defaultMaxChangedItemFraction,
-        maxPatchRoots: Int = 512
+        maxPatchRoots: Int = 5_000
     ) -> Decision {
         guard cacheAvailable else {
             return .coldFallback(reason: "no cache available")
@@ -483,10 +468,12 @@ public enum WarmStartPlanner {
     /// snapshot across every root so recording estimates does not repeat the aggregate
     /// estimator's whole-tree snapshot/traversal setup immediately before a patch.
     ///
-    /// A SHALLOW root (file-derived; see `JournalReplay.fileOnlyTargets`) is charged its
-    /// direct child count, because its reconcile reads exactly one entry level. Charging
-    /// it the cached subtree is what made `.DS_Store` noise in the home folder read as
-    /// "~92% of files changed" and kept every launch cold.
+    /// Every directory target is charged its direct child count: reconcile reads that
+    /// one entry level first (`selective-child-rescan`), and work revealed by the level
+    /// diff is governed downstream by the pre-staging reshape budget and the exact
+    /// post-Phase-A staged-item guard. Charging a deep root its cached subtree is what
+    /// made ordinary directory events read as "~84% of files changed" and kept launches
+    /// cold. `shallowTargets` is retained for PathCollapse's call-site signature only.
     public static func estimatedPatchItemCounts(
         forChangedPaths targets: [String],
         cachedTree: FileTree,
@@ -504,11 +491,7 @@ public enum WarmStartPlanner {
                 estimates[root] = unresolvedRootItemEstimate
                 continue
             }
-            if shallowTargets.contains(root) {
-                estimates[root] = max(1, Int(snapshot.nodes[Int(index)].childCount))
-            } else {
-                estimates[root] = cachedTree.subtreeItemCount(at: index)
-            }
+            estimates[root] = max(1, Int(snapshot.nodes[Int(index)].childCount))
         }
         return estimates
     }

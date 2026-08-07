@@ -514,11 +514,12 @@ public struct SubtreeRescanReport: Sendable {
     /// over the caller's budget. This stays distinct from cancellation and path-resolution
     /// failures so a warm-start caller can reuse its coherent cold-abandonment path.
     public let stagedItemBudgetExceeded: StagedItemBudgetExceeded?
-    /// Subset of `rescannedRoots` reconciled IN PLACE at one entry level (file-derived
-    /// targets whose level matched the cached children). A root-level entry here is a
-    /// successful reconcile, NOT the "couldn't resolve anything narrower" signal that a
-    /// root-level entry in `rescannedRoots` alone historically carried - callers with a
-    /// root-level cold-fallback rule must exempt these.
+    /// Subset of `rescannedRoots` reconciled by level diff - either metadata-only in
+    /// place, or structurally via the selective partial mutation. Historical name kept
+    /// for the AppState abandon contract: a root-level entry here is a successful
+    /// reconcile, NOT the "couldn't resolve anything narrower" signal that a root-level
+    /// entry in `rescannedRoots` alone historically carried. Callers with a root-level
+    /// cold-fallback rule must exempt these.
     public let shallowRoots: [String]
     public let metrics: SubtreeRescanMetrics
 
@@ -890,16 +891,11 @@ public final class FileScanner: @unchecked Sendable {
         let treeRoot = tree.path(at: 0)
 
         // Abandon before Phase A, and critically before ANY mutation, when the caller
-        // cannot trust a partial patch. AppState has always treated either shape as a
-        // cold-fallback signal; doing the preflight here strengthens that intended rule
-        // by ensuring a mixed valid+unresolved batch cannot alter the visible tree before
-        // AppState notices the report. A SHALLOW root-level target is exempt: files
-        // changing directly inside the scan root only require reconciling the root's own
-        // entry level, which Phase A0 below handles - abandoning for it was one of the
-        // two paths that kept every launch cold.
-        let deepRootLevelTarget = rescannedRoots.contains(treeRoot)
-            && !shallowResolved.contains(treeRoot)
-        if !unresolvedPaths.isEmpty || deepRootLevelTarget {
+        // cannot trust a partial patch. Unresolved paths alone still force that
+        // fail-closed path. A root-level target - shallow OR deep - is no longer an
+        // automatic abandon: selective-child-rescan reconciles it by level diff the
+        // same way as every other directory (see openspec selective-child-rescan).
+        if !unresolvedPaths.isEmpty {
             let now = clock.now
             let metrics = SubtreeRescanMetrics(
                 preflightAndPlanningSeconds: Self.wallSeconds(totalStart.duration(to: now)),
@@ -943,19 +939,16 @@ public final class FileScanner: @unchecked Sendable {
             return false
         }
 
-        // ---- Phase A0: shallow one-level reconcile ---------------------------------
-        // A shallow target's fresh entry level is read WITHOUT descending. If its
-        // (name, type) set matches the cached children, only metadata changed there and
-        // the target is applied in place before Phase B; otherwise it PROMOTES to the
-        // ordinary full-subtree semantics below. Bundle targets keep bundle semantics
-        // regardless of kind.
+        // ---- Phase A0: level-diff every non-bundle target --------------------------------
+        // Every directory target's fresh entry level is read WITHOUT descending. The level
+        // is compared with the cached children (`DirectoryLevelDiff`); metadata-only hits
+        // are applied in place, and structural hits stage only the entries that differ.
+        // Bundle targets keep opaque bundle semantics regardless of event kind.
         var shallowLevels: [String: FileTree] = [:]
-        var promotedRoots: [String] = []
-        var predictedPromotionItemCount = 0
-        let shallowPlans = plans.filter {
-            shallowResolved.contains($0.targetPath) && !$0.isBundle
-        }
-        if !shallowPlans.isEmpty {
+        var structuralPlans: [StructuralLevelPlan] = []
+        let levelPlans = plans.filter { !$0.isBundle }
+        let bundleOnlyPlans = plans.filter { $0.isBundle }
+        if !levelPlans.isEmpty {
             let levelSnapshot = tree.pathBuildingSnapshot()
             let rawFilesystemForScan = filesystem as? RealFilesystemProvider
             let rawBuffer = rawFilesystemForScan.map { _ in
@@ -967,11 +960,11 @@ public final class FileScanner: @unchecked Sendable {
             defer { rawBuffer?.deallocate() }
             var rawScratch = RawScanScratch()
             var rawArena = RawScanArena()
-            for plan in shallowPlans {
+            for plan in levelPlans {
                 guard !isCancelled, !Task.isCancelled else { break }
                 // A throwaway visited guard: A0 never recurses, and sharing the batch's
                 // guard would mark this level's subdirectories visited before Phase A
-                // legitimately enumerates a promoted subtree.
+                // legitimately enumerates an added subtree.
                 let levelVisited = VisitedDirectories(
                     rootDevice: rootDevice,
                     mountTraversalScope: tree.mountTraversalScope,
@@ -998,42 +991,86 @@ public final class FileScanner: @unchecked Sendable {
                     deferredBuilder: nil,
                     rawArena: &rawArena
                 )
-                if Self.levelMatchesCachedChildren(
+
+                guard let targetIndex = Self.resolveIndex(
                     of: plan.targetPath,
-                    staging: staging,
                     nodes: levelSnapshot.nodes,
                     stringPool: levelSnapshot.stringPool,
                     rootPath: levelSnapshot.rootPath
-                ) {
+                ) else { continue }
+
+                let cachedIdentities = Self.cachedChildIdentities(
+                    of: targetIndex,
+                    nodes: levelSnapshot.nodes,
+                    stringPool: levelSnapshot.stringPool
+                )
+                let freshIdentities = Self.freshChildIdentities(from: staging)
+                let diff = DirectoryLevelDiff.compare(
+                    cached: cachedIdentities,
+                    fresh: freshIdentities,
+                    isCaseSensitive: tree.isCaseSensitive
+                )
+
+                if diff.isMetadataOnly {
                     shallowLevels[plan.targetPath] = staging
-                } else {
-                    promotedRoots.append(plan.targetPath)
-                    // A promotion inherits full-subtree cost - price it from the cached
-                    // tree so a doomed patch can abandon BEFORE staging.
-                    if let components = Self.relativeComponents(
-                           of: plan.targetPath, rootPath: levelSnapshot.rootPath
-                       ),
-                       let index = FileTree.descendPath(
-                           components,
-                           nodes: levelSnapshot.nodes,
-                           stringPool: levelSnapshot.stringPool
-                       ) {
-                        predictedPromotionItemCount += tree.subtreeItemCount(at: index)
-                    }
+                    continue
                 }
+
+                let removeNames = Set(diff.requiresRemoval)
+                let removeChildIndices = Self.directChildIndices(
+                    named: removeNames,
+                    of: targetIndex,
+                    nodes: levelSnapshot.nodes,
+                    stringPool: levelSnapshot.stringPool,
+                    isCaseSensitive: tree.isCaseSensitive
+                )
+                // Complete reshape (nothing kept) is the one case whose committed work
+                // can still approach a full-subtree stage - price it from the cache so
+                // a doomed patch can abandon BEFORE staging. Partial diffs rely on the
+                // exact post-Phase-A guard; their additions are unbounded at estimate time.
+                // Summed only AFTER nested targets covered by another plan are dropped.
+                let predictedReshape = diff.unchanged.isEmpty
+                    ? tree.subtreeItemCount(at: targetIndex)
+                    : 0
+                structuralPlans.append(StructuralLevelPlan(
+                    targetPath: plan.targetPath,
+                    levelStaging: staging,
+                    removeChildIndices: removeChildIndices,
+                    enumerateNames: diff.requiresEnumeration,
+                    coveringNames: diff.requiresRemoval + diff.requiresEnumeration,
+                    predictedReshapeItemCount: predictedReshape
+                ))
             }
         }
 
-        // The recorded shallow-parent-splice residual, closed: a structural change at a
-        // giant root's own level used to stage its whole subtree (~82% of the tree,
-        // ~40 seconds, observed live) only for the exact post-Phase-A guard to abandon
-        // the patch anyway. When the cached price of the promotions alone already
-        // exceeds the caller's budget, refuse up front - same report shape as the
-        // post-staging guard, so the caller's cold-fallback path and reason line are
-        // identical, minus the wasted staging.
+        // Drop structural / shallow / bundle targets nested beneath an entry another
+        // target is about to remove or fully re-enumerate - that work is covered.
+        let coveringPrefixes = Set(structuralPlans.flatMap { plan in
+            plan.coveringNames.map { appendPathComponent(plan.targetPath, $0) }
+        })
+        func isCovered(_ path: String) -> Bool {
+            var candidate = path
+            while true {
+                if coveringPrefixes.contains(candidate) { return true }
+                let parent = (candidate as NSString).deletingLastPathComponent
+                guard !parent.isEmpty, parent != candidate else { return false }
+                candidate = parent
+            }
+        }
+        structuralPlans = structuralPlans.filter { !isCovered($0.targetPath) }
+        shallowLevels = shallowLevels.filter { !isCovered($0.key) }
+        let keptBundlePlans = bundleOnlyPlans.filter { !isCovered($0.targetPath) }
+
+        let predictedReshapeItemCount = structuralPlans.reduce(0) {
+            $0 + $1.predictedReshapeItemCount
+        }
+
+        // Pre-staging refuse for complete reshapes whose cached cost already exceeds the
+        // caller's budget - same report shape as the post-staging guard, so the caller's
+        // cold-fallback path and reason line are identical, minus the wasted staging.
         if let maximumStagedItemCount = options.maximumStagedItemCount,
-           predictedPromotionItemCount > maximumStagedItemCount,
-           predictedPromotionItemCount >= options.promotionRefusalFloor {
+           predictedReshapeItemCount > maximumStagedItemCount,
+           predictedReshapeItemCount >= options.promotionRefusalFloor {
             let now = clock.now
             let metrics = SubtreeRescanMetrics(
                 preflightAndPlanningSeconds: Self.wallSeconds(totalStart.duration(to: now)),
@@ -1048,63 +1085,56 @@ public final class FileScanner: @unchecked Sendable {
                 rescannedRoots: rescannedRoots,
                 unresolvedPaths: unresolvedPaths,
                 stagedItemBudgetExceeded: .init(
-                    actualStagedItemCount: predictedPromotionItemCount,
+                    actualStagedItemCount: predictedReshapeItemCount,
                     maximumStagedItemCount: maximumStagedItemCount
                 ),
                 metrics: metrics
             )
         }
 
-        // A promotion at the scan root means the root's own level changed shape - the
-        // existing root-level cold fallback applies, before any mutation.
-        if promotedRoots.contains(treeRoot) {
-            let now = clock.now
-            let metrics = SubtreeRescanMetrics(
-                preflightAndPlanningSeconds: Self.wallSeconds(totalStart.duration(to: now)),
-                totalSeconds: Self.wallSeconds(totalStart.duration(to: now)),
-                beforeNodeCount: beforeNodeCount,
-                afterNodeCount: tree.count,
-                requestedPathCount: changedDirectories.count,
-                rescannedRootCount: rescannedRoots.count
-            )
-            return SubtreeRescanReport(
-                requestedPaths: changedDirectories,
-                rescannedRoots: rescannedRoots,
-                unresolvedPaths: unresolvedPaths,
-                wasCancelled: isCancelled || Task.isCancelled,
-                metrics: metrics
-            )
-        }
-
-        // Everything that is not a metadata-equal shallow level keeps full-subtree
-        // semantics (deep, bundles, promotions, and shallow plans a cancellation
-        // skipped). Promotions claim their descendants; shallow levels nested inside
-        // any final deep root are covered by that root's staging and dropped.
-        let finalDeepRoots = PathCollapse.outermostRoots(
-            rescannedRoots.filter { shallowLevels[$0] == nil }
-        )
-        let finalDeepSet = Set(finalDeepRoots)
-        let keptShallowRoots = rescannedRoots.filter { path in
-            shallowLevels[path] != nil && !finalDeepRoots.contains { ancestor in
-                path.hasPrefix(ancestor.hasSuffix("/") ? ancestor : ancestor + "/")
-            }
-        }
+        let structuralRootSet = Set(structuralPlans.map(\.targetPath))
+        let keptShallowRoots = rescannedRoots.filter { shallowLevels[$0] != nil }
         let keptShallowSet = Set(keptShallowRoots)
-        shallowLevels = shallowLevels.filter { keptShallowSet.contains($0.key) }
+        let keptBundleRootSet = Set(keptBundlePlans.map(\.targetPath))
         let appliedRootOrder = rescannedRoots.filter {
-            finalDeepSet.contains($0) || keptShallowSet.contains($0)
+            structuralRootSet.contains($0)
+                || keptShallowSet.contains($0)
+                || keptBundleRootSet.contains($0)
         }
-        let deepPlans = plans.filter { finalDeepSet.contains($0.targetPath) }
         let preflightAndPlanningEnd = clock.now
 
         let phaseAStart = clock.now
-        let staged = await stageChangedRoots(
-            deepPlans,
+        let selectiveStaged = await stageSelectiveAdditions(
+            structuralPlans,
+            progress: progress,
+            visited: visited,
+            priority: options.priority
+        )
+        let bundleStaged = await stageChangedRoots(
+            keptBundlePlans,
             progress: progress,
             visited: visited,
             priority: options.priority
         )
         let phaseAEnd = clock.now
+
+        var staged: [String: StageResult] = bundleStaged
+        var removeChildIndicesByPath: [String: [UInt32]?] = [:]
+        for plan in structuralPlans {
+            removeChildIndicesByPath[plan.targetPath] = plan.removeChildIndices
+            if let staging = selectiveStaged[plan.targetPath] {
+                staged[plan.targetPath] = .directory(staging: staging)
+            } else if !plan.removeChildIndices.isEmpty {
+                // Removal-only: placeholder staging with no children. Phase B still needs
+                // an entry so the partial mutation can drop the named children.
+                let empty = FileTree(stagingCapacityHint: 1)
+                var placeholderRoot = FileNode()
+                placeholderRoot.isDirectory = true
+                _ = empty.addNode(placeholderRoot, name: "")
+                staged[plan.targetPath] = .directory(staging: empty)
+            }
+        }
+
         let rootStaging = appliedRootOrder.compactMap { path -> SubtreeRescanMetrics.RootStaging? in
             if let level = shallowLevels[path] {
                 return SubtreeRescanMetrics.RootStaging(
@@ -1133,6 +1163,9 @@ public final class FileScanner: @unchecked Sendable {
             count = sum.overflow ? Int.max : sum.partialValue
         }
         let actualStagedItemCount = rootStaging.reduce(into: 0) { count, root in
+            // Metadata-only levels are not "staged" against the budget - they never go
+            // through Phase A. Only structural / bundle work counts.
+            guard shallowLevels[root.path] == nil else { return }
             let sum = count.addingReportingOverflow(root.actualStagedItemCount)
             count = sum.overflow ? Int.max : sum.partialValue
         }
@@ -1176,15 +1209,39 @@ public final class FileScanner: @unchecked Sendable {
             )
         }
 
-        // Metadata-only shallow levels are applied in place BEFORE any compaction: no
-        // index is invalidated, so this never needs the onWillCommit pause, and the
-        // batch's mandatory aggregate recompute repairs the totals it touches.
+        // Metadata-only levels are applied in place BEFORE any compaction: no index is
+        // invalidated, so this never needs the onWillCommit pause. Unchanged siblings of
+        // structural targets get the same in-place refresh against the A0 level, still
+        // before compaction, so their metadata lands without touching their subtrees.
         var appliedShallowRoots: [String] = []
         if !shallowLevels.isEmpty, !isCancelled, !Task.isCancelled {
             let shallowUnresolved = applyShallowLevels(shallowLevels, tree: tree)
             unresolvedPaths.append(contentsOf: shallowUnresolved)
             let failed = Set(shallowUnresolved)
             appliedShallowRoots = keptShallowRoots.filter { !failed.contains($0) }
+        }
+        if !structuralPlans.isEmpty, !isCancelled, !Task.isCancelled {
+            let metadataLevels = Dictionary(uniqueKeysWithValues: structuralPlans.map {
+                ($0.targetPath, $0.levelStaging)
+            })
+            let allowlists = Dictionary(uniqueKeysWithValues: structuralPlans.map { plan -> (String, Set<String>) in
+                let level = plan.levelStaging.pathBuildingSnapshot()
+                let enumerate = Set(plan.enumerateNames)
+                // coveringNames = requiresRemoval ∪ requiresEnumeration. Unchanged fresh
+                // names are everything else at the level - only those get in-place updates.
+                let coveredFresh = Set(plan.coveringNames)
+                var unchanged = Set<String>()
+                for i in level.nodes.indices where i != 0 && level.nodes[i].parentIndex == 0 {
+                    let name = Self.nodeName(level.nodes[i], in: level.stringPool)
+                    if !coveredFresh.contains(name) && !enumerate.contains(name) {
+                        unchanged.insert(name)
+                    }
+                }
+                // coveringNames already includes enumerateNames; the enumerate check is
+                // redundant insurance if a caller ever builds a looser covering set.
+                return (plan.targetPath, unchanged)
+            })
+            _ = applyShallowLevels(metadataLevels, tree: tree, onlyNames: allowlists)
         }
 
         // Give a UI caller one MainActor turn to suspend index-based interaction before
@@ -1196,9 +1253,11 @@ public final class FileScanner: @unchecked Sendable {
             await onWillCommit?()
         }
 
+        let structuralPaths = appliedRootOrder.filter { staged[$0] != nil }
         let phaseB = applyStagedRoots(
-            finalDeepRoots,
+            structuralPaths,
             staged: staged,
+            removeChildIndicesByPath: removeChildIndicesByPath,
             tree: tree,
             progress: progress
         )
@@ -1247,21 +1306,45 @@ public final class FileScanner: @unchecked Sendable {
             appliedRootCount: phaseB.appliedRootCount + appliedShallowRoots.count,
             rootStaging: rootStaging
         )
+        // Structural level-diff roots are successful reconciles of the same kind as
+        // metadata-only shallow roots: callers with a root-level cold-fallback rule must
+        // exempt them. Report them together under `shallowRoots` (historical name kept
+        // for the AppState abandon contract; it now means "level-reconciled successfully").
+        let levelReconciledRoots = appliedShallowRoots + structuralPaths.filter {
+            !phaseB.unresolvedPaths.contains($0) && phaseB.committed
+        }
         return SubtreeRescanReport(
             requestedPaths: changedDirectories,
             rescannedRoots: appliedRootOrder,
             unresolvedPaths: unresolvedPaths,
             wasCancelled: isCancelled || Task.isCancelled,
-            shallowRoots: appliedShallowRoots,
+            shallowRoots: levelReconciledRoots,
             metrics: metrics
         )
     }
 
+    /// One collapsed root's batch-start shape:
     /// One collapsed root's batch-start shape: just enough to decide, up front, whether
     /// Phase A should enumerate it as a directory or compute it as an opaque bundle leaf.
     private struct RootPlan {
         let targetPath: String
         let isBundle: Bool
+    }
+
+    /// A directory target whose level differed structurally from the cache: remove the
+    /// named children and install only the freshly enumerated additions.
+    private struct StructuralLevelPlan {
+        let targetPath: String
+        let levelStaging: FileTree
+        /// Pre-mutation direct-child indices to remove (includes type-change victims).
+        let removeChildIndices: [UInt32]
+        /// Fresh entry names whose subtrees must be enumerated and installed.
+        let enumerateNames: [String]
+        /// Names whose paths cover nested targets (removed ∪ enumerated).
+        let coveringNames: [String]
+        /// Cached subtree size when this level is a complete reshape (`unchanged` empty);
+        /// summed only for plans that survive the covered-nested filter.
+        let predictedReshapeItemCount: Int
     }
 
     /// What Phase A produced for one root, keyed by path in `stageChangedRoots`'s result -
@@ -1291,56 +1374,96 @@ public final class FileScanner: @unchecked Sendable {
         return plans
     }
 
-    /// (name, isDirectory, isBundle) equality between a shallow target's fresh one-level
-    /// staging and its cached direct children. Equality means only metadata changed at
-    /// this level; anything else (created, removed, renamed, or type-swapped entries)
-    /// requires full-subtree semantics and promotes the target.
-    private static func levelMatchesCachedChildren(
+    private static func resolveIndex(
         of targetPath: String,
-        staging: FileTree,
         nodes: [FileNode],
         stringPool: Data,
         rootPath: String
-    ) -> Bool {
+    ) -> UInt32? {
         guard let components = relativeComponents(of: targetPath, rootPath: rootPath),
               let targetIndex = FileTree.descendPath(
                   components, nodes: nodes, stringPool: stringPool
               ),
-              Int(targetIndex) < nodes.count else { return false }
-
-        var cached: [String: (isDirectory: Bool, isBundle: Bool)] = [:]
-        let target = nodes[Int(targetIndex)]
-        if target.firstChildIndex != FileNode.invalid {
-            let start = Int(target.firstChildIndex)
-            let end = min(start + Int(target.childCount), nodes.count)
-            for child in start..<end {
-                let node = nodes[child]
-                cached[Self.nodeName(node, in: stringPool)] =
-                    (node.isDirectory, node.isBundle)
-            }
-        }
-
-        let level = staging.pathBuildingSnapshot()
-        var freshCount = 0
-        for i in level.nodes.indices where i != 0 && level.nodes[i].parentIndex == 0 {
-            let node = level.nodes[i]
-            freshCount += 1
-            guard let match = cached[Self.nodeName(node, in: level.stringPool)],
-                  match.isDirectory == node.isDirectory,
-                  match.isBundle == node.isBundle else { return false }
-        }
-        return freshCount == cached.count
+              Int(targetIndex) < nodes.count else { return nil }
+        return targetIndex
     }
 
-    /// Applies metadata-only shallow reconciles: copy every non-structural field from
-    /// the fresh level onto the existing child nodes, matched by name. Runs BEFORE any
-    /// compaction, so no index is invalidated. Directory and bundle children keep their
-    /// cached sizes - non-bundle totals are recomputed by the batch's mandatory
-    /// `recomputeAggregates()`, and a bundle's opaque size only changes via its own
-    /// bundle-target events. Returns targets that could no longer be resolved.
+    private static func cachedChildIdentities(
+        of targetIndex: UInt32,
+        nodes: [FileNode],
+        stringPool: Data
+    ) -> [DirectoryEntryIdentity] {
+        let target = nodes[Int(targetIndex)]
+        guard target.firstChildIndex != FileNode.invalid else { return [] }
+        let start = Int(target.firstChildIndex)
+        let end = min(start + Int(target.childCount), nodes.count)
+        var identities: [DirectoryEntryIdentity] = []
+        identities.reserveCapacity(max(0, end - start))
+        for child in start..<end {
+            let node = nodes[child]
+            identities.append(DirectoryEntryIdentity(
+                name: nodeName(node, in: stringPool),
+                isDirectory: node.isDirectory,
+                isBundle: node.isBundle
+            ))
+        }
+        return identities
+    }
+
+    private static func freshChildIdentities(from staging: FileTree) -> [DirectoryEntryIdentity] {
+        let level = staging.pathBuildingSnapshot()
+        var identities: [DirectoryEntryIdentity] = []
+        for i in level.nodes.indices where i != 0 && level.nodes[i].parentIndex == 0 {
+            let node = level.nodes[i]
+            identities.append(DirectoryEntryIdentity(
+                name: nodeName(node, in: level.stringPool),
+                isDirectory: node.isDirectory,
+                isBundle: node.isBundle
+            ))
+        }
+        return identities
+    }
+
+    private static func directChildIndices(
+        named names: Set<String>,
+        of targetIndex: UInt32,
+        nodes: [FileNode],
+        stringPool: Data,
+        isCaseSensitive: Bool
+    ) -> [UInt32] {
+        guard !names.isEmpty else { return [] }
+        func key(_ name: String) -> String {
+            isCaseSensitive ? name : name.lowercased()
+        }
+        let wanted = Set(names.map(key))
+        let target = nodes[Int(targetIndex)]
+        guard target.firstChildIndex != FileNode.invalid else { return [] }
+        let start = Int(target.firstChildIndex)
+        let end = min(start + Int(target.childCount), nodes.count)
+        var indices: [UInt32] = []
+        for child in start..<end {
+            let name = nodeName(nodes[child], in: stringPool)
+            if wanted.contains(key(name)) {
+                indices.append(UInt32(child))
+            }
+        }
+        return indices
+    }
+
+    /// Applies metadata-only reconciles: copy every non-structural field from the fresh
+    /// level onto the existing child nodes, matched by name. Runs BEFORE any compaction,
+    /// so no index is invalidated. Directory and bundle children keep their cached sizes -
+    /// non-bundle totals are recomputed by the batch's mandatory `recomputeAggregates()`,
+    /// and a bundle's opaque size only changes via its own bundle-target events.
+    ///
+    /// `onlyNames` restricts updates to specific child names per target - used for the
+    /// unchanged siblings of a structural level-diff so type-changed entries are not
+    /// briefly patched onto soon-to-be-removed nodes. Returns targets that could no
+    /// longer be resolved.
     private func applyShallowLevels(
         _ levels: [String: FileTree],
-        tree: FileTree
+        tree: FileTree,
+        onlyNames: [String: Set<String>]? = nil
     ) -> [String] {
         var unresolved: [String] = []
         let snapshot = tree.pathBuildingSnapshot()
@@ -1368,11 +1491,12 @@ public final class FileScanner: @unchecked Sendable {
             }
 
             let level = staging.pathBuildingSnapshot()
+            let allowed = onlyNames?[targetPath]
             for i in level.nodes.indices where i != 0 && level.nodes[i].parentIndex == 0 {
                 let fresh = level.nodes[i]
-                guard let cachedIndex = cachedByName[
-                    Self.nodeName(fresh, in: level.stringPool)
-                ] else { continue }
+                let freshName = Self.nodeName(fresh, in: level.stringPool)
+                if let allowed, !allowed.contains(freshName) { continue }
+                guard let cachedIndex = cachedByName[freshName] else { continue }
                 tree.updateNode(at: cachedIndex) { node in
                     if !fresh.isDirectory {
                         node.fileSize = fresh.fileSize
@@ -1400,6 +1524,214 @@ public final class FileScanner: @unchecked Sendable {
         let end = start + Int(node.nameLength)
         guard start >= 0, end <= pool.count else { return "" }
         return String(decoding: pool[start..<end], as: UTF8.self)
+    }
+
+    /// Phase A for selective level-diff targets: install only the named additions under
+    /// a placeholder root, then recursively enumerate directories among those additions.
+    /// Files and bundles are copied from the A0 level staging (already read); directory
+    /// additions become queue seeds drained by the shared worker pool.
+    private func stageSelectiveAdditions(
+        _ plans: [StructuralLevelPlan],
+        progress: ScanProgress,
+        visited: VisitedDirectories,
+        priority: SubtreeRescanOptions.Priority
+    ) async -> [String: FileTree] {
+        let workPlans = plans.filter { !$0.enumerateNames.isEmpty }
+        guard !workPlans.isEmpty else { return [:] }
+
+        var stagingByPath: [String: FileTree] = [:]
+        stagingByPath.reserveCapacity(workPlans.count)
+        var directorySeedPlans: [String] = []
+        var seedsByRoot: [String: [(path: String, parentIndex: UInt32, staging: FileTree)]] = [:]
+        let sharedQueue = RescanWorkQueue()
+        let totalRoots = workPlans.count
+        let rootsCompleted = Mutex(0)
+        let touchedRoots = Mutex(Set<String>())
+
+        for plan in workPlans {
+            if let di = filesystem.deviceAndInode(forPath: plan.targetPath) {
+                _ = visited.insert(dev: di.device, inode: di.inode)
+            }
+            let staging = FileTree(stagingCapacityHint: max(64, plan.enumerateNames.count * 8))
+            var placeholderRoot = FileNode()
+            placeholderRoot.isDirectory = true
+            _ = staging.addNode(placeholderRoot, name: "")
+
+            let level = plan.levelStaging.pathBuildingSnapshot()
+            let wanted = Set(plan.enumerateNames)
+            var children: [(node: FileNode, name: String)] = []
+            var directoryNames: [String] = []
+            for i in level.nodes.indices where i != 0 && level.nodes[i].parentIndex == 0 {
+                let name = Self.nodeName(level.nodes[i], in: level.stringPool)
+                guard wanted.contains(name) else { continue }
+                var node = level.nodes[i]
+                node.firstChildIndex = FileNode.invalid
+                node.childCount = 0
+                node.parentIndex = 0
+                children.append((node: node, name: name))
+                if node.isDirectory && !node.isBundle {
+                    directoryNames.append(name)
+                }
+            }
+            if !children.isEmpty {
+                _ = staging.addChildren(children, parentIndex: 0)
+            }
+
+            stagingByPath[plan.targetPath] = staging
+
+            if directoryNames.isEmpty {
+                // File/bundle-only additions: already fully described by the A0 level.
+                touchedRoots.withLock { _ = $0.insert(plan.targetPath) }
+                let completedSnapshot = rootsCompleted.withLock { count -> Int in
+                    count += 1
+                    return count
+                }
+                progress.updateCurrentPath(
+                    "Scanning changed folders (\(completedSnapshot) of \(totalRoots))…"
+                )
+                Task { await MainActor.run { progress.publishCounters() } }
+                continue
+            }
+
+            let seeded = staging.pathBuildingSnapshot()
+            var indexByName: [String: UInt32] = [:]
+            if seeded.nodes[0].firstChildIndex != FileNode.invalid {
+                let start = Int(seeded.nodes[0].firstChildIndex)
+                let end = start + Int(seeded.nodes[0].childCount)
+                for child in start..<end {
+                    indexByName[Self.nodeName(seeded.nodes[child], in: seeded.stringPool)] =
+                        UInt32(child)
+                }
+            }
+            var seeds: [(path: String, parentIndex: UInt32, staging: FileTree)] = []
+            for name in directoryNames {
+                guard let parentIndex = indexByName[name] else { continue }
+                let path = appendPathComponent(plan.targetPath, name)
+                if let di = filesystem.deviceAndInode(forPath: path) {
+                    _ = visited.insert(dev: di.device, inode: di.inode)
+                }
+                seeds.append((path: path, parentIndex: parentIndex, staging: staging))
+            }
+            guard !seeds.isEmpty else {
+                touchedRoots.withLock { _ = $0.insert(plan.targetPath) }
+                let completedSnapshot = rootsCompleted.withLock { count -> Int in
+                    count += 1
+                    return count
+                }
+                progress.updateCurrentPath(
+                    "Scanning changed folders (\(completedSnapshot) of \(totalRoots))…"
+                )
+                Task { await MainActor.run { progress.publishCounters() } }
+                continue
+            }
+            directorySeedPlans.append(plan.targetPath)
+            seedsByRoot[plan.targetPath] = seeds
+        }
+
+        guard !directorySeedPlans.isEmpty else {
+            let touched = touchedRoots.withLock { $0 }
+            return stagingByPath.filter { touched.contains($0.key) }
+        }
+
+        // RootCompletionTracker starts each root at pending=1 for its first queue item.
+        // Additional seeds call itemEnqueued, matching stageChangedRoots' discipline.
+        let tracker = RootCompletionTracker(rootPaths: directorySeedPlans)
+        for (rootPath, seeds) in seedsByRoot {
+            for (index, seed) in seeds.enumerated() {
+                if index > 0 {
+                    tracker.itemEnqueued(forRoot: rootPath)
+                }
+                sharedQueue.enqueue(RescanWorkItem(
+                    path: seed.path,
+                    parentIndex: seed.parentIndex,
+                    rootPath: rootPath,
+                    staging: seed.staging
+                ))
+            }
+        }
+
+        @Sendable func reportRootDone() {
+            let completedSnapshot = rootsCompleted.withLock { count -> Int in
+                count += 1
+                return count
+            }
+            progress.updateCurrentPath(
+                "Scanning changed folders (\(completedSnapshot) of \(totalRoots))…"
+            )
+            Task { await MainActor.run { progress.publishCounters() } }
+        }
+
+        let workerBudget = priority == .utility
+            ? max(1, Self.defaultRescanWorkerCount() / 2)
+            : Self.defaultRescanWorkerCount()
+        let workerCount = min(workerBudget, max(1, directorySeedPlans.count))
+        let dispatchQoS: DispatchQoS.QoSClass = priority == .utility
+            ? .utility
+            : .userInitiated
+        let taskPriority: TaskPriority = priority == .utility
+            ? .low
+            : .userInitiated
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask(priority: taskPriority) {
+                let rawFilesystemForScan = self.filesystem as? RealFilesystemProvider
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    let dispatchGroup = DispatchGroup()
+                    for _ in 0..<workerCount {
+                        dispatchGroup.enter()
+                        DispatchQueue.global(qos: dispatchQoS).async {
+                            let rawBuffer = rawFilesystemForScan.map { _ in
+                                UnsafeMutableRawPointer.allocate(
+                                    byteCount: RealFilesystemProvider.directoryBufferSize,
+                                    alignment: 16
+                                )
+                            }
+                            var rawScratch = RawScanScratch()
+                            var rawArena = RawScanArena()
+                            defer { rawBuffer?.deallocate() }
+
+                            while let item = sharedQueue.next() {
+                                if !self.isCancelled {
+                                    touchedRoots.withLock { _ = $0.insert(item.rootPath) }
+                                    self.scanDirectory(
+                                        dirPath: item.path,
+                                        parentIndex: item.parentIndex,
+                                        tree: item.staging,
+                                        progress: progress,
+                                        visited: visited,
+                                        enqueue: { path, parentIndex in
+                                            tracker.itemEnqueued(forRoot: item.rootPath)
+                                            sharedQueue.enqueue(RescanWorkItem(
+                                                path: path, parentIndex: parentIndex,
+                                                rootPath: item.rootPath, staging: item.staging
+                                            ))
+                                        },
+                                        maybeUpdateProgress: { _ in },
+                                        rawFilesystem: rawFilesystemForScan,
+                                        rawBuffer: rawBuffer,
+                                        rawScratch: &rawScratch,
+                                        deferredBuilder: nil,
+                                        rawArena: &rawArena
+                                    )
+                                }
+                                sharedQueue.complete()
+                                if tracker.itemCompleted(forRoot: item.rootPath) {
+                                    reportRootDone()
+                                }
+                            }
+                            dispatchGroup.leave()
+                        }
+                    }
+                    dispatchGroup.notify(queue: .global(qos: dispatchQoS)) {
+                        continuation.resume()
+                    }
+                }
+            }
+            await group.waitForAll()
+        }
+
+        let touched = touchedRoots.withLock { $0 }
+        return stagingByPath.filter { touched.contains($0.key) }
     }
 
     /// Phase A: enumerate every plan's on-disk subtree (or compute its bundle size)
@@ -1674,6 +2006,7 @@ public final class FileScanner: @unchecked Sendable {
     private func applyStagedRoots(
         _ rescannedRoots: [String],
         staged: [String: StageResult],
+        removeChildIndicesByPath: [String: [UInt32]?] = [:],
         tree: FileTree,
         progress: ScanProgress
     ) -> PhaseBOutcome {
@@ -1730,10 +2063,23 @@ public final class FileScanner: @unchecked Sendable {
             progress.publishCounters()
         } }
 
-        let replacements: [(target: UInt32, staged: FileTree)] = resolved.targets.compactMap {
-            guard case .directory(let staging) = $0.result else { return nil }
-            return (target: $0.oldIndex, staged: staging)
-        }
+        let replacements: [(target: UInt32, removeChildIndices: [UInt32]?, staged: FileTree)] =
+            resolved.targets.compactMap { target in
+                guard case .directory(let staging) = target.result else { return nil }
+                // Missing key => whole-subtree replacement (bundle-adjacent / legacy).
+                // Present key (even empty) => selective partial mutation.
+                let removeChildIndices: [UInt32]?
+                if let explicit = removeChildIndicesByPath[target.path] {
+                    removeChildIndices = explicit
+                } else {
+                    removeChildIndices = nil
+                }
+                return (
+                    target: target.oldIndex,
+                    removeChildIndices: removeChildIndices,
+                    staged: staging
+                )
+            }
         let proposedAppendedNodeCount = replacements.reduce(into: 0) { count, replacement in
             let appended = max(0, replacement.staged.count - 1)
             let sum = count.addingReportingOverflow(appended)

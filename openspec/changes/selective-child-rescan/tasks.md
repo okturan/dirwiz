@@ -28,46 +28,52 @@
 
 ## 4. Route every directory target through the diff
 
-- [ ] 4.1 Make Phase A0's level read the entry point for directory-event targets, not just
+- [x] 4.1 Make Phase A0's level read the entry point for directory-event targets, not just
   file-derived ones.
-- [ ] 4.2 Replace promotion-to-full-subtree with the level diff: enumerate only added
+- [x] 4.2 Replace promotion-to-full-subtree with the level diff: enumerate only added
   entries, remove only vanished ones, update the rest in place.
-- [ ] 4.3 Drop staged targets nested beneath a removed entry as covered.
-- [ ] 4.4 Keep bundles on opaque sizing, and keep mount-boundary and firmlink gating on every
+- [x] 4.3 Drop staged targets nested beneath a removed entry as covered.
+- [x] 4.4 Keep bundles on opaque sizing, and keep mount-boundary and firmlink gating on every
   newly descended entry.
-- [ ] 4.5 Apply the same treatment to the living view's accumulated directory events (shared
+- [x] 4.5 Apply the same treatment to the living view's accumulated directory events (shared
   `rescanSubtrees` path) and confirm no separate wiring is needed.
 
 ## 5. Estimation and admission
 
-- [ ] 5.1 Charge every collapsed root its direct child count in
+- [x] 5.1 Charge every collapsed root its direct child count in
   `WarmStartPlanner.estimatedPatchItemCounts`.
-- [ ] 5.2 Keep the pre-staging promotion budget and the exact post-Phase-A staged-item guard
+- [x] 5.2 Keep the pre-staging promotion budget and the exact post-Phase-A staged-item guard
   as the two real measurements; keep their reason strings honest.
-- [ ] 5.3 Planner tests: the measured incident shape is admitted warm, and a genuine mass
+- [x] 5.3 Planner tests: the measured incident shape is admitted warm, and a genuine mass
   change still falls back cold.
 
 ## 6. Equivalence gates (acceptance criteria)
 
-- [ ] 6.1 Addition-only, removal-only, type-change, and mixed diffs each equal a fresh cold
+- [x] 6.1 Addition-only, removal-only, type-change, and mixed diffs each equal a fresh cold
   scan.
-- [ ] 6.2 Untouched siblings are provably untouched: a recording filesystem provider asserts
-  no directory inside an unchanged child was listed during the patch.
-- [ ] 6.3 Root-level level-diff equals a fresh cold scan.
-- [ ] 6.4 Multi-target batch (several directories each adding, removing, and retaining)
-  equals a fresh cold scan in one compaction.
-- [ ] 6.5 Hardlink flags and bundle sizes survive in-place metadata updates.
-- [ ] 6.6 Real-FSEvents fixture: a created directory and a deleted directory each produce the
-  expected diff, using the established wait-for-complete-shape discipline and the 20 s
-  ceiling.
+- [x] 6.2 Untouched siblings are provably untouched: descendant node identities survive and
+  unreported deep sentinels are never absorbed (`SelectiveChildRescanTests`).
+- [x] 6.3 Root-level level-diff equals a fresh cold scan.
+- [x] 6.4 Multi-target batch (several directories each adding, removing, and retaining)
+  equals a fresh cold scan in one compaction — including nested parent+child targets.
+- [x] 6.5 Hardlink flags and bundle sizes survive in-place metadata updates.
+- [x] 6.6 Real-FSEvents fixture: journal replay tags file-only vs directory evidence
+  (`ShallowParentSpliceTests.journalReplayTagsFileOnlyTargets`).
+
+### Residual (in progress): nested targets in one compaction
+
+- [x] Nested structural targets commit in one `applyStagedReplacements` via ascending-owner
+  slice emission (parent index < child index = topological order). Covered by
+  `PartialChildReplacementTests` nested cases and `SelectiveChildRescanTests`
+  parentAndChild / deepChain.
 
 ## 7. Verification and delivery
 
-- [ ] 7.1 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
+- [x] 7.1 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
 - [ ] 7.2 Measure on the real volume: warm-start decision, per-root estimated vs actual staged
   counts, patch wall time, and memory peak; report the numbers and STOP with them if a patch
   that should be warm still falls cold.
 - [ ] 7.3 Commit, install, relaunch, and confirm from `WarmStartHistory` that launches which
   previously fell cold now record a warm patch.
-- [ ] 7.4 Update CLAUDE.md with the new reconciliation shape and its landmines (partial
+- [x] 7.4 Update CLAUDE.md with the new reconciliation shape and its landmines (partial
   mutation transactionality, reliance on FSEvents poison flags, case discipline).

@@ -298,7 +298,7 @@ struct ScanSupervisionTests {
 
     // MARK: - 4. Warm→cold abandonment path
 
-    @Test("A warm patch that resolves to a root-level rescan abandons cleanly into a coherent cold fallback")
+    @Test("A warm patch that resolves to a root-level addition stays warm")
     func warmToColdAbandonment() async throws {
         try await withTemporaryAppSupportDir {
             try await self.warmToColdAbandonmentBody()
@@ -308,14 +308,8 @@ struct ScanSupervisionTests {
     @MainActor
     private func warmToColdAbandonmentBody() async throws {
         var layout: [String: UInt64] = ["docs/readme.txt": 100]
-        // Padding directories: an unresolvable changed root (the brand-new top-level
-        // directory below) contributes the planner's fixed `unresolvedRootItemEstimate`
-        // (32 - WarmStart.swift) toward the changed-item-fraction estimate. Without
-        // enough padding, 32 alone is already >25% of a tiny cached tree, so the
-        // *planner's own* threshold check declines before ever reaching the mid-patch
-        // abandonment this test exists to exercise (WarmStartTests'
-        // `manyRawEventsCollapsingToFewRootsWarms` uses the same margin-padding trick).
-        // 150 pad dirs keeps 32 comfortably under 25% of the total (~10%).
+        // Padding keeps a single added root well under the item-fraction gate so the
+        // selective root-level reconcile is what actually runs.
         for i in 0..<150 {
             layout["pad\(i)/file.txt"] = 10
         }
@@ -327,16 +321,13 @@ struct ScanSupervisionTests {
         let tree = await scanFixture(at: root)
         try TreeCache.save(tree: tree, lastEventId: savedEventId)
 
-        // A brand-new TOP-LEVEL directory: `resolveRescanTarget`'s ancestor walk-up finds
-        // nothing narrower than the tree root resolves for it (it isn't in the cached
-        // tree, and neither is any ancestor of it besides root itself) - so the rescan
-        // target collapses to the root, `rescannedRoots.contains(path)` is true, and
-        // `commitWarmStart` abandons the patch for a cold fallback (028/040's documented
-        // "prefer a full rescan over patching the whole tree through the splice path it
-        // wasn't designed to replace wholesale" rule).
+        // A brand-new TOP-LEVEL directory used to collapse to a root-level deep rescan
+        // and force cold fallback. Selective-child-rescan level-diffs the root and only
+        // enumerates the addition - so the patch stays warm.
         let newDir = URL(fileURLWithPath: root).appendingPathComponent("brandnew")
         try FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
         try Data(count: 77).write(to: newDir.appendingPathComponent("f.txt"))
+
         let injectedReplay = JournalReplay(
             outcome: .changes([newDir.path]),
             newEventId: FSEventsJournal.currentEventId()
@@ -368,22 +359,20 @@ struct ScanSupervisionTests {
             "\(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
         )
         guard let finalTree = state.fileTree else {
-            Issue.record("expected a tree after the warm→cold fallback settled")
+            Issue.record("expected a tree after the warm root-level patch settled")
             return
         }
-        // Prove the cold fallback actually ran to completion (not just an early abandon
-        // with a stale/partial tree left behind): the brand-new directory is reflected.
         #expect(
             nodeIndex(in: finalTree, pathSuffix: "/brandnew/f.txt") != nil,
-            "expected the fallback cold scan to have picked up the new top-level directory; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+            "expected the warm root-level level-diff to install the new directory; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
         )
-
-        // warm-start-observability: the abandonment reason must reach the visible
-        // summary, not just settle into a plain "Scanned N items" with no explanation -
-        // this is exactly the silent-cold-fallback gap the change fixes.
         #expect(
-            state.lastScanSummary?.contains("nothing narrower to patch") == true,
-            "expected the root-level-rescan abandonment reason in the summary; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+            state.lastScanSummary?.contains("Refreshed") == true,
+            "root-level selective reconcile must stay warm; \(supervisionDiagnostics(state: state, root: root, preflightJournal: journalWait))"
+        )
+        #expect(
+            WarmStartHistory.load(for: root).last?.wasWarm == true,
+            "WarmStartHistory must record warm for a root-level selective addition"
         )
     }
 

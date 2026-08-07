@@ -2,10 +2,11 @@ import Testing
 import Foundation
 @testable import DirWizCore
 
-/// Shallow-parent splicing: file-derived targets are scoped to one entry level instead
-/// of their whole subtree. These gates pin the collapse rules, the honest estimates,
-/// the in-place reconcile, promotion, root-level handling, and - non-negotiably - that
-/// every outcome remains indistinguishable from a fresh cold scan.
+/// Shallow-parent splicing + selective-child-rescan: every directory target is one level
+/// of work. These gates pin the collapse rules, the honest estimates, in-place metadata
+/// reconcile, structural level-diff (not whole-subtree promotion), root-level handling,
+/// and - non-negotiably - that every outcome remains indistinguishable from a fresh cold
+/// scan.
 @Suite("Shallow Parent Splice Tests")
 struct ShallowParentSpliceTests {
 
@@ -19,24 +20,23 @@ struct ShallowParentSpliceTests {
 
     // MARK: - Collapse and planning
 
-    @Test("A shallow root never claims the precise deep targets beneath it")
+    @Test("No ancestor claims nested directory targets")
     func shallowRootsClaimNothing() {
-        // Deep ancestor still swallows everything under it.
-        #expect(PathCollapse.outermostRoots(["/a", "/a/b/c"], shallow: []) == ["/a"])
-        // Shallow ancestor keeps nested deep targets alive.
+        // Selective-child-rescan: every reported directory is its own level of work.
+        #expect(PathCollapse.outermostRoots(["/a", "/a/b/c"], shallow: [])
+                == ["/a", "/a/b/c"])
         #expect(PathCollapse.outermostRoots(["/a", "/a/b/c", "/a/d"], shallow: ["/a"])
                 == ["/a", "/a/b/c", "/a/d"])
-        // Nested shallow targets are each one disjoint level of work - both survive.
         #expect(Set(PathCollapse.outermostRoots(["/a/b", "/a", "/a/b/c"],
                                                 shallow: ["/a", "/a/b", "/a/b/c"]))
                 == Set(["/a", "/a/b", "/a/b/c"]))
-        // A deep ancestor claims shallow descendants: full staging covers their level.
-        #expect(PathCollapse.outermostRoots(["/a", "/a/b"], shallow: ["/a/b"]) == ["/a"])
+        #expect(PathCollapse.outermostRoots(["/a", "/a/b"], shallow: ["/a/b"])
+                == ["/a", "/a/b"])
         // Exact duplicates still dedupe.
         #expect(PathCollapse.outermostRoots(["/a", "/a"], shallow: ["/a"]) == ["/a"])
     }
 
-    @Test("The estimator charges a shallow root its level, not its subtree")
+    @Test("The estimator charges every root its level, not its subtree")
     func estimatorChargesShallowLevel() async throws {
         let (root, cleanup) = try createTempTree([
             "big/file1.txt": 100,
@@ -52,11 +52,11 @@ struct ShallowParentSpliceTests {
         let shallow = WarmStartPlanner.estimatedPatchItemCounts(
             forChangedPaths: [root + "/big"], cachedTree: tree,
             shallowTargets: [root + "/big"])
-        // Deep: big + file1 + sub + deep1 + deep2 territory; shallow: big's two entries.
+        // Both shapes now charge big's two direct children (file1 + sub).
         let deepEstimate = try #require(deep.values.first)
         let shallowEstimate = try #require(shallow.values.first)
         #expect(shallowEstimate == 2)
-        #expect(deepEstimate > shallowEstimate)
+        #expect(deepEstimate == shallowEstimate)
     }
 
     @Test("The incident shape is admitted warm once estimates are honest")
@@ -126,8 +126,8 @@ struct ShallowParentSpliceTests {
         assertTreesEquivalent(tree, fresh, "metadata-only shallow patch")
     }
 
-    @Test("A structural change at the level promotes to full-subtree semantics")
-    func structuralChangePromotes() async throws {
+    @Test("A structural change at the level installs only the added entry")
+    func structuralChangeInstallsOnlyAdditions() async throws {
         let (root, cleanup) = try createTempTree([
             "big/file1.txt": 100,
             "big/sub/deep1.txt": 200,
@@ -135,8 +135,9 @@ struct ShallowParentSpliceTests {
         defer { cleanup() }
         let tree = await coldScan(root)
 
-        // Structural change at big/'s own level, plus a deep sentinel that only a
-        // full-subtree rescan can absorb - promotion must pick BOTH up.
+        // Structural change at big/'s own level, plus a deep sentinel under an unchanged
+        // sibling. Selective reconcile must install created.txt and must NOT absorb the
+        // unreported sentinel inside sub/.
         try Data(count: 64).write(
             to: URL(fileURLWithPath: root).appendingPathComponent("big/created.txt"))
         try Data(count: 32).write(
@@ -147,24 +148,38 @@ struct ShallowParentSpliceTests {
             [root + "/big"], tree: tree, progress: ScanProgress(),
             shallowTargets: [root + "/big"]
         )
-        #expect(report.shallowRoots.isEmpty, "a promoted target is not an in-place root")
+        #expect(report.unresolvedPaths.isEmpty)
+        #expect(report.shallowRoots.contains { $0.hasSuffix("/big") || $0 == root + "/big" },
+                "a level-diffed structural target is a successful reconcile")
+        #expect(summarizeTree(tree)[root + "/big/created.txt"]?.fileSize == 64)
+        #expect(summarizeTree(tree)[root + "/big/sub/sentinel.txt"] == nil,
+                "unchanged siblings must not be re-enumerated")
+
+        try FileManager.default.removeItem(
+            at: URL(fileURLWithPath: root).appendingPathComponent("big/sub/sentinel.txt"))
         let fresh = await coldScan(root)
-        assertTreesEquivalent(tree, fresh, "promoted shallow patch")
+        assertTreesEquivalent(tree, fresh, "selective structural patch")
     }
 
-    @Test("A doomed promotion abandons before staging, not after")
+    @Test("A doomed complete reshape abandons before staging, not after")
     func oversizedPromotionAbandonsBeforeStaging() async throws {
-        var layout: [String: UInt64] = ["big/file1.txt": 100, "other/x.txt": 50]
-        for i in 0..<220 { layout["big/sub/f\(i).txt"] = 10 }
+        var layout: [String: UInt64] = ["other/x.txt": 50]
+        for i in 0..<220 { layout["big/f\(i).txt"] = 10 }
         let (root, cleanup) = try createTempTree(layout)
         defer { cleanup() }
         let tree = await coldScan(root)
         let before = summarizeTree(tree)
 
-        // Structural change at big/'s level forces a promotion whose cached subtree
-        // (~220+ items) dwarfs the remaining budget below.
-        try Data(count: 64).write(
-            to: URL(fileURLWithPath: root).appendingPathComponent("big/created.txt"))
+        // Complete reshape of big/: every cached child vanishes and a different set
+        // appears. unchanged.isEmpty triggers the pre-staging reshape budget.
+        let bigURL = URL(fileURLWithPath: root).appendingPathComponent("big")
+        for i in 0..<220 {
+            try FileManager.default.removeItem(
+                at: bigURL.appendingPathComponent("f\(i).txt"))
+        }
+        for i in 0..<10 {
+            try Data(count: 8).write(to: bigURL.appendingPathComponent("n\(i).txt"))
+        }
 
         let scanner = FileScanner()
         let report = await scanner.rescanSubtrees(
@@ -180,12 +195,43 @@ struct ShallowParentSpliceTests {
             )
         )
         let exceeded = try #require(report.stagedItemBudgetExceeded,
-                                    "the doomed promotion must refuse via the budget")
+                                    "the doomed reshape must refuse via the budget")
         #expect(exceeded.actualStagedItemCount > 50,
                 "the refusal must carry the predicted size for the reason line")
         #expect(report.metrics.stagedNodeCount == 0,
                 "the whole point: no Phase A staging happens for a doomed patch")
-        #expect(report.shallowRoots.isEmpty)
+        #expect(summarizeTree(tree) == before, "the tree is untouched")
+    }
+
+    @Test("A huge selective addition abandons after staging with the tree untouched")
+    func oversizedAdditionAbandonsAfterStaging() async throws {
+        let (root, cleanup) = try createTempTree([
+            "big/keep.txt": 100,
+            "other/x.txt": 50,
+        ])
+        defer { cleanup() }
+        let tree = await coldScan(root)
+        let before = summarizeTree(tree)
+
+        let addDir = URL(fileURLWithPath: root).appendingPathComponent("big/hugeAdd")
+        try FileManager.default.createDirectory(at: addDir, withIntermediateDirectories: true)
+        for i in 0..<80 {
+            try Data(count: 4).write(to: addDir.appendingPathComponent("f\(i).txt"))
+        }
+
+        let scanner = FileScanner()
+        let report = await scanner.rescanSubtrees(
+            [root + "/big"], tree: tree, progress: ScanProgress(),
+            options: SubtreeRescanOptions(
+                priority: .interactive,
+                resetsCancellation: true,
+                maximumStagedItemCount: 20
+            )
+        )
+        let exceeded = try #require(report.stagedItemBudgetExceeded)
+        #expect(exceeded.actualStagedItemCount > 20)
+        #expect(report.metrics.stagedNodeCount > 0,
+                "partial diffs rely on the exact post-Phase-A guard")
         #expect(summarizeTree(tree) == before, "the tree is untouched")
     }
 
@@ -214,15 +260,14 @@ struct ShallowParentSpliceTests {
         assertTreesEquivalent(tree, fresh, "root-level shallow patch")
     }
 
-    @Test("A structural root-level change still abandons before any mutation")
-    func rootLevelStructuralStillAbandons() async throws {
+    @Test("A structural root-level change reconciles by level diff")
+    func rootLevelStructuralReconciles() async throws {
         let (root, cleanup) = try createTempTree([
             "top.txt": 100,
             "dir/inner.txt": 200,
         ])
         defer { cleanup() }
         let tree = await coldScan(root)
-        let before = summarizeTree(tree)
 
         try Data(count: 64).write(
             to: URL(fileURLWithPath: root).appendingPathComponent("created.txt"))
@@ -233,11 +278,12 @@ struct ShallowParentSpliceTests {
             shallowTargets: [root]
         )
         let treeRoot = tree.path(at: 0)
-        #expect(report.rescannedRoots.contains(treeRoot),
-                "callers keep their existing root-level cold-fallback signal")
-        #expect(report.shallowRoots.isEmpty)
-        #expect(summarizeTree(tree) == before,
-                "a promoted root-level target must abandon before any mutation")
+        #expect(report.rescannedRoots.contains(treeRoot))
+        #expect(report.shallowRoots.contains(treeRoot),
+                "root-level structural reconcile is success, not a cold-fallback signal")
+        #expect(report.stagedItemBudgetExceeded == nil)
+        let fresh = await coldScan(root)
+        assertTreesEquivalent(tree, fresh, "root-level structural patch")
     }
 
     @Test("A shallow parent and a nested deep target both apply")
@@ -316,7 +362,7 @@ struct ShallowParentSpliceTests {
         #expect(replay.fileOnlyTargets.contains { $0.hasSuffix("/dirA") },
                 "a parent blamed only by a file event must be shallow-eligible")
         #expect(!replay.fileOnlyTargets.contains { $0.hasSuffix("/createdDir") },
-                "a directory FSEvents reported itself must keep full-subtree semantics")
+                "a directory FSEvents reported itself carries directory evidence")
     }
 
     @Test("The live monitor records directory evidence stickily")

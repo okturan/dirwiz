@@ -154,12 +154,18 @@ struct BatchedSubtreeSpliceCharacterizationTests {
         let tree = FileTree()
         await scanner.scan(path: root, progress: progress, tree: tree)
 
+        try Data(count: 2).write(
+            to: URL(fileURLWithPath: root).appendingPathComponent("a/new.txt"))
+        try Data(count: 3).write(
+            to: URL(fileURLWithPath: root).appendingPathComponent("b/new.txt"))
+
         let report = await scanner.rescanSubtrees(
             [root + "/a", root + "/b"],
             tree: tree,
             progress: progress
         )
         #expect(report.unresolvedPaths.isEmpty)
+        #expect(report.metrics.structurallyReplacedRootCount == 2)
 
         let finalProgress = await MainActor.run {
             progress.publishCounters()

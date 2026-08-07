@@ -153,7 +153,7 @@ struct SubtreeRescanTests {
         #expect(summarize(tree)[root + "/src/oldmodule"] == nil, "deleted subtree must be gone")
     }
 
-    @Test("Two changed dirs where one contains the other - outermost-dedupe")
+    @Test("Two changed dirs where one contains the other - both level-diff")
     func outermostDedupe() async throws {
         let (root, cleanup) = try createTempTree([
             "src/sub/file.txt": 10,
@@ -169,18 +169,19 @@ struct SubtreeRescanTests {
         try Data(count: 99).write(to: URL(fileURLWithPath: root).appendingPathComponent("src/sub/added.txt"))
         try Data(count: 11).write(to: URL(fileURLWithPath: root).appendingPathComponent("src/newfile.txt"))
 
-        // List the inner path first to prove dedupe doesn't depend on input order.
+        // Selective-child-rescan: each reported directory is its own level of work.
+        // Nested targets must both survive (under an unchanged child of the parent).
         let report = await scanner.rescanSubtrees(
             [root + "/src/sub", root + "/src"],
             tree: tree,
             progress: progress
         )
         #expect(report.unresolvedPaths.isEmpty)
-        #expect(report.rescannedRoots == [root + "/src"],
-            "the inner target must be absorbed by the outer one, not scanned twice")
+        #expect(Set(report.rescannedRoots) == Set([root + "/src", root + "/src/sub"]),
+            "nested directory targets each reconcile their own level")
 
         let coldTree = await coldScan(root)
-        assertTreesEquivalent(tree, coldTree, "outermostDedupe")
+        assertTreesEquivalent(tree, coldTree, "nestedBothTargets")
     }
 
     @Test("Change outside the tree root leaves the tree untouched")
@@ -514,14 +515,22 @@ struct SubtreeRescanProgressTests {
         let tree = FileTree()
         await bootstrapScanner.scan(path: "/vol", progress: ScanProgress(), tree: tree)
 
-        mock.directories["/vol/a"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 20))
-        mock.directories["/vol/b"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 21))
-        mock.directories["/vol/c"]?.append(MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 22))
+        // Selective staging only re-opens ADDED directories; file-only additions never
+        // hit Phase A's worker queue. Gate a nested new directory so "k of N" still
+        // tracks concurrent addition enumerations.
+        mock.inodeMap["/vol/a/newDir"] = (device: 1, inode: 30)
+        mock.inodeMap["/vol/b/newDir"] = (device: 1, inode: 31)
+        mock.inodeMap["/vol/c/newDir"] = (device: 1, inode: 32)
+        mock.directories["/vol/a"]?.append(MockFilesystemProvider.dir(name: "newDir", inode: 30))
+        mock.directories["/vol/b"]?.append(MockFilesystemProvider.dir(name: "newDir", inode: 31))
+        mock.directories["/vol/c"]?.append(MockFilesystemProvider.dir(name: "newDir", inode: 32))
+        mock.directories["/vol/a/newDir"] = [MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 40)]
+        mock.directories["/vol/b/newDir"] = [MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 41)]
+        mock.directories["/vol/c/newDir"] = [MockFilesystemProvider.file(name: "new.txt", size: 1, inode: 42)]
 
-        // Hold "/vol/a" open - "/vol/b" and "/vol/c" run concurrently (the default
-        // worker count comfortably covers all 3 of these tiny plans) and WILL both
-        // finish while "/vol/a" is blocked, since nothing gates them.
-        let gated = GatedFilesystemProvider(inner: mock, gatedPath: "/vol/a")
+        // Hold "/vol/a/newDir" open - b and c's added directories run concurrently and
+        // both finish while a is blocked.
+        let gated = GatedFilesystemProvider(inner: mock, gatedPath: "/vol/a/newDir")
         let rescanScanner = FileScanner(filesystem: gated)
         let progress = ScanProgress()
 

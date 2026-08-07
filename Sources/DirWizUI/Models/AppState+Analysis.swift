@@ -292,11 +292,11 @@ extension AppState {
         }
 
         // Failure honesty (same rule `commitWarmStart` applies to its own patch): an
-        // unresolved path, or every target collapsing to the tree root because nothing
-        // narrower survived resolution, means the patch can't be trusted - prefer a full
+        // unresolved path, or every target collapsing to the tree root without a
+        // successful level reconcile, means the patch can't be trusted - prefer a full
         // refresh over publishing a half-applied tree. `startFullRescan()` is 036-safe.
-        // A root-level SHALLOW reconcile is a successful in-place patch, not the
-        // "nothing narrower resolved" failure this guard exists for.
+        // A root-level level reconcile (metadata-only or selective structural) is success,
+        // not the "nothing narrower resolved" failure this guard exists for.
         let rootLevelFailure = report.rescannedRoots.contains(rootPath)
             && !report.shallowRoots.contains(rootPath)
         guard report.unresolvedPaths.isEmpty, !rootLevelFailure else {

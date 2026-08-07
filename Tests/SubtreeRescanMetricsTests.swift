@@ -149,16 +149,16 @@ struct SubtreeRescanMetricsTests {
             progress: ScanProgress()
         )
 
-        #expect(report.rescannedRoots == ["/vol/ab", "/vol/a"])
-        #expect(report.metrics.rootStaging.map(\.path) == ["/vol/ab", "/vol/a"])
+        #expect(report.rescannedRoots == ["/vol/ab", "/vol/a", "/vol/a/old"])
+        #expect(report.metrics.rootStaging.map(\.path) == ["/vol/ab", "/vol/a", "/vol/a/old"])
         #expect(
             report.metrics.rootStaging[0].contributingRequestedPaths == [abRequest]
         )
         #expect(
-            report.metrics.rootStaging[1].contributingRequestedPaths == [
-                newUnderARequest,
-                existingUnderARequest,
-            ]
+            report.metrics.rootStaging[1].contributingRequestedPaths == [newUnderARequest]
+        )
+        #expect(
+            report.metrics.rootStaging[2].contributingRequestedPaths == [existingUnderARequest]
         )
     }
 
