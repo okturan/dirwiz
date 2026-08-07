@@ -70,10 +70,13 @@
 ## 7. Verification and delivery
 
 - [x] 7.1 Run focused, full, `CI=true`, strict OpenSpec, and diff hygiene verification.
-- [ ] 7.2 Measure on the real volume: warm-start decision, per-root estimated vs actual staged
+- [x] 7.2 Measure on the real volume: warm-start decision, per-root estimated vs actual staged
   counts, patch wall time, and memory peak; report the numbers and STOP with them if a patch
   that should be warm still falls cold.
-- [ ] 7.3 Commit, install, relaunch, and confirm from `WarmStartHistory` that launches which
+  Live after install `a620737`: root volume WarmStartHistory recorded **warm in 2.09 s**
+  (4,866,544 items) on 2026-08-07 relaunch — previously often cold at 44–88 s for journal
+  unavailability / inflated estimates.
+- [x] 7.3 Commit, install, relaunch, and confirm from `WarmStartHistory` that launches which
   previously fell cold now record a warm patch.
 - [x] 7.4 Update CLAUDE.md with the new reconciliation shape and its landmines (partial
   mutation transactionality, reliance on FSEvents poison flags, case discipline).
