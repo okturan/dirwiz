@@ -42,6 +42,17 @@ struct WebsiteContractTests {
         #expect(page.contains("recency heatmap, snapshot pinning, temporal diff, CSV/JSON export"))
     }
 
+    @Test("Hero and Mac-native card surface the menu-bar presence")
+    func menuBarPresenceBadges() throws {
+        let page = try html
+        #expect(page.contains("class=\"hero-badge"),
+                "menu-bar presence must appear above the fold in the hero")
+        #expect(page.contains("Lives in the menu bar"))
+        #expect(page.contains("<span class=\"new-badge\">New</span>"),
+                "Mac-native card keeps a New mark next to the heading")
+        #expect(page.contains("<h3>Mac-native controls</h3>"))
+    }
+
     /// The demo's Folders mode mirrors the shipped semantics: depth colors from the
     /// finalized Nord palette, applied through the same named seam. The eight RGB rows
     /// are CardGeometry's Nord `chromeLevels` scaled to bytes - if the shipped palette
