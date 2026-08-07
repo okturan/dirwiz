@@ -47,7 +47,7 @@ struct WebsiteContractTests {
         let page = try html
         #expect(page.contains("class=\"hero-badge"),
                 "menu-bar presence must appear above the fold in the hero")
-        #expect(page.contains("Lives in the menu bar"))
+        #expect(page.contains("Now lives in the menu bar"))
         #expect(page.contains("<span class=\"new-badge\">New</span>"),
                 "Mac-native card keeps a New mark next to the heading")
         #expect(page.contains("<h3>Mac-native controls</h3>"))
