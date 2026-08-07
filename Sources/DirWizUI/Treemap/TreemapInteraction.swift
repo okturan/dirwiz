@@ -48,7 +48,14 @@ public struct InteractiveTreemapView: View {
     @State private var layoutRectByNode: [UInt32: TreemapRect] = [:]
     /// Drawn-rect count from the last layout, used to explain a card→cushion fallback.
     @State private var drawnRectCount: Int = 0
+    /// Coalesces deferred label applies without writing `@State` from the Metal draw path.
+    @State private var layoutPublishToken = LayoutPublishToken()
     @State private var isAppearancePopoverShown = false
+
+    /// Bumped from Metal/`onLayoutUpdate` without touching SwiftUI state storage.
+    private final class LayoutPublishToken {
+        var generation: UInt64 = 0
+    }
 
     private var selectedLayoutRect: CGRect? {
         guard let idx = appState.selectedNodeIndex else { return nil }
@@ -305,45 +312,57 @@ public struct InteractiveTreemapView: View {
                     hoverPoint = point
                 },
                 onLayoutUpdate: { rects in
-                    // Parent directories were excluded here, so a folder owning a huge
-                    // region was never named on the map - the hierarchy was real in the
-                    // layout but invisible on screen. Directory rects are now labelled
-                    // too, and in Folders style they get the header strip the geometry
-                    // already reserves for them.
-                    // Caps scale with the window. Fixed caps meant enlarging the window
-                    // qualified MORE rects for labels while the budget stayed put, so the
-                    // newly-roomy folders reserved their 18pt header strip and then never
-                    // got text - a visibly empty bar. The label count a viewport can hold
-                    // is inherently bounded by its own area, so deriving the cap from it
-                    // stays cheap while never being the reason a roomy folder goes unnamed.
-                    let labelBudget = TreemapLabelBudget.budgets(
-                        viewportWidth: Float(geo.size.width),
-                        viewportHeight: Float(geo.size.height)
-                    )
-                    let leaves = rects
-                        .filter(\.qualifiesForLeafLabel)
-                        .sorted { $0.width * $0.height > $1.width * $1.height }
-                        .prefix(labelBudget.leaves)
-                    // Folders style reserves a header strip per container for exactly this.
-                    // Cushions stays a pure file view: a chip there would sit on top of a
-                    // child tile, since cushion children fill their parent edge to edge.
-                    // The filter MUST be the geometry's own header test, not an
-                    // approximation of it: a container between 40 and 56pt tall reserves
-                    // no strip, so a chip drawn there lands on top of its first child.
-                    let containers = appState.treemapRenderStyle == .cards
-                        ? rects
-                            .filter { $0.isBackground
-                                && CardGeometry.headerHeight(width: $0.width, height: $0.height) > 0 }
+                    // Never write SwiftUI `@State` re-entrantly from a Metal size-change /
+                    // draw callback - that is how label overlays and the right-rail legend
+                    // ghost when panes are dragged. Publish on the next main-queue turn,
+                    // dropping anything overtaken by a newer layout.
+                    let token = layoutPublishToken
+                    token.generation &+= 1
+                    let generation = token.generation
+                    let viewport = geo.size
+                    let style = appState.treemapRenderStyle
+                    DispatchQueue.main.async {
+                        guard generation == token.generation else { return }
+                        // Parent directories were excluded here, so a folder owning a huge
+                        // region was never named on the map - the hierarchy was real in the
+                        // layout but invisible on screen. Directory rects are now labelled
+                        // too, and in Folders style they get the header strip the geometry
+                        // already reserves for them.
+                        // Caps scale with the window. Fixed caps meant enlarging the window
+                        // qualified MORE rects for labels while the budget stayed put, so the
+                        // newly-roomy folders reserved their 18pt header strip and then never
+                        // got text - a visibly empty bar. The label count a viewport can hold
+                        // is inherently bounded by its own area, so deriving the cap from it
+                        // stays cheap while never being the reason a roomy folder goes unnamed.
+                        let labelBudget = TreemapLabelBudget.budgets(
+                            viewportWidth: Float(viewport.width),
+                            viewportHeight: Float(viewport.height)
+                        )
+                        let leaves = rects
+                            .filter(\.qualifiesForLeafLabel)
                             .sorted { $0.width * $0.height > $1.width * $1.height }
-                            .prefix(labelBudget.containers)
-                        : [].prefix(0)
-                    // Leaves first, containers last: a ZStack draws later views on top,
-                    // and the folder name is the one that must never be buried.
-                    labelRects = Array(leaves) + Array(containers)
-                    var byNode = [UInt32: TreemapRect](minimumCapacity: rects.count)
-                    for r in rects { byNode[r.nodeIndex] = r }
-                    layoutRectByNode = byNode
-                    drawnRectCount = rects.count
+                            .prefix(labelBudget.leaves)
+                        // Folders style reserves a header strip per container for exactly this.
+                        // Cushions stays a pure file view: a chip there would sit on top of a
+                        // child tile, since cushion children fill their parent edge to edge.
+                        // The filter MUST be the geometry's own header test, not an
+                        // approximation of it: a container between 40 and 56pt tall reserves
+                        // no strip, so a chip drawn there lands on top of its first child.
+                        let containers = style == .cards
+                            ? rects
+                                .filter { $0.isBackground
+                                    && CardGeometry.headerHeight(width: $0.width, height: $0.height) > 0 }
+                                .sorted { $0.width * $0.height > $1.width * $1.height }
+                                .prefix(labelBudget.containers)
+                            : [].prefix(0)
+                        // Leaves first, containers last: a ZStack draws later views on top,
+                        // and the folder name is the one that must never be buried.
+                        labelRects = Array(leaves) + Array(containers)
+                        var byNode = [UInt32: TreemapRect](minimumCapacity: rects.count)
+                        for r in rects { byNode[r.nodeIndex] = r }
+                        layoutRectByNode = byNode
+                        drawnRectCount = rects.count
+                    }
                 }
             )
             .contextMenu {
@@ -351,12 +370,19 @@ public struct InteractiveTreemapView: View {
             }
 
             // Text labels on large rectangles.
-            textLabelOverlay
-                .allowsHitTesting(false)
+            // Cleared while geo.size is changing; republished when Metal settles.
+            if !labelRects.isEmpty {
+                textLabelOverlay
+                    .allowsHitTesting(false)
+                    .transaction { $0.animation = nil }
+            }
 
             // Selection border overlay - visible even when the Metal highlight is too subtle.
-            selectionBorderOverlay
-                .allowsHitTesting(false)
+            if selectedLayoutRect != nil {
+                selectionBorderOverlay
+                    .allowsHitTesting(false)
+                    .transaction { $0.animation = nil }
+            }
 
             // Say why the picked style isn't what's on screen, rather than degrading silently.
             if let notice = styleFallbackNotice {
@@ -377,6 +403,14 @@ public struct InteractiveTreemapView: View {
                     .allowsHitTesting(false)
                     .animation(.none, value: nodeIndex)
             }
+        }
+        // Labels sit in layout coordinates. While Metal stretch-previews a resize they
+        // would drift; clear until the settled layout republishes display rects.
+        .onChange(of: geo.size) { _, _ in
+            labelRects = []
+            layoutRectByNode = [:]
+            hoveredNodeIndex = nil
+            hoverPoint = nil
         }
         } // GeometryReader
     }

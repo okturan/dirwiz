@@ -636,13 +636,34 @@ struct ContentView: View {
     // MARK: - Detail
 
     private var detailContent: some View {
-        HStack(spacing: 0) {
+        GeometryReader { detailGeo in
+            let legendVisible = showLegend && detailGeo.size.width >= 740
+            HStack(spacing: 0) {
             // Main content area with resizable split.
             VStack(spacing: 0) {
                 tabBar
                 Divider()
 
                 GeometryReader { geo in
+                    let dividerHeight: CGFloat = 6
+                    let collapsed = appState.isTreemapPaneCollapsed
+                    let bannerHeight: CGFloat = (appState.temporalDiff.isTemporalDiffEnabled
+                        && appState.temporalDiff.temporalSnapshot != nil) ? 28 : 0
+                    // Product-UI craft: never let a fixed treemap floor steal the table on
+                    // short windows. Share height by ratio, clamp both panes, and assign
+                    // EXPLICIT heights (no competing minHeight that overflows the reader).
+                    let available = max(0, geo.size.height - dividerHeight - bannerHeight)
+                    let minTop = min(140, max(88, available * 0.32))
+                    let minBottom = collapsed ? 0 : min(96, max(56, available * 0.28))
+                    let maxTop = collapsed
+                        ? available
+                        : max(minTop, available - minBottom)
+                    let requestedTop = available * splitRatio
+                    let topHeight = collapsed
+                        ? available
+                        : min(max(minTop, requestedTop), maxTop)
+                    let bottomHeight = collapsed ? 0 : max(0, available - topHeight)
+
                     VStack(spacing: 0) {
                         // Top: table or scanning placeholder.
                         Group {
@@ -666,9 +687,7 @@ struct ContentView: View {
                                 }
                             }
                         }
-                        .frame(height: appState.isTreemapPaneCollapsed
-                                        ? nil : max(60, geo.size.height * splitRatio))
-                        .frame(maxHeight: appState.isTreemapPaneCollapsed ? .infinity : nil)
+                        .frame(width: geo.size.width, height: topHeight, alignment: .top)
                         .clipped()
 
                         // Resizable drag divider; doubles as the collapse/restore control.
@@ -680,22 +699,26 @@ struct ContentView: View {
                         if appState.temporalDiff.isTemporalDiffEnabled,
                            let snap = appState.temporalDiff.temporalSnapshot {
                             diffStatusBanner(snapshot: snap)
+                                .frame(height: bannerHeight)
                         }
 
                         // Bottom: treemap. Removed from the hierarchy entirely while
                         // collapsed - the renderer relayouts on reappearance through its
                         // normal change detection, so nothing special is needed here.
-                        if !appState.isTreemapPaneCollapsed {
+                        if !collapsed {
                             InteractiveTreemapView(appState: appState)
-                                .frame(minHeight: 100)
+                                .frame(width: geo.size.width, height: bottomHeight)
+                                .clipped()
                         }
                     }
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+                    .clipped()
                     .coordinateSpace(name: "splitView")
                 }
             }
 
             // Right sidebar: legend.
-            if showLegend {
+            if legendVisible {
                 Divider()
                 ExtensionLegend(
                     palette: appState.extensionPalette,
@@ -717,6 +740,7 @@ struct ContentView: View {
         // resolved against the newly-renumbered tree (especially by destructive menus).
         .disabled(appState.isWarmPatchCommitInProgress)
         .allowsHitTesting(!appState.isWarmPatchCommitInProgress)
+        }
     }
 
     // MARK: - Split Divider
@@ -743,7 +767,17 @@ struct ContentView: View {
                     .onChanged { value in
                         guard !collapsed else { return }
                         let newRatio = value.location.y / totalHeight
-                        splitRatio = max(0.1, min(0.85, newRatio))
+                        let clamped = max(0.1, min(0.85, newRatio))
+                        // Quantize to ~0.5% so SwiftUI is not forced to relayout on every
+                        // mouse pixel - the map stretch-previews; the table does not need
+                        // sub-pixel pane updates at 120Hz.
+                        let quantized = (clamped * 200).rounded() / 200
+                        guard abs(quantized - splitRatio) >= 0.005 else { return }
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            splitRatio = quantized
+                        }
                     }
             )
             .onTapGesture(count: 2) { toggleTreemapPane() }

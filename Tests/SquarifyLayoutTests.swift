@@ -201,6 +201,37 @@ struct SquarifyLayoutTests {
             "the 1% tail must remain occupied instead of exposing its parent")
     }
 
+    @Test("Interactive min pixel size collapses dense siblings far below 1pt layouts")
+    func interactiveDensityFloorReducesDrawnTiles() {
+        // Half the bytes in one file; the rest are a fog of siblings. At ~100×100 their
+        // individual footprint sits between 1pt and 3pt, so the interactive floor must
+        // merge them into occupied aggregates instead of emitting one instance each.
+        let tinyCount = 400
+        let tree = makeTree(childSizes: [UInt64(tinyCount)] + Array(repeating: 1, count: tinyCount))
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let nodes = tree.nodesSnapshot()
+
+        let fine = SquarifyLayout.layout(
+            nodes: nodes, rootIndex: 0, bounds: bounds, minPixelSize: 1.0
+        )
+        let coarse = SquarifyLayout.layout(
+            nodes: nodes, rootIndex: 0, bounds: bounds,
+            minPixelSize: SquarifyLayout.interactiveMinPixelSize
+        )
+
+        let fineIndividuals = fine.filter { !$0.isBackground && !$0.isAggregate }.count
+        let coarseIndividuals = coarse.filter { !$0.isBackground && !$0.isAggregate }.count
+        let coarseAggregates = coarse.filter(\.isAggregate).count
+
+        #expect(SquarifyLayout.interactiveMinPixelSize >= 2.5,
+            "interactive floor should stay in the 2–3pt band the eye can resolve")
+        #expect(fineIndividuals > coarseIndividuals,
+            "3pt floor must keep fewer individual leaf tiles (\(coarseIndividuals) vs \(fineIndividuals))")
+        #expect(coarseAggregates > 0, "sub-threshold siblings should become occupied aggregates")
+        #expect(coarse.count <= fine.count,
+            "overall rect count must not grow when the floor rises (\(coarse.count) vs \(fine.count))")
+    }
+
     @Test("Nested directories produce deeper rects")
     func nestedDirectoriesDepth() {
         let tree = FileTree()

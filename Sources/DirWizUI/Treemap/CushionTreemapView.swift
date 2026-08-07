@@ -84,11 +84,9 @@ public struct CushionTreemapView: NSViewRepresentable {
         mtkView.clearColor = MTLClearColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
         mtkView.isPaused = true
         mtkView.enableSetNeedsDisplay = true
-        // Commit the drawable inside the surrounding CATransaction. This view is
-        // on-demand rather than a 60fps loop, so the per-frame `waitUntilScheduled`
-        // this implies is cheap - and it is what keeps the map in lockstep with the
-        // labels and panes animating around it (see `CushionTreemapCoordinator.present`).
-        mtkView.presentsWithTransaction = true
+        // Free present path: stretch-preview keeps the map glued to the pane without
+        // `waitUntilScheduled` blocking SwiftUI layout during divider drag.
+        mtkView.presentsWithTransaction = false
 
         if let coordinator = CushionTreemapCoordinator(mtkView: mtkView) {
             coordinator.mtkView = mtkView

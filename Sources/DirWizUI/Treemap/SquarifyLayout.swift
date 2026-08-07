@@ -48,6 +48,13 @@ private struct LayoutRect {
 
 public struct SquarifyLayout {
 
+    /// Default density floor for interactive maps.
+    ///
+    /// Human vision cannot resolve millions of 1pt tiles; anything smaller than this is
+    /// merged into occupied aggregates (Folders) or folded into the parent fill (Cushion).
+    /// Raising this is the primary resize/draw budget control - not a Rust rewrite.
+    public static let interactiveMinPixelSize: Float = 3.0
+
     /// Layout a treemap for the subtree rooted at `rootIndex`.
     /// Takes a snapshot of nodes (plain array) to avoid lock contention with the scanner.
     /// Returns an array of TreemapRect for all visible leaf/small-directory nodes.
@@ -56,7 +63,7 @@ public struct SquarifyLayout {
         rootIndex: UInt32,
         bounds: CGRect,
         maxDepth: Int = 20,
-        minPixelSize: Float = 1.0
+        minPixelSize: Float = SquarifyLayout.interactiveMinPixelSize
     ) -> [TreemapRect] {
         var result: [TreemapRect] = []
         result.reserveCapacity(min(nodes.count, 200_000))

@@ -54,6 +54,16 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     var currentRootIndex: UInt32 = 0
     var currentTreeRevision: Int = 0
     var currentViewportSize: CGSize = .zero
+    /// Viewport the instance buffer / `cachedLayout` coordinates were built for.
+    /// During live resize this stays put so Metal can stretch the existing tiles into the
+    /// new drawable without a full instance rebuild (the real drag-lag culprit).
+    private var instanceCoordinateSize: CGSize = .zero
+    /// True while the drawable size differs from the laid-out coordinate system.
+    var isStretchPreviewActive: Bool {
+        instanceCoordinateSize != .zero
+            && currentViewportSize != .zero
+            && instanceCoordinateSize != currentViewportSize
+    }
     var selectedNodeIndex: UInt32?
 
     /// Mirrors `AppState.scanProgress.isScanning` (Plan 044). Gates the scan-time layout
@@ -228,36 +238,21 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         }
 
         // freshStart: currentViewportSize == .zero means force/invalidate was called -
-        // skip scale preview since the layout data or root has changed.
+        // skip stretch preview since the layout data or root has changed.
         let freshStart = currentViewportSize == .zero
         pendingLayoutTask?.cancel()
 
-        // Fix 3: Immediately scale existing rects to fill the new viewport.
-        // Coefs remain valid - they're computed in normalized [0,1] space per rect,
-        // so uniform proportional scaling leaves them unchanged.
+        // Stretch preview: keep layout + instance buffer in their built coordinate system
+        // and let the shader map that space onto the new drawable. Mutating every rect and
+        // rebuilding instances on each drag tick was the pane-resize stall (tens of ms of
+        // CPU per frame on a volume scan). Hit testing maps points back into layout space.
         let scalePreviewed = !cachedLayout.isEmpty && !freshStart && sizeChanged
-        if scalePreviewed {
-            let sx = Float(viewportSize.width / currentViewportSize.width)
-            let sy = Float(viewportSize.height / currentViewportSize.height)
-            for i in cachedLayout.indices {
-                cachedLayout[i].x *= sx
-                cachedLayout[i].y *= sy
-                cachedLayout[i].width *= sx
-                cachedLayout[i].height *= sy
-            }
-            spatialGrid = nil // Stale; rebuilt when background layout completes.
-            cushionHitRects = []
-            cardHitGrid = nil // Same, and rebuilt from displayRects on the next instance build.
-            cardHitRects = []
-            instanceBufferDirty = true
-            // Deliberately NOT bumping layoutIdentity: scaling preserves the rect→node
-            // mapping, so cached colours remain exactly right (see the property doc).
-        }
+            && instanceCoordinateSize != .zero
 
         currentViewportSize = viewportSize
         pendingLayoutSize = viewportSize
 
-        // With a correct scale preview on screen, a live pane animation should cost ONE
+        // With a correct stretch preview on screen, a live pane animation should cost ONE
         // exact relayout when the size settles - not a snapshot copy plus a squarify per
         // frame. Anything without a preview (first layout, tree/root/revision change via
         // invalidateLayout) still launches immediately.
@@ -265,7 +260,9 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         layoutDebounceTask = nil
         if scalePreviewed {
             layoutDebounceTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 120_000_000)
+                // Slightly longer than a typical drag sample interval so settling does not
+                // kick off squarify while the finger is still micro-adjusting.
+                try? await Task.sleep(nanoseconds: 220_000_000)
                 guard !Task.isCancelled else { return }
                 self?.launchBackgroundLayout()
             }
@@ -298,6 +295,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             self.cachedSnapshot = snapshot
             self.spatialGrid = grid
             self.cushionHitRects = layout.filter { !$0.isAggregate }
+            self.instanceCoordinateSize = viewportSize
             self.instanceBufferDirty = true
             if isScanningNow {
                 self.lastScanTimeLayoutCompletedAt = CFAbsoluteTimeGetCurrent()
@@ -318,7 +316,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
                 rootIndex: rootIndex,
                 bounds: bounds,
                 maxDepth: maxDepth,
-                minPixelSize: 1.0
+                minPixelSize: SquarifyLayout.interactiveMinPixelSize
             )
             let duration = CFAbsoluteTimeGetCurrent() - layoutStart
             guard !Task.isCancelled else { return }
@@ -355,6 +353,7 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
         layoutDebounceTask?.cancel()
         layoutDebounceTask = nil
         currentViewportSize = .zero
+        instanceCoordinateSize = .zero
         lastScanTimeLayoutCompletedAt = nil
         lastScanTimeLayoutDuration = 0
         lastScanTimeLayoutNodeCount = 0
@@ -657,41 +656,34 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
 
     // MARK: - MTKViewDelegate
 
-    /// Presents inside the current CATransaction when the view asks for it.
+    /// Present without blocking the main thread on GPU schedule.
     ///
-    /// With `presentsWithTransaction`, the drawable must NOT be presented by the command
-    /// buffer: it is presented by hand after the GPU work is scheduled, which is what
-    /// puts the Metal content in the same transaction as the AppKit/SwiftUI layout
-    /// around it. Without this the map and its labels visibly move at different paces
-    /// while a pane animates, because the two are committed independently.
+    /// `presentsWithTransaction` + `waitUntilScheduled` was kept for label lockstep, but
+    /// during pane drag it stalls layout commits and is exactly the "lags behind" feel.
+    /// Stretch preview already keeps the map glued to the pane; a one-frame label drift
+    /// is preferable to a frozen divider.
     private static func present(
         _ drawable: CAMetalDrawable,
         with commandBuffer: MTLCommandBuffer,
-        view: MTKView
+        view _: MTKView
     ) {
-        if view.presentsWithTransaction {
-            commandBuffer.commit()
-            commandBuffer.waitUntilScheduled()
-            drawable.present()
-        } else {
-            commandBuffer.present(drawable)
-            commandBuffer.commit()
-        }
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // A size change is NOT a "handle it on the next draw" event. This view is
-        // on-demand (`isPaused` + `enableSetNeedsDisplay`), so deferring meant the map
-        // kept painting at its old size until some later frame happened to run - which
-        // is exactly the pane-collapse lag where the treemap stays large for seconds
-        // while the rest of the window has already moved. Rescale and draw NOW, in the
-        // same beat as the surrounding view tree.
+        // Rescale the layout to the new size in this beat so the next drawn frame is
+        // already correct - but do NOT draw synchronously here. Sync `view.draw()` from
+        // inside a size-change (with `presentsWithTransaction` + `waitUntilScheduled`)
+        // mutates SwiftUI label `@State` mid-layout and can stall the CA commit: the
+        // metal layer stays large over the table while File Types / Folder Depth text
+        // ghosts and stacked panes refuse to settle. Arm a normal on-demand draw instead.
         let scale = view.window?.backingScaleFactor ?? 2.0
         guard scale > 0, size.width > 0, size.height > 0 else { return }
         recomputeLayoutIfNeeded(
             viewportSize: CGSize(width: size.width / scale, height: size.height / scale)
         )
-        view.draw()
+        view.needsDisplay = true
     }
 
     func draw(in view: MTKView) {
@@ -755,9 +747,13 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             selectedInstance = nodeToInstanceIndex[selected] ?? -1
         }
 
+        // Map instance coordinates through the size they were built for. When the drawable
+        // has changed and we are still stretch-previewing, that size differs from
+        // `logicalSize` and the GPU scales the existing tiles for free.
+        let coordinateSize = instanceCoordinateSize == .zero ? logicalSize : instanceCoordinateSize
         let ld = normalize(SIMD3<Float>(0.5, 0.5, 1.0))
         var uniforms = CushionUniforms(
-            viewportSize: SIMD2<Float>(Float(logicalSize.width), Float(logicalSize.height)),
+            viewportSize: SIMD2<Float>(Float(coordinateSize.width), Float(coordinateSize.height)),
             ambient: 0.25,
             padding1: 0,
             lightDir: SIMD4<Float>(ld.x, ld.y, ld.z, 0),
@@ -836,8 +832,10 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
     /// Uses the spatial grid for O(1) cell lookup instead of O(n) linear scan.
     /// Returns the node index, or nil if no rect contains the point.
     func hitTest(point: NSPoint) -> UInt32? {
-        let px = Float(point.x)
-        let py = Float(point.y)
+        // Drawable space → layout / instance coordinate space while stretch-previewing.
+        let mapped = mapPointToInstanceCoordinates(point)
+        let px = mapped.x
+        let py = mapped.y
 
         // Use spatial grid if available for fast lookup.
         // Folders style: the drawn geometry is the nested one, so hit test against that.
@@ -858,5 +856,15 @@ final class CushionTreemapCoordinator: NSObject, MTKViewDelegate, @unchecked Sen
             }
         }
         return nil
+    }
+
+    private func mapPointToInstanceCoordinates(_ point: NSPoint) -> (x: Float, y: Float) {
+        guard isStretchPreviewActive,
+              currentViewportSize.width > 0, currentViewportSize.height > 0 else {
+            return (Float(point.x), Float(point.y))
+        }
+        let sx = Float(instanceCoordinateSize.width / currentViewportSize.width)
+        let sy = Float(instanceCoordinateSize.height / currentViewportSize.height)
+        return (Float(point.x) * sx, Float(point.y) * sy)
     }
 }
