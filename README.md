@@ -70,19 +70,19 @@ The package script creates `dist/DirWiz.app` and `dist/DirWiz-<version>-macos.zi
 Grab the latest build from [dirwiz.app](https://dirwiz.app) or the
 [releases page](https://github.com/okturan/dirwiz/releases/latest).
 
-**v1.2.1** - universal (`arm64` + `x86_64`), macOS 15+, ~3.9 MB zipped / ~11 MB installed.
+**v1.4.0** - universal (`arm64` + `x86_64`), macOS 15+, ~4.6 MB zipped / ~11 MB installed.
 Signed with a Developer ID and notarized by Apple, so it opens without a Gatekeeper
 override.
 
 ```text
-0acc8061d65b247c7e16f799a605a2e90f92dc982ee7214a80d58379c9013f09  DirWiz-1.2.1-macos.zip
+51b49bb852ae3760c17ee83f754ac8e6406d1d9c315ae882e4862a3346d95e83  DirWiz-1.4.0-macos.zip
 ```
 
 Verify before opening - and don't take the checksum above on faith either; the same
 commands confirm signing and architecture for yourself:
 
 ```bash
-shasum -a 256 DirWiz-1.1.1-macos.zip
+shasum -a 256 DirWiz-1.4.0-macos.zip
 spctl -a -vvv DirWiz.app      # expect: source=Notarized Developer ID
 lipo -archs DirWiz.app/Contents/MacOS/DirWiz   # expect: x86_64 arm64
 ```
