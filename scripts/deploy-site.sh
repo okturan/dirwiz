@@ -87,11 +87,16 @@ if [[ -z "$EXPECTED_VERSION" ]]; then
 fi
 
 # Apex can lag a few seconds behind the deployment URL.
+# Buffer the body first: `curl | grep -q` can SIGPIPE curl (exit 56) under `pipefail`
+# when grep closes early on a match.
 for _ in 1 2 3 4 5 6; do
-  if curl -fsSL "https://dirwiz.app/" | grep -q "Version ${EXPECTED_VERSION}"; then
-    echo "Verified https://dirwiz.app shows Version ${EXPECTED_VERSION}"
-    exit 0
-  fi
+  body="$(curl -fsSL "https://dirwiz.app/")"
+  case "$body" in
+    *"Version ${EXPECTED_VERSION}"*)
+      echo "Verified https://dirwiz.app shows Version ${EXPECTED_VERSION}"
+      exit 0
+      ;;
+  esac
   sleep 2
 done
 
