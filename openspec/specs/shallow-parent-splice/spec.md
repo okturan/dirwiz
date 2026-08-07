@@ -27,9 +27,10 @@ subtree by the admission estimator.
 
 A shallow target whose fresh entry level matches its cached children by name and type SHALL be
 patched by in-place metadata updates without re-enumerating or restructuring child subtrees.
-Any structural difference at that level SHALL promote the target to full-subtree rescan
-semantics before any mutation. Every outcome SHALL leave the tree indistinguishable from a
-fresh cold scan.
+Any structural difference at that level SHALL be reconciled by the level diff defined in
+`selective-child-rescan` - installing only the added entries and removing only the vanished
+ones - rather than by re-enumerating the target's whole subtree. Every outcome SHALL leave the
+tree indistinguishable from a fresh cold scan.
 
 #### Scenario: A file directly inside the target changed size
 
@@ -41,15 +42,17 @@ fresh cold scan.
 #### Scenario: An entry appeared or vanished at the target's level
 
 - **WHEN** the fresh level differs from the cached children in names or types
-- **THEN** the target SHALL be promoted to a full-subtree rescan before any mutation
-- **AND** staged targets nested beneath the promotion SHALL be dropped as covered
+- **THEN** only the differing entries SHALL be enumerated or removed
+- **AND** unchanged siblings SHALL keep their existing subtrees without re-enumeration
+- **AND** staged targets nested beneath a removed entry SHALL be dropped as covered
 - **AND** the resulting tree SHALL equal a fresh cold scan
 
 #### Scenario: Files directly inside the scan root changed
 
 - **WHEN** the tree root becomes a target only through file events directly inside it
 - **THEN** the patch SHALL reconcile the root's own level instead of abandoning
-- **AND** a deep or promoted root-level target SHALL keep the existing cold fallback
+- **AND** a root-level target whose level changed shape SHALL likewise be reconciled by level
+  diff rather than forcing a cold fallback
 
 ### Requirement: The living view shares shallow scoping
 
@@ -79,3 +82,4 @@ staging the subtree only for the exact post-staging guard to abandon it.
 - **THEN** the rescan SHALL return the budget-exceeded report with nothing staged
 - **AND** the destination tree SHALL be untouched
 - **AND** the caller's cold-fallback reason SHALL name the predicted fraction honestly
+
