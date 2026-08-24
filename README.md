@@ -14,7 +14,7 @@ This is the public home for DirWiz bug reports, feature requests, and release no
 
 ## Reporting a bug
 
-Open an [issue](https://github.com/okturan/dirwiz-feedback/issues) with:
+Open an [issue](https://github.com/okturan/dirwiz/issues) with:
 
 - your macOS version and Mac model
 - the DirWiz version (DirWiz menu, About DirWiz)
